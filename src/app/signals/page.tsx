@@ -1,0 +1,118 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useApi, fmtUsd, fmtPct, labelClass } from "@/lib/client";
+import { Score, TokenMark, Empty } from "@/components/ui/bits";
+import type { Signal, StrategyProfileId } from "@/lib/types";
+import type { AccuracyStats } from "@/lib/engine/signals";
+
+type SignalWithMeta = Signal & { symbol: string; name: string; hue: number };
+
+const PROFILES: { id: StrategyProfileId; label: string }[] = [
+  { id: "balanced", label: "Balanced" },
+  { id: "conservative", label: "Conservative" },
+  { id: "aggressive", label: "Aggressive" },
+  { id: "early_gem", label: "Early Gem" },
+  { id: "smart_money", label: "Smart Money" },
+  { id: "momentum", label: "Momentum" },
+  { id: "mean_reversion", label: "Mean Reversion" },
+  { id: "whale_shadow", label: "Whale Shadow" },
+  { id: "high_risk", label: "High Risk" },
+];
+
+type Board = "best" | "early" | "smart" | "whale" | "warnings" | "no_trade";
+
+export default function SignalTerminal() {
+  const [profile, setProfile] = useState<StrategyProfileId>("balanced");
+  const [board, setBoard] = useState<Board>("best");
+  const { data, error } = useApi<{ signals: SignalWithMeta[]; asOf: number }>(`/api/signals?profile=${profile}`, 30_000);
+  const { data: acc } = useApi<{ stats: AccuracyStats }>(`/api/accuracy?profile=${profile}`);
+
+  const list = useMemo(() => {
+    const all = data?.signals ?? [];
+    switch (board) {
+      case "best":
+        return all.filter((s) => s.label !== "NO TRADE").slice(0, 30);
+      case "early":
+        return all.filter((s) => s.label !== "NO TRADE" && s.features.ageHours < 72).sort((a, b) => b.score - a.score);
+      case "smart":
+        return all.filter((s) => s.features.smartMoneyWallets > 0 && s.label !== "NO TRADE").sort((a, b) => b.features.smartMoneyNetFlowUsd - a.features.smartMoneyNetFlowUsd);
+      case "whale":
+        return all.filter((s) => s.label !== "NO TRADE").sort((a, b) => b.features.whaleNetFlowUsd - a.features.whaleNetFlowUsd).slice(0, 30);
+      case "warnings":
+        return all.filter((s) => ["whale_exit_warning", "distribution_warning", "rug_risk_escalation", "liquidity_collapse"].includes(s.kind) || s.label === "EXTREME RISK");
+      case "no_trade":
+        return all.filter((s) => s.label === "NO TRADE").slice(0, 40);
+    }
+  }, [data, board]);
+
+  const boards: { id: Board; label: string }[] = [
+    { id: "best", label: "Best setups" },
+    { id: "early", label: "Early setups" },
+    { id: "smart", label: "Smart money" },
+    { id: "whale", label: "Whale accumulation" },
+    { id: "warnings", label: "Warnings" },
+    { id: "no_trade", label: "NO TRADE" },
+  ];
+
+  return (
+    <div className="p-3 flex flex-col gap-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <h1 className="text-[15px] font-semibold tracking-wide mr-2">SIGNAL TERMINAL</h1>
+        <select value={profile} onChange={(e) => setProfile(e.target.value as StrategyProfileId)} className="input">
+          {PROFILES.map((p) => (
+            <option key={p.id} value={p.id}>{p.label}</option>
+          ))}
+        </select>
+        <div className="flex gap-1.5 ml-2 flex-wrap">
+          {boards.map((b) => (
+            <button key={b.id} onClick={() => setBoard(b.id)} className={`chip cursor-pointer ${board === b.id ? "chip-accent" : ""}`}>
+              {b.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* honest accuracy strip */}
+      {acc && (
+        <div className="panel px-4 py-2 flex items-center gap-6 num text-[11.5px] flex-wrap">
+          <span className="panel-title">Measured performance · last {acc.stats.windowDays}d · {profile}</span>
+          <span><span className="dim">actionable signals</span> {acc.stats.samples}</span>
+          <span><span className="dim">hit rate (&gt;5% in 24h)</span> <span className={acc.stats.hitRate >= 0.5 ? "pos" : "warn"}>{(acc.stats.hitRate * 100).toFixed(0)}%</span></span>
+          <span><span className="dim">avg 24h</span> <span className={acc.stats.avgReturn24h >= 0 ? "pos" : "neg"}>{fmtPct(acc.stats.avgReturn24h)}</span></span>
+          <span><span className="dim">median 24h</span> <span className={acc.stats.medianReturn24h >= 0 ? "pos" : "neg"}>{fmtPct(acc.stats.medianReturn24h)}</span></span>
+          <span><span className="dim">false positives (&lt;−10%)</span> <span className="neg">{(acc.stats.falsePositiveRate * 100).toFixed(0)}%</span></span>
+          <span className="faint text-[10px]">measured on synthetic data — the method is the product, not the numbers</span>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">
+        {list.map((s, i) => (
+          <Link key={s.id} href={`/signal?id=${s.id}`} className="panel p-3 hover:border-[var(--border-hi)] block fade-up">
+            <div className="flex items-center gap-2">
+              <span className="faint num text-[10px]">{i + 1}</span>
+              <TokenMark hue={s.hue} symbol={s.symbol} size={20} />
+              <span className="font-semibold text-[13.5px]">{s.symbol}</span>
+              <span className="faint text-[10.5px] truncate">{s.name}</span>
+              <span className={`ml-auto chip ${labelClass(s.label)}`}>{s.label}</span>
+            </div>
+            <div className="flex items-center justify-between mt-2">
+              <Score value={s.score} width={90} />
+              <span className="chip">{s.kind.replace(/_/g, " ")}</span>
+            </div>
+            <div className="grid grid-cols-3 gap-1 mt-2 num text-[10.5px]">
+              <span className="dim">liq {fmtUsd(s.features.liquidityUsd)}</span>
+              <span className={s.features.whaleNetFlowUsd >= 0 ? "pos" : "neg"}>whale {fmtUsd(s.features.whaleNetFlowUsd)}</span>
+              <span className={s.features.momentum24h >= 0 ? "pos" : "neg"}>24h {fmtPct(s.features.momentum24h)}</span>
+            </div>
+            <div className="text-[11px] dim mt-2 leading-snug line-clamp-2">{s.why[0]}</div>
+          </Link>
+        ))}
+      </div>
+      {list.length === 0 && (
+        <Empty>{data ? "Nothing on this board right now." : error ? "Signal engine unavailable — retrying automatically." : "SYNCING SMART MONEY…"}</Empty>
+      )}
+    </div>
+  );
+}

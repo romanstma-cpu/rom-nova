@@ -1,0 +1,161 @@
+"use client";
+
+// Browser-side API dispatcher for the static build. Pages keep calling the
+// same /api/* URLs; in static mode the calls route here instead of over the
+// network, hitting the identical handlers the server routes use. The world
+// runs entirely in the visitor's browser — nothing is uploaded anywhere.
+
+import { getStore, type DemoStore } from "./demo/store";
+import { ensureSimulator } from "./demo/simulator";
+import {
+  ApiError,
+  handleAccuracy,
+  handleAlertOp,
+  handleAlertsGet,
+  handleBacktest,
+  handleCandles,
+  handleClusters,
+  handleEvents,
+  handleFlow,
+  handleMarket,
+  handleNetwork,
+  handlePaperGet,
+  handlePaperOrder,
+  handleResearchAsk,
+  handleResearchGet,
+  handleResearchNote,
+  handleSearch,
+  handleSignalById,
+  handleSignals,
+  handleStatus,
+  handleTokenDetail,
+  handleTokens,
+  handleWalletDetail,
+  handleWallets,
+  handleWatchlistOp,
+  handleWatchlists,
+  type AlertOp,
+  type WatchlistOp,
+} from "./api/handlers";
+import { getSolReference } from "./providers/reference";
+import type { StrategyProfileId } from "./types";
+
+export const IS_STATIC = process.env.NEXT_PUBLIC_STATIC === "1";
+
+function localStore(): DemoStore {
+  return ensureSimulator();
+}
+
+const num = (v: string | null): number | undefined => {
+  if (v === null || v === "") return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+};
+
+export interface LocalResponse {
+  status: number;
+  body: unknown;
+}
+
+export async function localGet(url: string): Promise<LocalResponse> {
+  const u = new URL(url, "http://local");
+  const p = u.pathname;
+  const q = u.searchParams;
+  const store = localStore();
+
+  try {
+    if (p === "/api/market") {
+      const reference = await getSolReference().catch(() => null);
+      return { status: 200, body: { ...handleMarket(store), reference } };
+    }
+    if (p === "/api/tokens")
+      return {
+        status: 200,
+        body: handleTokens(store, {
+          profile: (q.get("profile") ?? undefined) as StrategyProfileId | undefined,
+          asOf: num(q.get("asOf")),
+          sort: q.get("sort") ?? undefined,
+          dir: (q.get("dir") ?? undefined) as "asc" | "desc" | undefined,
+          limit: num(q.get("limit")),
+        }),
+      };
+    {
+      const m = p.match(/^\/api\/tokens\/([^/]+)\/candles$/);
+      if (m) return { status: 200, body: handleCandles(store, m[1], num(q.get("from")), num(q.get("to"))) };
+    }
+    {
+      const m = p.match(/^\/api\/tokens\/([^/]+)$/);
+      if (m)
+        return {
+          status: 200,
+          body: handleTokenDetail(store, m[1], num(q.get("asOf")), (q.get("profile") ?? "balanced") as StrategyProfileId),
+        };
+    }
+    if (p === "/api/wallets") return { status: 200, body: handleWallets(store) };
+    {
+      const m = p.match(/^\/api\/wallets\/([^/]+)$/);
+      if (m) return { status: 200, body: handleWalletDetail(store, m[1]) };
+    }
+    if (p === "/api/signals")
+      return {
+        status: 200,
+        body: handleSignals(store, (q.get("profile") ?? "balanced") as StrategyProfileId, num(q.get("asOf"))),
+      };
+    {
+      const m = p.match(/^\/api\/signals\/([^/]+)$/);
+      if (m) return { status: 200, body: handleSignalById(store, m[1]) };
+    }
+    if (p === "/api/accuracy")
+      return { status: 200, body: handleAccuracy(store, (q.get("profile") ?? "balanced") as StrategyProfileId) };
+    if (p === "/api/network") return { status: 200, body: handleNetwork(store, num(q.get("asOf"))) };
+    if (p === "/api/events") return { status: 200, body: handleEvents(store, num(q.get("limit")) ?? 60) };
+    if (p === "/api/status") return { status: 200, body: handleStatus(store) };
+    if (p === "/api/flow") return { status: 200, body: handleFlow(store, q.get("mint"), num(q.get("hours")) ?? 72) };
+    if (p === "/api/clusters") return { status: 200, body: handleClusters(store) };
+    if (p === "/api/search") return { status: 200, body: handleSearch(store, q.get("q") ?? "") };
+    if (p === "/api/watchlists") return { status: 200, body: handleWatchlists(store) };
+    if (p === "/api/alerts") return { status: 200, body: handleAlertsGet(store) };
+    if (p === "/api/paper") return { status: 200, body: handlePaperGet(store) };
+    if (p === "/api/research") return { status: 200, body: handleResearchGet(store) };
+    return { status: 404, body: { error: `no local route for ${p}` } };
+  } catch (err) {
+    if (err instanceof ApiError) return { status: err.status, body: { error: err.message } };
+    throw err;
+  }
+}
+
+export async function localPost(url: string, body: unknown): Promise<LocalResponse> {
+  const u = new URL(url, "http://local");
+  const p = u.pathname;
+  const store = localStore();
+  const b = (body ?? {}) as Record<string, unknown>;
+
+  try {
+    if (p === "/api/backtests") return { status: 200, body: handleBacktest(store, b) };
+    if (p === "/api/watchlists") return { status: 200, body: handleWatchlistOp(store, b as unknown as WatchlistOp) };
+    if (p === "/api/alerts") return { status: 200, body: handleAlertOp(store, b as unknown as AlertOp) };
+    if (p === "/api/paper/orders") {
+      const res = handlePaperOrder(store, {
+        portfolioId: String(b.portfolioId ?? ""),
+        mint: String(b.mint ?? ""),
+        side: b.side === "sell" ? "sell" : "buy",
+        usd: Number(b.usd) || 0,
+        stopLossPct: b.stopLossPct !== undefined ? Number(b.stopLossPct) : undefined,
+        takeProfitPct: b.takeProfitPct !== undefined ? Number(b.takeProfitPct) : undefined,
+      });
+      return { status: res.status, body: res.body };
+    }
+    if (p === "/api/research") return { status: 200, body: handleResearchNote(store, String(b.mint ?? ""), String(b.note ?? "")) };
+    if (p === "/api/research/ask") return { status: 200, body: handleResearchAsk(store, String(b.question ?? "")) };
+    return { status: 404, body: { error: `no local route for ${p}` } };
+  } catch (err) {
+    if (err instanceof ApiError) return { status: err.status, body: { error: err.message } };
+    throw err;
+  }
+}
+
+/** static-mode event subscription — same shape the SSE stream delivers */
+export function localSubscribe(onEvent: (e: unknown) => void): () => void {
+  const store = localStore();
+  return store.onEvent((e) => onEvent({ ...e, symbol: e.mint ? getStore().token(e.mint)?.info.symbol : undefined }));
+}

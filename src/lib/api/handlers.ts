@@ -1,0 +1,470 @@
+// Shared API handlers. The Next.js route files and the static-build client
+// dispatcher (local.ts) both call these, so server mode and the exported
+// browser-only build answer every query with the same code.
+
+import type { DemoStore } from "../demo/store";
+import { HOUR } from "../demo/universe";
+import { computeSignal, evaluateOutcome, signalsAt, accuracyStats } from "../engine/signals";
+import { riskRadar } from "../engine/risk";
+import { findSimilar } from "../engine/similarity";
+import { runBacktest, DEFAULT_BACKTEST } from "../engine/backtest";
+import { placeOrder, portfolioView, type OrderRequest } from "../engine/paper";
+import { answerQuestion } from "../engine/research";
+import { buildFlowSeries, buildTokenRows, buildWalletRows } from "./rows";
+import { providerHealth } from "../providers/registry";
+import type { AlertCondition, BacktestConfig, StrategyProfileId } from "../types";
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+// ---------------------------------------------------------------- reads
+
+export function handleMarket(store: DemoStore) {
+  return { market: store.marketState(), demo: true };
+}
+
+export interface TokensQuery {
+  profile?: StrategyProfileId;
+  asOf?: number;
+  sort?: string;
+  dir?: "asc" | "desc";
+  limit?: number;
+}
+
+export function handleTokens(store: DemoStore, q: TokensQuery) {
+  const { profile = "balanced", asOf, sort = "signalScore", dir = "desc", limit = 200 } = q;
+  let rows = buildTokenRows(store, asOf, profile);
+  const key = sort as keyof (typeof rows)[0];
+  if (rows[0] && key in rows[0] && typeof rows[0][key] === "number") {
+    rows = rows.sort((a, b) =>
+      dir === "asc" ? (a[key] as number) - (b[key] as number) : (b[key] as number) - (a[key] as number),
+    );
+  }
+  return { rows: rows.slice(0, Math.min(limit, 500)), asOf: asOf ?? store.simulatedUntil, demo: true };
+}
+
+export function handleTokenDetail(store: DemoStore, mint: string, asOf?: number, profile: StrategyProfileId = "balanced") {
+  const tok = store.token(mint);
+  const snap = store.snapshot(mint, asOf);
+  if (!tok || !snap) throw new ApiError(404, "unknown mint");
+
+  const now = asOf ?? store.simulatedUntil;
+  const signal = computeSignal(store, mint, now, profile);
+  const risk = riskRadar(store, mint, now);
+  const similar = findSimilar(store, mint, now);
+  const series = store.holdersSeries(mint).filter((p) => p.ts <= now);
+  const trades = store.mintTrades(mint, now - 72 * HOUR, now).slice(-120).reverse();
+
+  const byWallet = new Map<string, { buys: number; sells: number; netUsd: number }>();
+  for (const t of store.mintTrades(mint, 0, now)) {
+    const e = byWallet.get(t.wallet) ?? { buys: 0, sells: 0, netUsd: 0 };
+    if (t.side === "buy") {
+      e.buys++;
+      e.netUsd -= t.amountUsd;
+    } else {
+      e.sells++;
+      e.netUsd += t.amountUsd;
+    }
+    byWallet.set(t.wallet, e);
+  }
+  const topTraders = [...byWallet.entries()]
+    .map(([address, e]) => {
+      const w = store.wallet(address);
+      const pos = store.ledgers.get(address)?.positions.find((p) => p.mint === mint);
+      const unrealized = pos ? pos.tokens * (store.lastPrice(mint, asOf) ?? 0) - pos.costBasisUsd : 0;
+      return {
+        address,
+        entity: w?.knownEntity,
+        labels: w?.labels ?? [],
+        smartMoneyScore: w?.smartMoney.total ?? 0,
+        buys: e.buys,
+        sells: e.sells,
+        netUsd: e.netUsd,
+        unrealizedUsd: unrealized,
+        holding: Boolean(pos && pos.tokens > 0),
+      };
+    })
+    .sort((a, b) => Math.abs(b.netUsd) + b.unrealizedUsd - (Math.abs(a.netUsd) + a.unrealizedUsd))
+    .slice(0, 12);
+
+  return {
+    info: tok.info,
+    archetype: tok.archetype,
+    supply: tok.supply,
+    snapshot: snap,
+    signal,
+    risk,
+    similar,
+    flow: buildFlowSeries(store, mint, 72, asOf),
+    holdersSeries: series.filter((_, i) => i % 2 === 0),
+    trades,
+    topTraders,
+    asOf: now,
+    demo: true,
+  };
+}
+
+export function handleCandles(store: DemoStore, mint: string, from?: number, to?: number) {
+  const candles = store.candles(mint, from, to);
+  if (!candles.length) throw new ApiError(404, "unknown mint or empty range");
+  return { candles, live: store.livePrice.get(mint) ?? null, demo: true };
+}
+
+export function handleWallets(store: DemoStore) {
+  return { rows: buildWalletRows(store), demo: true };
+}
+
+export function handleWalletDetail(store: DemoStore, address: string) {
+  const info = store.wallet(address);
+  const perf = store.perfs.get(address);
+  const ledger = store.ledgers.get(address);
+  if (!info || !perf || !ledger) throw new ApiError(404, "unknown wallet");
+
+  const trades = store.walletTrades(address).slice(-200).reverse();
+  const positions = ledger.positions.map((p) => {
+    const px = store.lastPrice(p.mint) ?? 0;
+    const tok = store.token(p.mint);
+    return {
+      ...p,
+      symbol: tok?.info.symbol ?? "?",
+      priceUsd: px,
+      valueUsd: p.tokens * px,
+      pnlUsd: p.tokens * px - p.costBasisUsd,
+      pnlPct: p.costBasisUsd > 0 ? ((p.tokens * px - p.costBasisUsd) / p.costBasisUsd) * 100 : 0,
+    };
+  });
+  const roundTrips = ledger.roundTrips
+    .map((r) => ({ ...r, symbol: store.token(r.mint)?.info.symbol ?? "?" }))
+    .sort((a, b) => b.exitTs - a.exitTs);
+  const cluster = store.universe.clusters.find((c) => c.members.includes(address));
+
+  return {
+    info,
+    perf,
+    positions,
+    roundTrips,
+    trades: trades.map((t) => ({ ...t, symbol: store.token(t.mint)?.info.symbol ?? "?" })),
+    cluster: cluster ?? null,
+    demo: true,
+  };
+}
+
+export function handleSignals(store: DemoStore, profile: StrategyProfileId = "balanced", asOf?: number) {
+  const at = asOf ?? store.simulatedUntil;
+  const signals = signalsAt(store, at, profile).map((s) => ({
+    ...s,
+    symbol: store.token(s.mint)?.info.symbol ?? "?",
+    name: store.token(s.mint)?.info.name ?? "?",
+    hue: store.token(s.mint)?.info.hue ?? 0,
+  }));
+  return { signals, asOf: at, profile, demo: true };
+}
+
+export function handleSignalById(store: DemoStore, id: string) {
+  const m = id.match(/^sig-([A-Za-z0-9]{8})-(\d+)-([a-z_]+)$/);
+  if (!m) throw new ApiError(400, "malformed signal id");
+  const [, mint8, bucketStr, profile] = m;
+  const tok = store.tokenList().find((t) => t.info.mint.startsWith(mint8));
+  if (!tok) throw new ApiError(404, "unknown signal token");
+  const asOf = Number(bucketStr) * 2 * HOUR + 1;
+  let sig = computeSignal(store, tok.info.mint, Math.min(asOf, store.simulatedUntil), profile as StrategyProfileId);
+  if (!sig) throw new ApiError(404, "signal not computable");
+  sig = evaluateOutcome(store, sig);
+  return { signal: sig, symbol: tok.info.symbol, name: tok.info.name, demo: true };
+}
+
+export function handleAccuracy(store: DemoStore, profile: StrategyProfileId = "balanced") {
+  return { stats: accuracyStats(store, profile), demo: true };
+}
+
+export function handleNetwork(store: DemoStore, asOf?: number) {
+  const at = asOf ?? store.simulatedUntil;
+  const isHistorical = asOf !== undefined;
+
+  const signals = signalsAt(store, at, "balanced");
+  const scoreOf = new Map(signals.map((s) => [s.mint, s]));
+
+  const tokens = store
+    .tokenList()
+    .map((t) => ({ t, snap: store.snapshot(t.info.mint, asOf) }))
+    .filter((x) => x.snap)
+    .sort((a, b) => b.snap!.volume24hUsd - a.snap!.volume24hUsd)
+    .slice(0, 64)
+    .map(({ t, snap }) => {
+      const sig = scoreOf.get(t.info.mint);
+      return {
+        id: t.info.mint,
+        kind: "token" as const,
+        symbol: t.info.symbol,
+        narrative: t.info.narrative,
+        hue: t.info.hue,
+        marketCapUsd: snap!.marketCapUsd,
+        liquidityUsd: snap!.liquidityUsd,
+        volume24hUsd: snap!.volume24hUsd,
+        momentum24h: sig?.features.momentum24h ?? 0,
+        signalScore: sig?.score ?? 50,
+        riskHigh: (sig?.risks.filter((r) => r.severity === "high").length ?? 0) >= 2,
+      };
+    });
+  const tokenSet = new Set(tokens.map((t) => t.id));
+
+  const wallets = store.walletList().map((w) => ({
+    id: w.address,
+    kind: "wallet" as const,
+    entity: w.knownEntity,
+    labels: w.labels,
+    smartMoneyScore: w.smartMoney.total,
+    solBalance: w.solBalance,
+    cluster: store.universe.clusters.find((c) => c.members.includes(w.address))?.id ?? null,
+  }));
+
+  const edges: { from: string; to: string; kind: "position" | "buy" | "sell"; usd: number; ts: number }[] = [];
+  for (const [addr, ledger] of store.ledgers) {
+    for (const p of ledger.positions) {
+      if (!tokenSet.has(p.mint)) continue;
+      const px = store.lastPrice(p.mint, asOf) ?? 0;
+      edges.push({ from: addr, to: p.mint, kind: "position", usd: p.tokens * px, ts: p.openedAt });
+    }
+  }
+  const from = at - 24 * HOUR;
+  const windowTrades = [...store.universe.trades, ...(isHistorical ? [] : store.liveTrades)].filter(
+    (t) => t.ts >= from && t.ts <= at && tokenSet.has(t.mint),
+  );
+  for (const t of windowTrades.slice(-160)) {
+    edges.push({ from: t.wallet, to: t.mint, kind: t.side, usd: t.amountUsd, ts: t.ts });
+  }
+
+  return {
+    asOf: at,
+    historical: isHistorical,
+    tokens,
+    wallets,
+    edges: edges.slice(0, 420),
+    clusters: store.universe.clusters,
+    demo: true,
+  };
+}
+
+export function handleEvents(store: DemoStore, limit = 60) {
+  return {
+    events: store.recentEvents(Math.min(200, limit)).map((e) => ({
+      ...e,
+      symbol: e.mint ? store.token(e.mint)?.info.symbol : undefined,
+    })),
+    demo: true,
+  };
+}
+
+export function handleStatus(store: DemoStore) {
+  return {
+    providers: providerHealth(),
+    engine: {
+      version: "1.0.0",
+      tokens: store.tokenList().length,
+      wallets: store.walletList().length,
+      historicalTrades: store.universe.trades.length,
+      liveTrades: store.liveTrades.length,
+      eventsBuffered: store.events.length,
+      simulatedUntil: store.simulatedUntil,
+      genesis: store.universe.genesis,
+      seed: store.universe.seed,
+    },
+    demo: true,
+  };
+}
+
+export function handleFlow(store: DemoStore, mint: string | null, hours = 72) {
+  if (mint && !store.token(mint)) throw new ApiError(404, "unknown mint");
+  return { flow: buildFlowSeries(store, mint, Math.min(24 * 14, hours)), demo: true };
+}
+
+export function handleClusters(store: DemoStore) {
+  const clusters = store.universe.clusters.map((c) => ({
+    ...c,
+    memberDetails: c.members.map((m) => {
+      const w = store.wallet(m);
+      return { address: m, entity: w?.knownEntity, smartMoneyScore: w?.smartMoney.total ?? 0, labels: w?.labels ?? [] };
+    }),
+    sharedTokenDetails: c.sharedTokens.map((mint) => ({ mint, symbol: store.token(mint)?.info.symbol ?? "?" })),
+  }));
+  return { clusters, demo: true };
+}
+
+export function handleSearch(store: DemoStore, qRaw: string) {
+  const q = qRaw.trim().toLowerCase();
+  if (!q) return { tokens: [], wallets: [] };
+  const tokens = store
+    .tokenList()
+    .filter(
+      (t) =>
+        t.info.mint.toLowerCase().startsWith(q) ||
+        t.info.symbol.toLowerCase().includes(q) ||
+        t.info.name.toLowerCase().includes(q),
+    )
+    .slice(0, 8)
+    .map((t) => ({
+      mint: t.info.mint,
+      symbol: t.info.symbol,
+      name: t.info.name,
+      hue: t.info.hue,
+      priceUsd: store.lastPrice(t.info.mint) ?? 0,
+    }));
+  const wallets = store
+    .walletList()
+    .filter(
+      (w) =>
+        w.address.toLowerCase().startsWith(q) ||
+        (w.knownEntity ?? "").toLowerCase().includes(q) ||
+        w.labels.some((l) => l.includes(q)),
+    )
+    .slice(0, 8)
+    .map((w) => ({ address: w.address, entity: w.knownEntity, labels: w.labels, smartMoneyScore: w.smartMoney.total }));
+  return { tokens, wallets };
+}
+
+export function handleWatchlists(store: DemoStore) {
+  const watchlists = store.watchlists.map((wl) => ({
+    ...wl,
+    items: wl.items.map((it) => {
+      if (it.kind === "token") {
+        const tok = store.token(it.ref);
+        const snap = store.snapshot(it.ref);
+        return { ...it, symbol: tok?.info.symbol, priceUsd: snap?.priceUsd, marketCapUsd: snap?.marketCapUsd };
+      }
+      const w = store.wallet(it.ref);
+      const perf = store.perfs.get(it.ref);
+      return { ...it, entity: w?.knownEntity, smartMoneyScore: w?.smartMoney.total, realizedPnlUsd: perf?.realizedPnlUsd };
+    }),
+  }));
+  return { watchlists, demo: true };
+}
+
+export function handleAlertsGet(store: DemoStore) {
+  return { rules: store.alertRules, events: store.alertEvents.slice(0, 100), demo: true };
+}
+
+export function handlePaperGet(store: DemoStore) {
+  return { portfolios: store.portfolios.map((p) => portfolioView(store, p)), demo: true };
+}
+
+export function handleResearchGet(store: DemoStore) {
+  return {
+    notes: store.research.map((n) => ({
+      ...n,
+      symbol: store.token(n.mint)?.info.symbol ?? "?",
+      priceNowUsd: store.lastPrice(n.mint) ?? 0,
+      outcomePct:
+        n.snapshot.priceUsd > 0
+          ? (((store.lastPrice(n.mint) ?? n.snapshot.priceUsd) - n.snapshot.priceUsd) / n.snapshot.priceUsd) * 100
+          : 0,
+    })),
+    demo: true,
+  };
+}
+
+// ---------------------------------------------------------------- writes
+
+export function handleBacktest(store: DemoStore, cfg: Partial<BacktestConfig>) {
+  const result = runBacktest(store, { ...DEFAULT_BACKTEST, ...cfg });
+  return { result: { ...result, trades: result.trades.slice(-100) }, demo: true };
+}
+
+export type WatchlistOp =
+  | { op: "create"; name: string }
+  | { op: "add"; id: string; kind: "token" | "wallet"; ref: string }
+  | { op: "remove"; id: string; ref: string }
+  | { op: "delete"; id: string };
+
+export function handleWatchlistOp(store: DemoStore, body: WatchlistOp) {
+  if (body.op === "create") {
+    const wl = { id: store.nextId("wl"), name: body.name, items: [], createdAt: Date.now() };
+    store.watchlists.push(wl);
+    store.persistUserState();
+    return { watchlist: wl };
+  }
+  const wl = store.watchlists.find((w) => w.id === body.id);
+  if (!wl) throw new ApiError(404, "watchlist not found");
+  if (body.op === "add") {
+    const valid = body.kind === "token" ? Boolean(store.token(body.ref)) : Boolean(store.wallet(body.ref));
+    if (!valid) throw new ApiError(404, `unknown ${body.kind}`);
+    if (!wl.items.some((i) => i.ref === body.ref)) wl.items.push({ kind: body.kind, ref: body.ref, addedAt: Date.now() });
+  } else if (body.op === "remove") {
+    wl.items = wl.items.filter((i) => i.ref !== body.ref);
+  } else if (body.op === "delete") {
+    store.watchlists = store.watchlists.filter((w) => w.id !== body.id);
+  }
+  store.persistUserState();
+  return { ok: true };
+}
+
+export type AlertOp =
+  | { op: "create"; name: string; condition: AlertCondition }
+  | { op: "toggle"; id: string }
+  | { op: "delete"; id: string }
+  | { op: "mark_read" };
+
+export function handleAlertOp(store: DemoStore, body: AlertOp) {
+  if (body.op === "create") {
+    const rule = {
+      id: store.nextId("al"),
+      name: body.name,
+      condition: body.condition,
+      channels: ["in_app" as const],
+      enabled: true,
+      createdAt: Date.now(),
+    };
+    store.alertRules.push(rule);
+    store.persistUserState();
+    return { rule };
+  }
+  if (body.op === "toggle") {
+    const rule = store.alertRules.find((r) => r.id === body.id);
+    if (!rule) throw new ApiError(404, "rule not found");
+    rule.enabled = !rule.enabled;
+    store.persistUserState();
+    return { rule };
+  }
+  if (body.op === "delete") {
+    store.alertRules = store.alertRules.filter((r) => r.id !== body.id);
+    store.persistUserState();
+    return { ok: true };
+  }
+  for (const e of store.alertEvents) e.read = true;
+  store.persistUserState();
+  return { ok: true };
+}
+
+export function handlePaperOrder(store: DemoStore, req: OrderRequest) {
+  const res = placeOrder(store, req);
+  const pf = store.portfolios.find((p) => p.id === req.portfolioId);
+  store.persistUserState();
+  return {
+    status: res.error ? 422 : 200,
+    body: {
+      order: res.order,
+      fill: res.fill ?? null,
+      error: res.error ?? null,
+      portfolio: pf ? portfolioView(store, pf) : null,
+      demo: true,
+    },
+  };
+}
+
+export function handleResearchNote(store: DemoStore, mint: string, note: string) {
+  const snapshot = store.snapshot(mint);
+  if (!snapshot) throw new ApiError(404, "unknown mint");
+  const entry = { id: store.nextId("rn"), mint, ts: Date.now(), note, snapshot };
+  store.research.unshift(entry);
+  store.persistUserState();
+  return { note: entry };
+}
+
+export function handleResearchAsk(store: DemoStore, question: string) {
+  return { ...answerQuestion(store, question), demo: true };
+}

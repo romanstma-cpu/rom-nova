@@ -1,0 +1,64 @@
+{
+  "name": "rom-nova-desktop",
+  "productName": "ROM Nova",
+  "version": "1.0.0",
+  "description": "Solana-style on-chain intelligence terminal on clearly-labeled simulated data. Part of ROM Apps.",
+  "author": "ROM <roman3165@icloud.com>",
+  "license": "MIT",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --publish never",
+    "release": "electron-builder --win nsis --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "xyz.romapps.nova",
+    "productName": "ROM Nova",
+    "artifactName": "ROM-Nova-Setup.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "icon.ico"
+    ],
+    "extraResources": [
+      {
+        "from": "../out",
+        "to": "static"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "romanstma-cpu",
+      "repo": "rom-nova",
+      "releaseType": "release"
+    }
+  },
+  "allowScripts": {
+    "electron@33.4.11": true
+  }
+}

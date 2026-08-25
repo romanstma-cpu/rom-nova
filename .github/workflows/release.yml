@@ -1,0 +1,54 @@
+name: release
+
+# Tag vX.Y.Z → run the gates, build the static app, wrap it in the desktop
+# shell, and publish ROM-Nova-Setup.exe (+ latest.yml for the auto-updater
+# and SHA256SUMS.txt for humans) to this repo's releases.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Build static app
+        run: npm run build:static
+
+      - name: Install desktop deps
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build + publish installer
+        working-directory: desktop
+        run: npx electron-builder --win nsis --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish checksums
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash "desktop/dist/ROM-Nova-Setup.exe" -Algorithm SHA256).Hash.ToLower()
+          "$hash  ROM-Nova-Setup.exe" | Out-File -Encoding ascii SHA256SUMS.txt
+          gh release upload "${{ github.ref_name }}" SHA256SUMS.txt --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

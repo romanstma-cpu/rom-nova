@@ -298,10 +298,15 @@ export function TokenField({
         <primitive object={coin.material} attach="material" />
       </instancedMesh>
 
-      {/* far tier — cheap, no emissive, no env sampling */}
+      {/* Far tier — cheap, no emissive, no per-instance attributes. It was an
+          unlit meshBasicMaterial, which turned every coin past the LOD boundary
+          into a flat dark blob the moment you zoomed out. Lighting it costs
+          almost nothing where it is actually used — far instances cover very
+          few fragments — and it keeps its shape instead of becoming a
+          silhouette. */}
       <instancedMesh ref={farRef} args={[undefined, undefined, count]} frustumCulled={false} raycast={() => null}>
         <primitive object={geoFar} attach="geometry" />
-        <meshBasicMaterial color="#131c30" />
+        <meshStandardMaterial color="#1a2440" roughness={0.42} metalness={0.28} envMap={env} envMapIntensity={0.95} />
       </instancedMesh>
 
       {/* wireframe overlay, near tier only */}

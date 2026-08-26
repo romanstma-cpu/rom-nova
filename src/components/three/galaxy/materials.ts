@@ -30,7 +30,13 @@ export const BODY = new THREE.Color("#1a2440");
 export function tokenColors(signalScore: number, hue: number) {
   const t = Math.min(1, Math.max(0, (signalScore - 35) / 55));
   const body = BODY.clone().lerp(new THREE.Color().setHSL(hue / 360, 0.45, 0.34), 0.14);
-  const emissive = SLATE.clone().lerp(CYAN, t * t);
+  // Was t*t, which crushed the whole middle of the range into slate: a score of
+  // 60 landed at 0.2 along the ramp, so most of a healthy field rendered as the
+  // same dull blue-grey and the scene read as a pile of identical marbles. The
+  // gentler curve still keeps the bottom end firmly slate and the top end
+  // firmly cyan — it just lets the middle be legible, which is the entire job
+  // of a colour ramp.
+  const emissive = SLATE.clone().lerp(CYAN, Math.pow(t, 1.35));
   if (signalScore >= 88) emissive.lerp(HOT, 0.5);
   return { body, emissive };
 }
@@ -45,8 +51,11 @@ export function tokenColors(signalScore: number, hue: number) {
  *  so it must be assigned to `material.envMap` and sampled by three's own PBR
  *  chunks rather than by a hand-written textureCube() call. */
 export function makeEnvironment(renderer: THREE.WebGLRenderer): THREE.Texture {
-  const w = 512;
-  const h = 256;
+  // 1024×512, up from 512×256. PMREM derives its mip chain from this source,
+  // so the low-roughness end of the chain — the sharp end, the one you actually
+  // see as a highlight — was being built from a half-resolution blur.
+  const w = 1024;
+  const h = 512;
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
@@ -73,9 +82,38 @@ export function makeEnvironment(renderer: THREE.WebGLRenderer): THREE.Texture {
   ctx.fillStyle = fill;
   ctx.fillRect(0, 0, w, h);
 
+  // Three tight, bright sources. A pure gradient has no edges, and an
+  // environment with no edges gives a metal nothing to reflect — which is what
+  // made the shells read as plastic no matter how the PBR values were tuned.
+  // These are what travels across a coin as it turns.
+  const softbox = (cx: number, cy: number, r: number, rgb: string, peak: number) => {
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, `rgba(${rgb}, ${peak})`);
+    g.addColorStop(0.55, `rgba(${rgb}, ${peak * 0.32})`);
+    g.addColorStop(1, `rgba(${rgb}, 0)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  };
+  softbox(w * 0.72, h * 0.22, h * 0.16, "215, 244, 255", 1.0); // key, near-white
+  softbox(w * 0.24, h * 0.34, h * 0.1, "120, 190, 255", 0.72); // cool fill
+  softbox(w * 0.5, h * 0.08, h * 0.09, "168, 150, 255", 0.55); // violet zenith
+
+  // A horizon band. Equirectangular v maps to elevation, so a bright line here
+  // becomes a ring around the scene — the classic studio cue that tells the eye
+  // a surface is curved and reflective rather than flat and lit.
+  const band = ctx.createLinearGradient(0, h * 0.46, 0, h * 0.56);
+  band.addColorStop(0, "rgba(56, 225, 255, 0)");
+  band.addColorStop(0.5, "rgba(56, 225, 255, 0.30)");
+  band.addColorStop(1, "rgba(56, 225, 255, 0)");
+  ctx.fillStyle = band;
+  ctx.fillRect(0, h * 0.46, w, h * 0.1);
+
   const tex = new THREE.CanvasTexture(canvas);
   tex.mapping = THREE.EquirectangularReflectionMapping;
   tex.colorSpace = THREE.SRGBColorSpace;
+  // The seam at u=0/1 wraps; without this the highlight tears as a coin turns.
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
   const pmrem = new THREE.PMREMGenerator(renderer);
   pmrem.compileEquirectangularShader();
@@ -120,13 +158,16 @@ export interface CoinMaterialHandle {
 export function makeCoinMaterial(env: THREE.Texture | null): CoinMaterialHandle {
   const material = new THREE.MeshStandardMaterial({
     color: BODY,
-    roughness: 0.38,
+    // Tightened from 0.38 now that the environment has actual highlights in it
+    // to reflect. A rough surface smears a sharp source back into the same grey
+    // wash the old gradient environment produced.
+    roughness: 0.3,
     // Metals have no diffuse term: at 0.62 the shells went black wherever the
     // environment did not hit them. Keep enough for a sheen, not enough to
     // swallow the body colour.
-    metalness: 0.24,
+    metalness: 0.3,
     envMap: env,
-    envMapIntensity: 1.15,
+    envMapIntensity: 1.25,
   });
 
   const uTime = { value: 0 };
@@ -175,11 +216,16 @@ export function makeCoinMaterial(env: THREE.Texture | null): CoinMaterialHandle 
       shader.fragmentShader,
       ["#include <opaque_fragment>", "#include <output_fragment>"],
       `float fres = 1.0 - abs(dot(normalize(vWorldNormal), normalize(vWorldView)));
-         fres = pow(clamp(fres, 0.0, 1.0), 2.6);
+         // 2.6 kept the rim hugging the silhouette so tightly it barely
+         // survived being drawn; 2.0 gives it enough width to read as a lit
+         // edge rather than a one-pixel outline.
+         fres = pow(clamp(fres, 0.0, 1.0), 2.0);
          float pulse = 0.82 + 0.18 * sin(uTime * (1.1 + vAScore * 2.2) + vAScore * 9.0);
          // floor the rim so a low-signal coin still reads as a body in space
-         vec3 aura = vAEmissive * fres * (0.62 + vAScore * 1.5) * pulse;
-         outgoingLight += aura + vAEmissive * vAScore * 0.16;
+         vec3 aura = vAEmissive * fres * (0.9 + vAScore * 2.0) * pulse;
+         // A little light across the whole shell, not just the rim, so a hot
+         // coin looks lit from within instead of outlined.
+         outgoingLight += aura + vAEmissive * (0.06 + vAScore * 0.3);
         `,
     );
   };
@@ -196,7 +242,14 @@ export function makeCoinMaterial(env: THREE.Texture | null): CoinMaterialHandle 
 }
 
 /** Icosahedron rather than a UV sphere: even triangle distribution, no pole
- *  pinching, and the facets catch the rim light instead of banding. */
+ *  pinching.
+ *
+ *  three's PolyhedronGeometry already normalises its normals, so these shells
+ *  are smooth-shaded, not faceted — worth knowing before anyone "fixes" the
+ *  shading: the small angular marks visible on a coin are the wireframe overlay
+ *  from coinWireGeometry, not flat-shading artifacts. galaxy.test.ts pins the
+ *  smooth normals so a future geometry swap cannot quietly reintroduce
+ *  faceting. */
 export function coinGeometry(detail: number): THREE.IcosahedronGeometry {
   return new THREE.IcosahedronGeometry(1, detail);
 }

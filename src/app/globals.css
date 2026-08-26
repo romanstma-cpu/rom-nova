@@ -64,17 +64,51 @@ body {
 /* ---------- primitives ---------- */
 
 .panel {
-  background: var(--panel);
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(30, 42, 66, 0.5) 0%, rgba(13, 18, 28, 0.42) 34%, rgba(10, 14, 22, 0.5) 100%),
+    var(--panel);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  backdrop-filter: blur(10px);
+  border-radius: 8px;
+  backdrop-filter: blur(12px);
+  box-shadow:
+    0 1px 0 0 rgba(150, 190, 255, 0.07) inset,
+    0 10px 30px -18px rgba(0, 0, 0, 0.9);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+/* the lit top edge — a 1px specular run that fades toward the corners */
+.panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  border-radius: 8px 8px 0 0;
+  background: linear-gradient(90deg, transparent, rgba(56, 225, 255, 0.28), transparent);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.panel-hover:hover {
+  border-color: var(--border-bright);
+  box-shadow:
+    0 1px 0 0 rgba(150, 190, 255, 0.1) inset,
+    0 14px 36px -18px rgba(0, 0, 0, 0.95);
+}
+
+/* KPI tile — same shell, tighter accent so the numbers carry the strip */
+.stat .num {
+  letter-spacing: -0.01em;
+}
+.stat:hover {
+  border-color: var(--border-bright);
 }
 
 .panel-title {
   font-size: 10.5px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--text-faint);
+  color: var(--text-dim);
   font-weight: 600;
 }
 
@@ -152,21 +186,27 @@ body {
   border-bottom: 1px solid rgba(27, 35, 51, 0.55);
   transition: background 100ms;
 }
-.trow:hover { background: rgba(40, 55, 85, 0.18); }
+.trow:hover {
+  background: linear-gradient(90deg, rgba(56, 225, 255, 0.07), rgba(40, 55, 85, 0.16) 22%, rgba(40, 55, 85, 0.1));
+  box-shadow: inset 2px 0 0 0 var(--accent);
+}
 
 .link { color: var(--accent); }
 .link:hover { text-decoration: underline; }
 
 /* score bar used everywhere a 0-100 appears */
 .scorebar {
-  height: 3px;
-  border-radius: 2px;
-  background: #1a2233;
+  height: 4px;
+  border-radius: 3px;
+  background: rgba(26, 34, 51, 0.9);
   overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(150, 190, 255, 0.05) inset;
 }
 .scorebar > div {
   height: 100%;
-  border-radius: 2px;
+  border-radius: 3px;
+  box-shadow: 0 0 10px -1px currentColor;
+  transition: width 420ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @keyframes toast-in {
@@ -196,4 +236,35 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .toast, .fade-up { animation: none; }
   .live-dot { animation: none; }
+}
+
+
+/* ---------- motion ---------- */
+
+@keyframes rise-in {
+  from { transform: translateY(10px) scale(0.995); opacity: 0; }
+  to   { transform: translateY(0) scale(1); opacity: 1; }
+}
+/* panels settle in on a long tail rather than appearing all at once */
+.rise-in {
+  animation: rise-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.rise-1 { animation-delay: 40ms; }
+.rise-2 { animation-delay: 90ms; }
+.rise-3 { animation-delay: 140ms; }
+
+@keyframes shimmer {
+  from { background-position: -220px 0; }
+  to   { background-position: 220px 0; }
+}
+.shimmer {
+  background-image: linear-gradient(90deg, transparent, rgba(120, 170, 230, 0.13), transparent);
+  background-size: 220px 100%;
+  background-repeat: no-repeat;
+  animation: shimmer 1.25s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise-in, .shimmer { animation: none; }
+  .scorebar > div { transition: none; }
 }

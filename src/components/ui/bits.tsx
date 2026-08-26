@@ -75,9 +75,9 @@ export function Sparkline({
 
 export function Stat({ label, children, sub }: { label: string; children: React.ReactNode; sub?: React.ReactNode }) {
   return (
-    <div className="panel px-3.5 py-2.5 min-w-0">
+    <div className="panel stat px-3.5 py-2.5 min-w-0">
       <div className="panel-title">{label}</div>
-      <div className="num text-[16px] mt-1 truncate">{children}</div>
+      <div className="num text-[17px] mt-1 truncate">{children}</div>
       {sub && <div className="text-[10.5px] faint mt-0.5 truncate">{sub}</div>}
     </div>
   );

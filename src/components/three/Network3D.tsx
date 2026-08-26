@@ -47,6 +47,34 @@ function makeGlowTexture(): THREE.Texture {
   return tex;
 }
 
+/* Fresnel atmosphere shell. A back-side sphere that only lights where the
+   surface turns away from the eye, so every node gets a silhouette rim instead
+   of reading as a matte billiard ball. Cheap: two triangles' worth of math per
+   fragment, no lights, no shadow pass. */
+const ATMO_VERT = /* glsl */ `
+  varying vec3 vNormal;
+  varying vec3 vView;
+  void main() {
+    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    vNormal = normalize(normalMatrix * normal);
+    vView = normalize(-mv.xyz);
+    gl_Position = projectionMatrix * mv;
+  }
+`;
+
+const ATMO_FRAG = /* glsl */ `
+  uniform vec3 uColor;
+  uniform float uPower;
+  uniform float uIntensity;
+  varying vec3 vNormal;
+  varying vec3 vView;
+  void main() {
+    float f = 1.0 - abs(dot(normalize(vNormal), normalize(vView)));
+    f = pow(clamp(f, 0.0, 1.0), uPower);
+    gl_FragColor = vec4(uColor * f * uIntensity, f * uIntensity);
+  }
+`;
+
 interface SelectHandler {
   (id: string | null, kind: "token" | "wallet" | null): void;
 }
@@ -209,37 +237,97 @@ function ParticleField({
 
 // ---------------------------------------------------------------- edges
 
+/* Holding every position edge on screen produced a spider-web that buried the
+   nodes. Keep only the strongest relationships, ramp their colour toward the
+   accent with conviction, and run a slow travelling wave along the set so the
+   lattice reads as a live circuit instead of static string art. */
+const MAX_EDGES = 190;
+
 function EdgeLines({ payload, placements }: { payload: NetworkPayload; placements: Map<string, NodePlacement> }) {
-  const geometry = useMemo(() => {
+  const linesRef = useRef<THREE.LineSegments>(null);
+  const { geometry, base } = useMemo(() => {
+    const scored = payload.edges
+      .filter((e) => e.kind === "position" && placements.has(e.from) && placements.has(e.to))
+      .map((e) => ({ e, w: edgeIntensity(e) }))
+      .sort((a, b) => b.w - a.w)
+      .slice(0, MAX_EDGES);
+
     const pts: number[] = [];
     const cols: number[] = [];
+    const weights: number[] = [];
+    const cold = new THREE.Color("#2f4a78");
+    const warm = new THREE.Color("#38e1ff");
     const c = new THREE.Color();
-    for (const e of payload.edges) {
-      if (e.kind !== "position") continue;
-      const a = placements.get(e.from);
-      const b = placements.get(e.to);
-      if (!a || !b) continue;
-      const alpha = 0.12 + edgeIntensity(e) * 0.25;
-      c.set("#3d5a8a").multiplyScalar(alpha * 2.4);
+    for (const { e, w } of scored) {
+      const a = placements.get(e.from)!;
+      const b = placements.get(e.to)!;
+      c.copy(cold).lerp(warm, Math.min(1, w * w * 0.85));
+      const alpha = 0.14 + w * 0.4;
+      c.multiplyScalar(alpha);
       pts.push(a.x, a.y, a.z, b.x, b.y, b.z);
       cols.push(c.r, c.g, c.b, c.r, c.g, c.b);
+      weights.push(w, w);
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
     g.setAttribute("color", new THREE.Float32BufferAttribute(cols, 3));
-    return g;
+    return { geometry: g, base: { colors: Float32Array.from(cols), weights: Float32Array.from(weights) } };
   }, [payload, placements]);
 
   useEffect(() => () => geometry.dispose(), [geometry]);
 
+  useFrame(({ clock }) => {
+    const g = linesRef.current?.geometry;
+    if (!g) return;
+    const attr = g.attributes.color as THREE.BufferAttribute;
+    const arr = attr.array as Float32Array;
+    const t = clock.elapsedTime;
+    for (let i = 0; i < base.weights.length; i++) {
+      // one wave sweeping the ranked list; strong edges swing wider
+      const pulse = 0.86 + 0.2 * Math.sin(t * 1.1 - i * 0.16) * (0.3 + base.weights[i]);
+      arr[i * 3] = base.colors[i * 3] * pulse;
+      arr[i * 3 + 1] = base.colors[i * 3 + 1] * pulse;
+      arr[i * 3 + 2] = base.colors[i * 3 + 2] * pulse;
+    }
+    attr.needsUpdate = true;
+  });
+
   return (
-    <lineSegments geometry={geometry} frustumCulled={false}>
-      <lineBasicMaterial vertexColors transparent opacity={0.5} depthWrite={false} blending={THREE.AdditiveBlending} />
+    <lineSegments ref={linesRef} geometry={geometry} frustumCulled={false}>
+      <lineBasicMaterial vertexColors transparent opacity={0.4} depthWrite={false} blending={THREE.AdditiveBlending} />
     </lineSegments>
   );
 }
 
 // ---------------------------------------------------------------- nodes
+
+/** Risk marker. Two counter-rotating additive rings read as a warning field
+ *  around the body rather than a red ellipse drawn on top of the picture. */
+function RiskHalo({ radius, phase }: { radius: number; phase: number }) {
+  const outer = useRef<THREE.Mesh>(null);
+  const inner = useRef<THREE.Mesh>(null);
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime;
+    if (outer.current) {
+      outer.current.rotation.z = t * 0.22 + phase;
+      const m = outer.current.material as THREE.MeshBasicMaterial;
+      m.opacity = 0.34 + 0.16 * Math.sin(t * 1.6 + phase);
+    }
+    if (inner.current) inner.current.rotation.z = -t * 0.31 + phase;
+  });
+  return (
+    <group rotation={[Math.PI / 2.4, 0, 0]} raycast={() => null}>
+      <mesh ref={outer}>
+        <torusGeometry args={[radius * 2.05, 0.055, 8, 56]} />
+        <meshBasicMaterial color="#ff4d6d" transparent opacity={0.42} blending={THREE.AdditiveBlending} depthWrite={false} />
+      </mesh>
+      <mesh ref={inner}>
+        <torusGeometry args={[radius * 1.72, 0.03, 8, 48]} />
+        <meshBasicMaterial color="#ff8098" transparent opacity={0.3} blending={THREE.AdditiveBlending} depthWrite={false} />
+      </mesh>
+    </group>
+  );
+}
 
 function TokenNode({
   node,
@@ -262,7 +350,15 @@ function TokenNode({
 }) {
   const group = useRef<THREE.Group>(null);
   const mesh = useRef<THREE.Mesh>(null);
+  const atmo = useRef<THREE.Mesh>(null);
+  const atmoMat = useRef<THREE.ShaderMaterial>(null);
   const target = useMemo(() => new THREE.Vector3(placement.x, placement.y, placement.z), [placement]);
+  // deterministic per-node phase so idle drift never syncs into a pulsing mass
+  const phase = useMemo(() => {
+    let h = 0;
+    for (let i = 0; i < node.id.length; i++) h = (h * 31 + node.id.charCodeAt(i)) % 6283;
+    return h / 1000;
+  }, [node.id]);
   // one instrument palette: signal strength drives a slate→cyan ramp; the
   // token's identity hue survives only as a 12% tint. State glows, identity
   // whispers — the opposite produces rainbow marbles.
@@ -274,19 +370,49 @@ function TokenNode({
     return { color: body, emissive: em };
   }, [node.hue, node.signalScore]);
   const hot = node.signalScore >= 76;
+  const atmoUniforms = useMemo(
+    () => ({
+      uColor: { value: emissive.clone() },
+      uPower: { value: 2.7 },
+      uIntensity: { value: 0.0 },
+    }),
+    [emissive],
+  );
 
   useFrame(({ clock }, dt) => {
     if (!group.current || !mesh.current) return;
+    const t = clock.elapsedTime;
+    // idle orbital drift — every node keeps a slow, per-node-phased float so the
+    // field reads alive when nothing is trading, without a synced "breathing" tell
+    const driftX = Math.sin(t * 0.31 + phase) * 0.34;
+    const driftY = Math.sin(t * 0.24 + phase * 1.7) * 0.46;
+    const driftZ = Math.cos(t * 0.27 + phase * 0.6) * 0.34;
     group.current.position.lerp(target, Math.min(1, dt * 2.2));
-    const breathe = hot ? 1 + Math.sin(clock.elapsedTime * 2.4 + node.hue) * 0.07 : 1;
-    // arrival pulse: an incoming trade briefly swells the node and its glow
+    group.current.position.x += driftX * dt * 2.2;
+    group.current.position.y += driftY * dt * 2.2;
+    group.current.position.z += driftZ * dt * 2.2;
+
+    const breathe = hot ? 1 + Math.sin(t * 2.4 + phase) * 0.06 : 1;
+    // arrival pulse: an incoming trade swells the node. Eased (cubic-out) so it
+    // snaps on impact and settles softly, instead of the old linear ramp-down.
     const until = pulsesRef.current.get(node.id) ?? 0;
     const now = Date.now();
-    const kick = until > now ? 1 + 0.42 * Math.min(1, (until - now) / 600) : 1;
-    mesh.current.scale.setScalar(placement.radius * breathe * kick * (selected ? 1.25 : 1));
+    const raw = until > now ? Math.min(1, (until - now) / 600) : 0;
+    const eased = raw * raw * (3 - 2 * raw);
+    const kick = 1 + 0.42 * eased;
+    const scale = placement.radius * breathe * kick * (selected ? 1.25 : 1);
+    mesh.current.scale.setScalar(scale);
+    mesh.current.rotation.y += dt * 0.12;
+    if (atmo.current) atmo.current.scale.setScalar(scale * 1.34);
+
     const mat = mesh.current.material as THREE.MeshStandardMaterial;
-    mat.emissiveIntensity =
-      (0.22 + (node.signalScore / 100) * (hot ? 1.3 : 0.6) + (selected ? 0.8 : 0)) * (kick > 1 ? 1.6 : 1);
+    mat.emissiveIntensity = (0.22 + (node.signalScore / 100) * (hot ? 1.3 : 0.6) + (selected ? 0.8 : 0)) * (1 + eased * 0.6);
+    // the rim tracks signal strength, so the strongest ideas are the ones that
+    // glow at the edges — and flares briefly when a trade lands. Reached through
+    // the material ref: the memoized uniforms object is a hook argument and the
+    // compiler (rightly) refuses direct mutation of it.
+    const am = atmoMat.current;
+    if (am) am.uniforms.uIntensity.value = 0.28 + (node.signalScore / 100) * 0.72 + (selected ? 0.5 : 0) + eased * 0.9;
   });
 
   return (
@@ -306,7 +432,21 @@ function TokenNode({
         }}
       >
         <sphereGeometry args={[1, 24, 24]} />
-        <meshStandardMaterial color={color} emissive={emissive} roughness={0.55} metalness={0.1} />
+        <meshStandardMaterial color={color} emissive={emissive} roughness={0.42} metalness={0.22} />
+      </mesh>
+      {/* silhouette rim — the single change that turns matte spheres into bodies */}
+      <mesh ref={atmo} scale={placement.radius * 1.34} raycast={() => null}>
+        <sphereGeometry args={[1, 20, 20]} />
+        <shaderMaterial
+          ref={atmoMat}
+          uniforms={atmoUniforms}
+          vertexShader={ATMO_VERT}
+          fragmentShader={ATMO_FRAG}
+          transparent
+          side={THREE.BackSide}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
       </mesh>
       {(hot || selected) && (
         <sprite scale={placement.radius * (selected ? 7 : 5)}>
@@ -320,12 +460,7 @@ function TokenNode({
           />
         </sprite>
       )}
-      {settings.riskOverlay && node.riskHigh && (
-        <mesh rotation={[Math.PI / 2.4, 0, 0]}>
-          <torusGeometry args={[placement.radius * 1.9, 0.045, 8, 48]} />
-          <meshBasicMaterial color="#ff4d6d" transparent opacity={0.7} />
-        </mesh>
-      )}
+      {settings.riskOverlay && node.riskHigh && <RiskHalo radius={placement.radius} phase={phase} />}
       {(labeled || selected) && settings.labels && (
         <Billboard position={[0, placement.radius + 1.1, 0]}>
           <Text fontSize={0.85} color={selected ? "#38e1ff" : "#9fb0cc"} anchorX="center" anchorY="bottom" outlineWidth={0.05} outlineColor="#04060a">
@@ -359,13 +494,22 @@ function WalletNode({
   const whale = node.labels.includes("whale") || node.labels.includes("fund");
   const color = smart ? "#e9f4ff" : whale ? "#8b7cff" : "#44546e";
 
-  useFrame((_, dt) => {
+  useFrame(({ clock }, dt) => {
     group.current?.position.lerp(target, Math.min(1, dt * 2.2));
     if (inner.current) {
       const until = pulsesRef.current.get(node.id) ?? 0;
       const now = Date.now();
-      const kick = until > now ? 1 + 0.5 * Math.min(1, (until - now) / 600) : 1;
-      inner.current.scale.setScalar(placement.radius * kick * (selected ? 1.6 : 1));
+      const raw = until > now ? Math.min(1, (until - now) / 600) : 0;
+      const eased = raw * raw * (3 - 2 * raw);
+      inner.current.scale.setScalar(placement.radius * (1 + 0.5 * eased) * (selected ? 1.6 : 1));
+      // smart money turns slowly — the facets catch the rim light and read as
+      // cut crystal rather than a white blob
+      if (smart) {
+        inner.current.rotation.y += dt * 0.5;
+        inner.current.rotation.x = Math.sin(clock.elapsedTime * 0.4) * 0.25;
+      }
+      const m = inner.current.material as THREE.MeshStandardMaterial;
+      m.emissiveIntensity = (smart ? 0.78 : 0.42) + eased * 0.9;
     }
   });
 
@@ -387,7 +531,14 @@ function WalletNode({
         }}
       >
         {smart ? <octahedronGeometry args={[1.4, 0]} /> : <sphereGeometry args={[1, 12, 12]} />}
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={smart ? 1.2 : 0.5} roughness={0.4} />
+        <meshStandardMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={smart ? 0.78 : 0.42}
+          roughness={smart ? 0.22 : 0.45}
+          metalness={smart ? 0.5 : 0.15}
+          flatShading={smart}
+        />
       </mesh>
       {selected && settings.labels && (
         <Billboard position={[0, 1.6, 0]}>
@@ -435,6 +586,33 @@ function CameraRig({
       autoRotateSpeed={0.35}
     />
   );
+}
+
+/** WebGL contexts die for reasons outside the app's control — a driver reset, a
+ *  GPU process restart, the tab being backgrounded too long. Three does not
+ *  recover on its own, so the panel stayed black for the rest of the session.
+ *  Calling preventDefault on the lost event is what makes the browser willing
+ *  to hand the context back; on restore we re-render the frame. */
+function ContextGuard({ onLost }: { onLost?: (lost: boolean) => void }) {
+  const { gl, invalidate } = useThree();
+  useEffect(() => {
+    const canvas = gl.domElement;
+    const lost = (e: Event) => {
+      e.preventDefault();
+      onLost?.(true);
+    };
+    const restored = () => {
+      onLost?.(false);
+      invalidate();
+    };
+    canvas.addEventListener("webglcontextlost", lost);
+    canvas.addEventListener("webglcontextrestored", restored);
+    return () => {
+      canvas.removeEventListener("webglcontextlost", lost);
+      canvas.removeEventListener("webglcontextrestored", restored);
+    };
+  }, [gl, invalidate, onLost]);
+  return null;
 }
 
 function QualityGovernor({
@@ -499,6 +677,7 @@ export function Network3D({
   // FPS, bloom stays off for the session rather than oscillating
   const [fx, setFx] = useState(!mobile);
   const onDegrade = useCallback(() => setFx(false), []);
+  const [glLost, setGlLost] = useState(false);
   const labeledTokens = useMemo(
     () => new Set([...payload.tokens].sort((a, b) => b.marketCapUsd - a.marketCapUsd).slice(0, 14).map((t) => t.id)),
     [payload.tokens],
@@ -511,6 +690,17 @@ export function Network3D({
 
   return (
     <div className={className}>
+      {glLost && (
+        <div
+          className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 text-center"
+          style={{ background: "rgba(4,6,10,0.82)" }}
+        >
+          <div className="panel-title">3D context interrupted</div>
+          <div className="text-[12px] dim max-w-[280px]">
+            The graphics context was reset. It restores automatically — reload the page if this persists.
+          </div>
+        </div>
+      )}
       <Canvas
         camera={{ position: [0, 22, 52], fov: 50 }}
         dpr={mobile ? [1, 1.25] : [1, 1.75]}
@@ -518,10 +708,13 @@ export function Network3D({
         onPointerMissed={() => onSelect(null, null)}
       >
         <color attach="background" args={["#04060a"]} />
-        <fog attach="fog" args={["#04060a", 70, 175]} />
-        <ambientLight intensity={0.18} />
+        {/* tighter falloff: distance now reads as depth instead of every node
+            sitting on one flat plane */}
+        <fog attach="fog" args={["#04060a", 52, 158]} />
+        <ambientLight intensity={0.22} />
         <pointLight position={[0, 34, 8]} intensity={650} color="#9fd8ff" />
         <pointLight position={[42, -22, 42]} intensity={320} color="#8b7cff" />
+        <pointLight position={[-46, 10, -30]} intensity={220} color="#38e1ff" />
         <Stars radius={140} depth={60} count={mobile ? 1200 : 2600} factor={3.2} saturation={0} fade speed={settings.speed * 0.5} />
 
         {payload.tokens.map((t) => {
@@ -560,11 +753,14 @@ export function Network3D({
         )}
 
         <CameraRig focus={focus} autoRotate={settings.autoRotate} resetSignal={resetSignal} />
+        <ContextGuard onLost={setGlLost} />
         <QualityGovernor budgetRef={budgetRef} onFps={onFps} onDegrade={onDegrade} />
         {fx && (
           <EffectComposer multisampling={0}>
-            <Bloom intensity={0.85} luminanceThreshold={0.32} luminanceSmoothing={0.28} mipmapBlur radius={0.72} />
-            <Vignette eskil={false} offset={0.26} darkness={0.55} />
+            {/* threshold raised with the new rim light so only genuinely hot
+                nodes bloom — at 0.32 the whole field washed out */}
+            <Bloom intensity={1.05} luminanceThreshold={0.42} luminanceSmoothing={0.22} mipmapBlur radius={0.78} />
+            <Vignette eskil={false} offset={0.22} darkness={0.62} />
           </EffectComposer>
         )}
       </Canvas>

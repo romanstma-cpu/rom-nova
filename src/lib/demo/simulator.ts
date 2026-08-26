@@ -183,6 +183,9 @@ function signalSweep(store: DemoStore) {
           mint: s.mint,
           read: false,
         });
+        // Same cap the other alert path applies. Without it this one grew the
+        // array for the life of the session.
+        if (store.alertEvents.length > 200) store.alertEvents.pop();
       }
     }
   }

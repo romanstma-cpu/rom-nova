@@ -6,6 +6,25 @@ import type { DemoStore } from "../demo/store";
 import type { PaperFill, PaperOrder, PaperPortfolio } from "../types";
 
 const FEE_PCT = 0.5;
+/** Price impact above which an order is refused rather than magically filled. */
+const MAX_IMPACT_PCT = 12;
+
+/** Usable depth behind a mint — half the pool, the same figure placeOrder uses. */
+function usableDepth(store: DemoStore, mint: string): number {
+  const snap = store.snapshot(mint);
+  if (!snap) return 0;
+  return Math.max(snap.liquidityUsd * 0.5, 1);
+}
+
+/**
+ * Largest order this pool can absorb without tripping the impact guard.
+ *
+ * `impactPct = (usd / depth) * 100 * 0.9`, solved for MAX_IMPACT_PCT and shaded
+ * just under it so a float landing exactly on the boundary is not rejected.
+ */
+export function maxOrderUsd(store: DemoStore, mint: string): number {
+  return ((usableDepth(store, mint) * MAX_IMPACT_PCT) / 90) * 0.99;
+}
 
 export interface OrderRequest {
   portfolioId: string;
@@ -39,7 +58,7 @@ export function placeOrder(store: DemoStore, req: OrderRequest): { order: PaperO
   // price impact from pool depth; refuse orders that would eat the pool
   const depth = Math.max(snap.liquidityUsd * 0.5, 1);
   const impactPct = Math.min(45, (req.usd / depth) * 100 * 0.9);
-  if (impactPct > 12) {
+  if (impactPct > MAX_IMPACT_PCT) {
     const order = mk("rejected", `order is ${((req.usd / depth) * 100).toFixed(1)}% of usable pool depth — impact ~${impactPct.toFixed(1)}%`);
     pf.orders.push(order);
     return { order, error: order.rejectReason };
@@ -153,22 +172,54 @@ export function portfolioView(store: DemoStore, pf: PaperPortfolio): PortfolioVi
   };
 }
 
-/** Check stops/targets against current prices; returns triggered sells. */
+/**
+ * Check stops/targets against current prices; returns the sells that filled.
+ *
+ * Exits are capped to what the pool can absorb. Asking to dump a whole position
+ * at once used to trip placeOrder's own impact guard, and the rejection was
+ * discarded: the caller was told the stop had fired, the position stayed fully
+ * open, a rejected order was appended to the ledger — and because the trigger
+ * condition was still true, the whole thing repeated on the next simulator
+ * tick, four seconds later, forever.
+ *
+ * Selling what the pool will take instead is both honest and terminating: the
+ * position bleeds down across ticks and eventually closes, which is what
+ * exiting an illiquid position actually looks like.
+ */
 export function enforceStops(store: DemoStore): { portfolioId: string; mint: string; reason: string }[] {
   const fired: { portfolioId: string; mint: string; reason: string }[] = [];
   for (const pf of store.portfolios) {
     for (const pos of [...pf.positions]) {
       const px = store.lastPrice(pos.mint);
-      if (!px || pos.costBasisUsd <= 0) continue;
+      if (!px || pos.costBasisUsd <= 0 || pos.tokens <= 0) continue;
       const avg = pos.costBasisUsd / pos.tokens;
       const ret = (px / avg - 1) * 100;
-      if (pos.stopLossPct !== undefined && ret <= -pos.stopLossPct) {
-        placeOrder(store, { portfolioId: pf.id, mint: pos.mint, side: "sell", usd: pos.tokens * px });
-        fired.push({ portfolioId: pf.id, mint: pos.mint, reason: `stop loss ${pos.stopLossPct}% hit` });
-      } else if (pos.takeProfitPct !== undefined && ret >= pos.takeProfitPct) {
-        placeOrder(store, { portfolioId: pf.id, mint: pos.mint, side: "sell", usd: pos.tokens * px });
-        fired.push({ portfolioId: pf.id, mint: pos.mint, reason: `take profit ${pos.takeProfitPct}% hit` });
-      }
+
+      const reason =
+        pos.stopLossPct !== undefined && ret <= -pos.stopLossPct
+          ? `stop loss ${pos.stopLossPct}% hit`
+          : pos.takeProfitPct !== undefined && ret >= pos.takeProfitPct
+            ? `take profit ${pos.takeProfitPct}% hit`
+            : null;
+      if (!reason) continue;
+
+      const wantUsd = pos.tokens * px;
+      const usd = Math.min(wantUsd, maxOrderUsd(store, pos.mint));
+      // A pool too thin to absorb anything at all: leave the position alone
+      // rather than filing a rejection every four seconds.
+      if (usd <= 0) continue;
+
+      const res = placeOrder(store, { portfolioId: pf.id, mint: pos.mint, side: "sell", usd });
+      if (!res.fill) continue; // rejected for some other reason; do not claim it fired
+
+      const partial = usd < wantUsd * 0.999;
+      fired.push({
+        portfolioId: pf.id,
+        mint: pos.mint,
+        reason: partial
+          ? `${reason} — sold what the pool could absorb, the rest follows`
+          : reason,
+      });
     }
   }
   return fired;

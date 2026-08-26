@@ -268,3 +268,88 @@ body {
   .rise-in, .shimmer { animation: none; }
   .scorebar > div { transition: none; }
 }
+
+
+/* ---------- 3D galaxy overlays ---------- */
+
+.galaxy-tip {
+  pointer-events: none;
+  min-width: 104px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border-bright);
+  background: rgba(8, 12, 20, 0.92);
+  box-shadow: 0 0 0 1px rgba(56, 225, 255, 0.12) inset, 0 8px 24px -12px #000;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text);
+  backdrop-filter: blur(6px);
+}
+.galaxy-tip-sym {
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 3px;
+}
+.galaxy-tip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+}
+.galaxy-tip-row span { color: var(--text-faint); }
+
+/* signal pod — a floating card for the highest-conviction coins */
+.galaxy-pod {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px 5px 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border-bright);
+  background: rgba(8, 12, 20, 0.9);
+  box-shadow: 0 0 18px -6px rgba(56, 225, 255, 0.5);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.galaxy-pod:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 26px -4px rgba(56, 225, 255, 0.75);
+}
+
+/* confidence ring drawn with a conic gradient, masked to an annulus */
+.galaxy-pod-ring {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: conic-gradient(var(--accent) calc(var(--pct) * 1%), rgba(56, 225, 255, 0.14) 0);
+  -webkit-mask: radial-gradient(circle, transparent 9px, #000 10px);
+  mask: radial-gradient(circle, transparent 9px, #000 10px);
+  animation: pod-pulse 2.4s ease-in-out infinite;
+}
+.galaxy-pod-score {
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text);
+  -webkit-mask: none;
+  mask: none;
+}
+.galaxy-pod-body { display: flex; flex-direction: column; line-height: 1.2; }
+.galaxy-pod-sym { font-size: 11px; font-weight: 600; letter-spacing: 0.05em; }
+.galaxy-pod-mom { font-size: 10px; font-family: var(--font-data); }
+
+@keyframes pod-pulse {
+  0%, 100% { filter: drop-shadow(0 0 2px rgba(56, 225, 255, 0.5)); }
+  50%      { filter: drop-shadow(0 0 7px rgba(56, 225, 255, 0.95)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .galaxy-pod-ring { animation: none; }
+}

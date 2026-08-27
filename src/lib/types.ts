@@ -521,6 +521,28 @@ export interface BacktestTrade {
   pnlPct: number;
 }
 
+/**
+ * Where the result came from, in the simulation's own terms.
+ *
+ * Every token in this market is generated from an archetype the generator
+ * chose in advance — moonshot, rug, chopper, and so on — and the features the
+ * signal engine reads are generated from that same archetype. So a good
+ * backtest return here is not evidence that the strategy works; it is evidence
+ * that the engine can recover the label the generator assigned. Showing that
+ * breakdown next to the return is the difference between a demonstration and a
+ * performance claim.
+ */
+export interface BacktestAttribution {
+  archetype: string;
+  trades: number;
+  wins: number;
+  pnlUsd: number;
+  /** Mean signal score across every token of this archetype the engine saw. */
+  meanScore: number;
+  /** How many of that archetype existed to be bought. */
+  candidates: number;
+}
+
 export interface BacktestResult {
   id: string;
   config: BacktestConfig;
@@ -534,6 +556,9 @@ export interface BacktestResult {
   sharpeLike: number;
   trades: BacktestTrade[];
   equityCurve: { ts: number; equity: number }[];
+  attribution: BacktestAttribution[];
+  /** Exits that could not fill at the barrier because the hour gapped past it. */
+  gappedExits: number;
   integrity: {
     lookaheadChecksPassed: boolean;
     notes: string[];

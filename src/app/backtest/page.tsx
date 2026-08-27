@@ -55,8 +55,10 @@ export default function BacktestPage() {
     <div className="p-3 flex flex-col gap-3">
       <div className="flex items-center gap-3 flex-wrap">
         <h1 className="text-[15px] font-semibold tracking-wide">BACKTESTING LAB</h1>
-        <span className="faint text-[10.5px]">
-          signals are recomputed at each historical step from data available at that moment — the integrity check fails the run if any entry saw the future
+        <span className="faint text-[10.5px] max-w-[92ch]">
+          signals are recomputed at each historical step from data available at that moment — the
+          integrity check fails the run if any entry saw the future. the market itself is generated
+          by this program, so a return here measures the engine against a world it made up
         </span>
       </div>
 
@@ -109,6 +111,48 @@ export default function BacktestPage() {
               </span>
             </Stat>
           </div>
+
+          {result.attribution.length > 0 && (
+            <div className="panel">
+              <div className="panel-title px-3 pt-2.5 pb-1">Where the return came from</div>
+              <p className="px-3 pb-2 text-[11.5px] dim max-w-[86ch] leading-relaxed">
+                Every token here was generated from an archetype chosen before the run — moonshot,
+                rug, chopper — and the holder, flow and concentration features the signal engine
+                reads were generated from that same archetype. So a good number above is the engine
+                recovering a label this program assigned, not evidence that the strategy works on a
+                real market. The spread of mean scores across these rows is the honest measure of
+                what the engine did.
+              </p>
+              <table className="w-full text-[11.5px]">
+                <thead className="thead">
+                  <tr>
+                    <th className="text-left px-3 py-1.5 font-medium">Archetype</th>
+                    <th className="text-right px-2 font-medium">Offered</th>
+                    <th className="text-right px-2 font-medium">Mean score</th>
+                    <th className="text-right px-2 font-medium">Bought</th>
+                    <th className="text-right px-2 font-medium">Won</th>
+                    <th className="text-right px-3 font-medium">PnL $</th>
+                  </tr>
+                </thead>
+                <tbody className="num">
+                  {result.attribution.map((a) => (
+                    <tr key={a.archetype} className="trow">
+                      <td className="px-3 py-1" style={{ fontFamily: "var(--font-sans)" }}>
+                        {a.archetype}
+                      </td>
+                      <td className="text-right px-2 faint">{a.candidates.toLocaleString()}</td>
+                      <td className="text-right px-2 dim">{a.meanScore.toFixed(1)}</td>
+                      <td className="text-right px-2">{a.trades}</td>
+                      <td className="text-right px-2 dim">{a.trades > 0 ? a.wins : "—"}</td>
+                      <td className={`text-right px-3 ${a.pnlUsd >= 0 ? "pos" : "neg"}`}>
+                        {a.trades > 0 ? fmtUsd(a.pnlUsd) : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <div className="panel">
             <div className="panel-title px-3 pt-2.5">Equity curve</div>

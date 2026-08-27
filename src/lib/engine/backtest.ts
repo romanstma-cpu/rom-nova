@@ -7,7 +7,12 @@
 import type { DemoStore } from "../demo/store";
 import { HOUR, DAY } from "../demo/universe";
 import { signalsAt } from "./signals";
-import type { BacktestConfig, BacktestResult, BacktestTrade } from "../types";
+import type {
+  BacktestAttribution,
+  BacktestConfig,
+  BacktestResult,
+  BacktestTrade,
+} from "../types";
 
 interface OpenPos {
   mint: string;
@@ -48,6 +53,9 @@ export function runBacktest(store: DemoStore, cfg: BacktestConfig): BacktestResu
   const equityCurve: { ts: number; equity: number }[] = [];
   const integrityNotes: string[] = [];
   let lookaheadOk = true;
+  let gappedExits = 0;
+  /** Every scored candidate, by the archetype the generator gave it. */
+  const seen = new Map<string, { n: number; score: number }>();
 
   const priceAt = (mint: string, ts: number) => store.lastPrice(mint, ts);
 
@@ -75,13 +83,33 @@ export function runBacktest(store: DemoStore, cfg: BacktestConfig): BacktestResu
       const p = open[k];
       const px = priceAt(p.mint, ts);
       if (px === undefined) continue;
-      const ret = (px / p.entryPrice - 1) * 100;
       const ageH = (ts - p.entryTs) / HOUR;
-      if (ret <= -cfg.stopLossPct) {
-        closePos(p, ts, p.entryPrice * (1 - cfg.stopLossPct / 100), "stop");
+      const stopPrice = p.entryPrice * (1 - cfg.stopLossPct / 100);
+      const targetPrice = p.entryPrice * (1 + cfg.takeProfitPct / 100);
+      // The hour the position just lived through, not only its closing price.
+      // Checking closes alone misses a target that was touched and given back,
+      // and a stop that was blown through and recovered from.
+      const bar = store.candles(p.mint, ts - HOUR + 1, ts).at(-1);
+      const low = Math.min(bar?.l ?? px, px);
+      const high = Math.max(bar?.h ?? px, px);
+      const open_ = bar?.o ?? px;
+
+      if (low <= stopPrice) {
+        // The stop is checked before the target, and a gap through it fills at
+        // the open rather than at the stop price. Both are the pessimistic
+        // reading, deliberately: within one hourly candle there is no way to
+        // know which barrier came first, and a stop is an instruction to sell,
+        // not a promise about the price. Booking every stop at exactly -20%
+        // when the hour opened at -45% is how a backtest invents money.
+        const fill = Math.min(stopPrice, open_);
+        if (fill < stopPrice) gappedExits++;
+        closePos(p, ts, fill, "stop");
         open.splice(k, 1);
-      } else if (ret >= cfg.takeProfitPct) {
-        closePos(p, ts, p.entryPrice * (1 + cfg.takeProfitPct / 100), "target");
+      } else if (high >= targetPrice) {
+        // A target that gapped past is still booked at the target: a resting
+        // sell would have filled better, but this engine does not rest orders,
+        // and crediting the gap would undo the caution above.
+        closePos(p, ts, targetPrice, "target");
         open.splice(k, 1);
       } else if (ageH >= cfg.holdHours) {
         closePos(p, ts, px, "time");
@@ -92,6 +120,18 @@ export function runBacktest(store: DemoStore, cfg: BacktestConfig): BacktestResu
     // entries
     if (open.length < cfg.maxConcurrent && cash >= cfg.positionUsd) {
       const sigs = signalsAt(store, ts, cfg.profile);
+
+      // Recorded before any filter and in its own pass, so the attribution
+      // describes everything the engine was offered — not just the prefix of
+      // the list it got through before the portfolio filled.
+      for (const s of sigs) {
+        const arch = store.token(s.mint)?.archetype ?? "unknown";
+        const acc = seen.get(arch) ?? { n: 0, score: 0 };
+        acc.n++;
+        acc.score += s.score;
+        seen.set(arch, acc);
+      }
+
       for (const s of sigs) {
         if (open.length >= cfg.maxConcurrent || cash < cfg.positionUsd) break;
         if (s.label === "NO TRADE") continue;
@@ -162,6 +202,28 @@ export function runBacktest(store: DemoStore, cfg: BacktestConfig): BacktestResu
   const sd = rets.length > 1 ? Math.sqrt(rets.reduce((s, x) => s + (x - mean) ** 2, 0) / (rets.length - 1)) : 0;
 
   if (lookaheadOk) integrityNotes.push(`verified ${trades.length} entries used only pre-entry data`);
+  if (gappedExits > 0) {
+    integrityNotes.push(
+      `${gappedExits} stop${gappedExits === 1 ? "" : "s"} filled below the stop price — the hour gapped through it`,
+    );
+  }
+
+  // Attribution by the generator's own archetype label. This is the number
+  // that keeps the return honest: in a market this program generated, a good
+  // result means the engine recovered the labels, not that the strategy works.
+  const attribution: BacktestAttribution[] = [...seen.entries()]
+    .map(([archetype, s]) => {
+      const mine = trades.filter((t) => (store.token(t.mint)?.archetype ?? "unknown") === archetype);
+      return {
+        archetype,
+        trades: mine.length,
+        wins: mine.filter((t) => t.pnlUsd > 0).length,
+        pnlUsd: Math.round(mine.reduce((a, t) => a + t.pnlUsd, 0) * 100) / 100,
+        meanScore: Math.round((s.score / s.n) * 10) / 10,
+        candidates: s.n,
+      };
+    })
+    .sort((a, b) => b.pnlUsd - a.pnlUsd || b.meanScore - a.meanScore);
 
   return {
     id: `bt_${Date.now().toString(36)}`,
@@ -176,6 +238,8 @@ export function runBacktest(store: DemoStore, cfg: BacktestConfig): BacktestResu
     sharpeLike: sd > 0 ? mean / sd : 0,
     trades,
     equityCurve,
+    attribution,
+    gappedExits,
     integrity: { lookaheadChecksPassed: lookaheadOk, notes: integrityNotes },
   };
 }

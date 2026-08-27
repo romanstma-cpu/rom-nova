@@ -7,6 +7,7 @@ import { useApi, useEventStream, fmtUsd, fmtPct, shortAddr, fmtAgo } from "@/lib
 import type { NetworkPayload, SceneMode } from "@/components/three/graph";
 import type { SceneSettings } from "@/components/three/Network3D";
 import { Score } from "@/components/ui/bits";
+import { Legend } from "@/components/three/Legend";
 
 const Network3D = dynamic(() => import("@/components/three/Network3D").then((m) => m.Network3D), { ssr: false });
 
@@ -25,8 +26,11 @@ export default function NetworkPage() {
   const [asOf, setAsOf] = useState<number | null>(null);
   const [sliderOffset, setSliderOffset] = useState(0);
   const [selected, setSelected] = useState<{ id: string; kind: "token" | "wallet" } | null>(null);
-  const [fps, setFps] = useState(0);
   const [toggles, setToggles] = useState({ particles: true, labels: true, trails: true, riskOverlay: true, autoRotate: true });
+  // Open on a desktop where it costs nothing; on a phone the sheet starts shut
+  // so the scene is the first thing on screen.
+  const [legendOpen, setLegendOpen] = useState(true);
+  const [hudOpen, setHudOpen] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [resetSignal, setResetSignal] = useState(0);
   const [mobile, setMobile] = useState(false);
@@ -67,7 +71,6 @@ export default function NetworkPage() {
           selectedId={selected?.id ?? null}
           onSelect={(id, kind) => setSelected(id && kind ? { id, kind } : null)}
           burstsRef={burstsRef}
-          onFps={setFps}
           className="absolute inset-0"
           resetSignal={resetSignal}
           mobile={mobile}
@@ -78,8 +81,26 @@ export default function NetworkPage() {
         </div>
       )}
 
+      {/* On a phone the three HUD panels stacked to roughly 55% of the screen,
+          so the controls hid the thing they control. One button, one sheet,
+          closed until asked for. On a desktop there is room and it is always
+          open — the toggle is display:none there. */}
+      <button
+        type="button"
+        className="galaxy-hud-toggle btn absolute top-3 right-3 z-20"
+        onClick={() => setHudOpen((v) => !v)}
+        aria-expanded={hudOpen}
+        aria-controls="galaxy-hud"
+      >
+        {hudOpen ? "✕ Close" : "☰ Scene"}
+      </button>
+
       {/* mode + toggles HUD */}
-      <div className="absolute top-3 left-3 flex flex-col gap-2 w-[210px]">
+      <div
+        id="galaxy-hud"
+        className="galaxy-hud absolute top-3 left-3 flex flex-col gap-2 w-[210px] md:top-3 max-md:top-14"
+        hidden={mobile && !hudOpen}
+      >
         <div className="panel p-2 flex flex-col gap-1">
           <div className="panel-title px-1 pb-1">Scene Mode</div>
           {MODES.map((m) => (
@@ -129,14 +150,36 @@ export default function NetworkPage() {
             ⌂ Reset view
           </button>
         </div>
-        <div className="panel px-2.5 py-1.5 flex items-center justify-between text-[10px] num faint">
-          <span>{fps ? `${fps.toFixed(0)} fps` : "…"}</span>
-          <span>{data ? `${data.tokens.length} tokens · ${data.wallets.length} wallets` : ""}</span>
+        {/* The frame rate used to live here. A number only its author could
+            use, sitting where a reader looks for something about the market —
+            and "200 fps" on a desktop says nothing about the phone it will be
+            read on. What is in the scene is worth the space; how fast it draws
+            is not. */}
+        <div className="panel px-2.5 py-1.5 text-[10px] num faint">
+          {data ? `${data.tokens.length} tokens · ${data.wallets.length} wallets` : "…"}
         </div>
+
+        {/* On a phone the legend joins the sheet; on a desktop it is pinned
+            bottom-right, below, where there is dead space. */}
+        {mobile && <Legend mode={mode} open={legendOpen} onToggle={() => setLegendOpen((v) => !v)} />}
       </div>
 
-      {/* time machine */}
-      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 w-[min(680px,90%)] panel px-4 py-2.5 flex items-center gap-3">
+      {!mobile && (
+        <div className="absolute bottom-20 right-3 w-[236px]">
+          <Legend mode={mode} open={legendOpen} onToggle={() => setLegendOpen((v) => !v)} />
+        </div>
+      )}
+
+      {/* time machine
+          The positioning lives on a wrapper because .panel sets
+          `position: relative` in globals.css, which is unlayered and therefore
+          beats Tailwind's `.absolute` from the utilities layer. Combined on one
+          element the panel won, so this bar computed to `position: relative`
+          and `bottom-3` nudged it twelve pixels UP from the top of the flow —
+          it has been sitting at the top of the scene, on every viewport, since
+          it was written. */}
+      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 w-[min(680px,90%)] z-10">
+      <div className="panel px-4 py-2.5 flex items-center gap-3">
         <button
           className={`btn text-[10px] ${asOf ? "" : "btn-primary"}`}
           onClick={() => {
@@ -163,15 +206,17 @@ export default function NetworkPage() {
           {asOf ? `${fmtAgo(asOf)} (historical)` : "now"}
         </span>
       </div>
+      </div>
       {asOf && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 chip chip-warn">
           TIME MACHINE — showing only what was knowable {fmtAgo(asOf)}
         </div>
       )}
 
-      {/* selection panel */}
+      {/* selection panel — positioning on a wrapper, same reason as above */}
       {(selToken || selWallet) && (
-        <div className="absolute top-3 right-3 w-[270px] panel p-3.5 fade-up">
+        <div className="absolute top-3 right-3 w-[270px] z-10 max-md:top-14">
+        <div className="panel p-3.5 fade-up">
           {selToken && (
             <>
               <div className="flex items-center justify-between">
@@ -217,6 +262,7 @@ export default function NetworkPage() {
               </Link>
             </>
           )}
+        </div>
         </div>
       )}
     </div>

@@ -353,3 +353,166 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .galaxy-pod-ring { animation: none; }
 }
+
+/* ---------------------------------------------------------------- legend
+   The scene encodes four variables and used to explain none of them. Sits
+   bottom-right on a desktop where there is dead space, and becomes part of the
+   single collapsible sheet on a phone. */
+.galaxy-legend {
+  padding: 0;
+  overflow: hidden;
+}
+
+.galaxy-legend-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 11px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+}
+
+.galaxy-legend-chevron {
+  font-size: 10px;
+  color: var(--faint);
+}
+
+.galaxy-legend-body {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 2px 11px 10px;
+}
+
+.galaxy-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.galaxy-legend-key {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  width: 46px;
+  flex: none;
+  justify-content: center;
+}
+
+.galaxy-legend-text {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--dim, #9fb0c8);
+}
+
+.galaxy-legend-text b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.galaxy-dot {
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 30%, #4f6795, #1a2440 72%);
+  box-shadow: inset 0 0 4px rgba(120, 160, 220, 0.4);
+}
+.galaxy-dot.sm { width: 5px; height: 5px; }
+.galaxy-dot.md { width: 8px; height: 8px; }
+.galaxy-dot.lg { width: 12px; height: 12px; }
+
+.galaxy-ramp {
+  width: 44px;
+  height: 7px;
+  border-radius: 4px;
+}
+
+.galaxy-arc {
+  width: 19px;
+  height: 3px;
+  border-radius: 2px;
+}
+.galaxy-arc.buy { background: linear-gradient(90deg, rgba(107, 255, 208, 0.1), #6bffd0); }
+.galaxy-arc.sell { background: linear-gradient(90deg, rgba(255, 95, 168, 0.1), #ff5fa8); }
+
+.galaxy-halo {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #1a2440;
+  box-shadow: 0 0 0 2px rgba(255, 95, 120, 0.75);
+}
+
+.galaxy-pos {
+  width: 32px;
+  height: 12px;
+  border-radius: 3px;
+  background:
+    radial-gradient(circle at 20% 50%, #4a6ea0 1.6px, transparent 2px),
+    radial-gradient(circle at 50% 30%, #4a6ea0 1.6px, transparent 2px),
+    radial-gradient(circle at 78% 66%, #4a6ea0 1.6px, transparent 2px);
+}
+
+.galaxy-legend-foot {
+  margin-top: 2px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--faint);
+}
+
+/* The HUD, on a phone.
+   Three stacked panels covered roughly 55% of a 390px screen — the controls
+   obscuring the thing they control. One sheet, closed by default, so the
+   visualisation gets the screen it was built for. */
+.galaxy-hud-toggle {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .galaxy-hud-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 12px;
+    font-size: 11.5px;
+  }
+
+  .galaxy-hud {
+    width: min(280px, calc(100vw - 24px));
+    max-height: calc(100dvh - 190px);
+    overflow-y: auto;
+  }
+
+  .galaxy-hud[hidden] {
+    display: none;
+  }
+}
+/* The line that makes a signal card actionable: what it can absorb, and what
+   would prove it wrong. Both were computed and shown only on the detail page. */
+.signal-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--dim, #9fb0c8);
+}
+
+.signal-plan b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.signal-invalid {
+  color: var(--faint);
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

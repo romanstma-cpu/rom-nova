@@ -107,6 +107,20 @@ export default function SignalTerminal() {
               <span className={s.features.momentum24h >= 0 ? "pos" : "neg"}>24h {fmtPct(s.features.momentum24h)}</span>
             </div>
             <div className="text-[11px] dim mt-2 leading-snug line-clamp-2">{s.why[0]}</div>
+
+            {/* A score is not a plan. The card showed conviction and evidence and
+                stopped there — nothing about how much you could put in, or what
+                would prove it wrong. Both numbers already exist on every signal;
+                they were only ever rendered on the detail page. */}
+            <div className="signal-plan">
+              <span className="num">
+                size ≤ <b>{fmtUsd(s.features.exitDepthUsd)}</b>
+                <span className="faint"> to exit inside 5%</span>
+              </span>
+              {s.invalidation[0] && (
+                <span className="signal-invalid">wrong if {s.invalidation[0]}</span>
+              )}
+            </div>
           </Link>
         ))}
       </div>

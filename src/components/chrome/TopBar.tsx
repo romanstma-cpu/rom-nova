@@ -80,9 +80,19 @@ export function TopBar({ onOpenPalette, onOpenNav }: { onOpenPalette: () => void
         >
           SIMULATED DATA
         </Link>
-        <button onClick={onOpenPalette} className="btn text-[11px]" title="Command palette">
-          <span className="dim">search / commands</span>
-          <kbd className="text-[10px] border border-[var(--border-hi)] rounded px-1 py-px bg-[rgba(20,28,44,0.8)]">⌘K</kbd>
+        {/* On a 390px screen the full label and its shortcut ran off the right
+            edge — the header read "search / c" with the rest clipped, and a
+            keyboard hint is meaningless on a phone anyway. Below sm it is the
+            glyph alone; the accessible name stays either way. */}
+        <button
+          onClick={onOpenPalette}
+          className="btn text-[11px]"
+          title="Command palette"
+          aria-label="Search and commands"
+        >
+          <span aria-hidden="true" className="sm:hidden">⌕</span>
+          <span className="dim hidden sm:inline">search / commands</span>
+          <kbd className="hidden sm:inline-block text-[10px] border border-[var(--border-hi)] rounded px-1 py-px bg-[rgba(20,28,44,0.8)]">⌘K</kbd>
         </button>
       </div>
     </header>

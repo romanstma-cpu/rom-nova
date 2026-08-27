@@ -75,10 +75,42 @@ export function useApi<T>(url: string | null, refreshMs?: number): {
       }
     };
     run();
-    const timer = refreshMs ? setInterval(run, refreshMs) : undefined;
+
+    // Poll only while the tab is actually being looked at.
+    //
+    // This used to be an unconditional setInterval, which in the static build
+    // is worse than it sounds: every tick runs the full handler — rebuilding
+    // signals, walking the universe — inside the visitor's browser. A Nova tab
+    // left open in the background re-derived the whole world every 8 to 30
+    // seconds, forever, on someone's battery. For an app whose entire pitch is
+    // "runs in your tab", that is the one bug it cannot afford.
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const start = () => {
+      if (!refreshMs || timer !== undefined) return;
+      timer = setInterval(run, refreshMs);
+    };
+    const stop = () => {
+      if (timer !== undefined) clearInterval(timer);
+      timer = undefined;
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        // Refresh on the way back in, so the first thing seen is not whatever
+        // was on screen when the tab was hidden.
+        void run();
+        start();
+      } else {
+        stop();
+      }
+    };
+
+    if (typeof document === "undefined" || document.visibilityState === "visible") start();
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
       dead = true;
-      if (timer) clearInterval(timer);
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [url, refreshMs, nonce]);
 

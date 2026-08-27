@@ -10,6 +10,13 @@ import { findSimilar } from "../engine/similarity";
 import { runBacktest, DEFAULT_BACKTEST } from "../engine/backtest";
 import { placeOrder, portfolioView, type OrderRequest } from "../engine/paper";
 import { answerQuestion } from "../engine/research";
+
+/** Total network edges returned to the 3D view. */
+const MAX_EDGES = 420;
+/** Of that budget, how much is reserved for buy/sell flow rather than holdings.
+ *  Reserved rather than shared: the arcs are the only thing that shows movement,
+ *  and static positions must not be able to crowd them out. */
+const MAX_TRADE_EDGES = 160;
 import { buildFlowSeries, buildTokenRows, buildWalletRows } from "./rows";
 import { providerHealth } from "../providers/registry";
 import type { AlertCondition, BacktestConfig, StrategyProfileId } from "../types";
@@ -224,28 +231,37 @@ export function handleNetwork(store: DemoStore, asOf?: number) {
     cluster: store.universe.clusters.find((c) => c.members.includes(w.address))?.id ?? null,
   }));
 
-  const edges: { from: string; to: string; kind: "position" | "buy" | "sell"; usd: number; ts: number }[] = [];
+  type Edge = { from: string; to: string; kind: "position" | "buy" | "sell"; usd: number; ts: number };
+
+  const positionEdges: Edge[] = [];
   for (const [addr, ledger] of store.ledgers) {
     for (const p of ledger.positions) {
       if (!tokenSet.has(p.mint)) continue;
       const px = store.lastPrice(p.mint, asOf) ?? 0;
-      edges.push({ from: addr, to: p.mint, kind: "position", usd: p.tokens * px, ts: p.openedAt });
+      positionEdges.push({ from: addr, to: p.mint, kind: "position", usd: p.tokens * px, ts: p.openedAt });
     }
   }
+
   const from = at - 24 * HOUR;
   const windowTrades = [...store.universe.trades, ...(isHistorical ? [] : store.liveTrades)].filter(
     (t) => t.ts >= from && t.ts <= at && tokenSet.has(t.mint),
   );
-  for (const t of windowTrades.slice(-160)) {
-    edges.push({ from: t.wallet, to: t.mint, kind: t.side, usd: t.amountUsd, ts: t.ts });
-  }
+  const tradeEdges: Edge[] = windowTrades
+    .slice(-MAX_TRADE_EDGES)
+    .map((t) => ({ from: t.wallet, to: t.mint, kind: t.side, usd: t.amountUsd, ts: t.ts }));
 
   return {
     asOf: at,
     historical: isHistorical,
     tokens,
     wallets,
-    edges: edges.slice(0, 420),
+    // Budgeted separately rather than concatenated and truncated. Trades used
+    // to be appended after positions and the lot sliced to a flat 420, so a
+    // universe with enough open positions would silently eat the whole budget
+    // and every buy/sell edge would fall off the end — taking the whale arcs in
+    // the 3D view with them. Today it is 175 positions to 160 trades, which is
+    // under the cap by luck rather than design.
+    edges: [...positionEdges.slice(0, MAX_EDGES - MAX_TRADE_EDGES), ...tradeEdges],
     clusters: store.universe.clusters,
     demo: true,
   };

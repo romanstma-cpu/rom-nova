@@ -201,6 +201,13 @@ export function ensureSimulator(): DemoStore {
   if (!globalThis.__whalenovaSim) {
     globalThis.__whalenovaSim = setInterval(() => {
       const s = getStore();
+      // A hidden tab has nobody watching the simulation, and in the browser
+      // build this loop is the visitor's own CPU. Skip the work rather than
+      // tearing the timer down — the store is time-based, so it catches up in
+      // a single step when the tab comes back instead of replaying every tick
+      // it missed. An hour in the background would otherwise be 900 iterations
+      // in one frame.
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       try {
         tick(s);
         signalSweep(s);

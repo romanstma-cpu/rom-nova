@@ -1,7 +1,7 @@
 {
   "name": "rom-nova-desktop",
   "productName": "ROM Nova",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Solana-style on-chain intelligence terminal on clearly-labeled simulated data. Part of ROM Apps.",
   "author": "ROM <roman3165@icloud.com>",
   "license": "MIT",

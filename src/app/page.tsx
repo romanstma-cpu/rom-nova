@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useApi, useEventStream, fmtUsd, fmtPct, fmtNum, fmtAge } from "@/lib/client";
 import { Score, Stat, TokenMark } from "@/components/ui/bits";
+import { FirstRun } from "@/components/FirstRun";
 import { ActivityFeed } from "@/components/feed/ActivityFeed";
 import { FlowChart } from "@/components/charts/FlowChart";
 import type { MarketState, Signal } from "@/lib/types";
@@ -65,6 +66,11 @@ export default function Dashboard() {
 
   return (
     <div className="p-3 flex flex-col gap-3 min-h-full">
+      {/* Shown once, above everything, then never again. A visitor arriving
+          from the site's hero has clicked "Launch it live" and landed on a
+          wall of numbers with no idea what any of it is for. */}
+      <FirstRun />
+
       {/* KPI strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-2">
         {ref ? (

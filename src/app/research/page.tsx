@@ -120,8 +120,14 @@ export default function ResearchPage() {
               evidence and source timestamp.{" "}
               {ai.enabled ? "A model rewords them; it never supplies a number." : "No generative model is involved."}
             </span>
-            <button className="chip cursor-pointer shrink-0" onClick={() => setShowAi((v) => !v)}>
-              AI phrasing: {ai.enabled ? "on" : "off"}
+            {/* Was 10px grey at the tail of this line — present in the DOM and
+                invisible in practice. Given the accent colour and a size that
+                reads as a control, since it is one. */}
+            <button
+              className={`chip cursor-pointer shrink-0 text-[11px] ${ai.enabled ? "chip-pos" : "chip-accent"}`}
+              onClick={() => setShowAi((v) => !v)}
+            >
+              {ai.enabled ? "AI phrasing: on" : "Add an AI key"}
             </button>
           </div>
 

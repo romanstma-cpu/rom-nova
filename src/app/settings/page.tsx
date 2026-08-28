@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useApi } from "@/lib/client";
 import { IS_STATIC } from "@/lib/local";
 import type { ProviderHealth } from "@/lib/types";
+import { AiKeyCard } from "@/components/ui/AiKeyCard";
 
 const PROVIDERS: { name: string; healthKey: string; env: string[]; role: string; keyless?: boolean }[] = [
   { name: "CoinGecko", healthKey: "coingecko", env: ["keyless (COINGECKO_API_KEY optional)"], role: "live SOL reference price + global market context — active by default", keyless: true },
@@ -23,6 +24,11 @@ export default function SettingsPage() {
   return (
     <div className="p-3 flex flex-col gap-3 max-w-[980px]">
       <h1 className="text-[15px] font-semibold tracking-wide">SETTINGS · DATA PROVIDERS</h1>
+
+      {/* First, because it is the only key on this page a reader can actually
+          set from the browser — everything below needs the project run in
+          server mode. */}
+      <AiKeyCard />
 
       <div className="panel p-3.5 text-[12px] dim leading-relaxed">
         {IS_STATIC ? (

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useApi, apiPost, fmtUsd, fmtPct, fmtNum, fmtAge, shortAddr, labelClass } from "@/lib/client";
@@ -11,6 +11,8 @@ import { LineChart } from "@/components/charts/LineChart";
 import type { Candle, RiskRadar, Signal, TokenInfo, TokenSnapshot, WalletTrade } from "@/lib/types";
 import type { FlowPoint } from "@/lib/api/rows";
 import type { SimilarityReport } from "@/lib/engine/similarity";
+import { NarratedAnswer } from "@/components/ui/NarratedAnswer";
+import { subscribeAi, getAiSnapshot, getAiServerSnapshot } from "@/lib/ai/config";
 
 interface TokenDetail {
   info: TokenInfo;
@@ -61,6 +63,9 @@ function TokenInner() {
   const [tradeMsg, setTradeMsg] = useState<string | null>(null);
   const [tradeUsd, setTradeUsd] = useState("250");
   const [asking, setAsking] = useState<ResearchAnswer | null>(null);
+  // Kept so a rewording gets the question as context, not just the answer.
+  const [askedQ, setAskedQ] = useState("");
+  const ai = useSyncExternalStore(subscribeAi, getAiSnapshot, getAiServerSnapshot);
 
   const markers = useMemo<ChartMarker[]>(() => {
     if (!data) return [];
@@ -100,6 +105,7 @@ function TokenInner() {
   };
 
   const ask = async (q: string) => {
+    setAskedQ(q);
     setAsking({ answer: "…", evidence: [] });
     const res = await apiPost<ResearchAnswer>("/api/research/ask", { question: q });
     setAsking(res.body);
@@ -253,14 +259,16 @@ function TokenInner() {
               <button className="btn text-[11px]" onClick={() => ask(`what did whales do on ${info.symbol}`)}>WHAT DID WHALES DO?</button>
             </div>
             {asking && (
-              <div className="text-[11.5px] dim leading-relaxed border-t border-[var(--border)] pt-2">
-                {asking.answer}
-                {asking.evidence?.slice(0, 4).map((e) => (
-                  <div key={e.label} className="flex justify-between gap-2 mt-1 num text-[10.5px]">
-                    <span className="faint">{e.label}</span>
-                    <span>{e.value}</span>
-                  </div>
-                ))}
+              <div className="border-t border-[var(--border)] pt-2">
+                <NarratedAnswer
+                  answer={{
+                    question: askedQ || `about ${info.symbol}`,
+                    answer: asking.answer,
+                    evidence: asking.evidence ?? [],
+                  }}
+                  ai={ai}
+                  compact
+                />
               </div>
             )}
           </div>

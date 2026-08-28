@@ -230,7 +230,7 @@ export default function ResearchPage() {
             {a.narrated && (
               <div className="text-[13px] leading-relaxed mb-2">
                 {a.narrated}
-                <span className="chip ml-2 align-middle text-[9.5px]">reworded</span>
+                <span className="chip chip-pos ml-2 align-middle text-[9.5px]">reworded · figures checked</span>
               </div>
             )}
             <div className={`leading-relaxed ${a.narrated ? "text-[12px] dim" : "text-[13px]"}`}>{a.answer}</div>

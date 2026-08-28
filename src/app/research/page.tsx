@@ -1,9 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useApi, apiPost, fmtPct, fmtAgo } from "@/lib/client";
 import { Empty } from "@/components/ui/bits";
+import { narrate } from "@/lib/ai/narrate";
+import {
+  saveAi,
+  clearAi,
+  looksLikeKey,
+  maskKey,
+  subscribeAi,
+  getAiSnapshot,
+  getAiServerSnapshot,
+  FREE_MODELS,
+} from "@/lib/ai/config";
 
 interface Answer {
   question: string;
@@ -11,6 +22,10 @@ interface Answer {
   evidence: { label: string; value: string }[];
   sources: { name: string; ts: number }[];
   links: { label: string; href: string }[];
+  /** Model phrasing of the same facts, when a key is configured and it passed the checks. */
+  narrated?: string;
+  /** Why phrasing was not used, so a silent fallback is never mistaken for a working one. */
+  narrationNote?: string;
 }
 
 interface Note {
@@ -35,13 +50,35 @@ export default function ResearchPage() {
   const { data: notes, reload } = useApi<{ notes: Note[] }>("/api/research");
   const [noteMint, setNoteMint] = useState("");
   const [noteText, setNoteText] = useState("");
+  const [keyDraft, setKeyDraft] = useState("");
+  const [showAi, setShowAi] = useState(false);
+  const ai = useSyncExternalStore(subscribeAi, getAiSnapshot, getAiServerSnapshot);
 
   const ask = async (question: string) => {
     setBusy(true);
     setQ("");
     try {
       const res = await apiPost<Answer>("/api/research/ask", { question });
-      if (res.ok) setThread((t) => [res.body, ...t]);
+      if (!res.ok) return;
+      const base = res.body;
+      // The computed answer goes up immediately. Phrasing is a second pass that
+      // can only ever replace the prose, never the evidence beneath it, so a
+      // slow or failing model costs presentation and never the answer.
+      setThread((t) => [base, ...t]);
+      if (!ai.enabled || !ai.apiKey) return;
+
+      const out = await narrate(
+        { question: base.question, answer: base.answer, evidence: base.evidence },
+        {
+          apiKey: ai.apiKey,
+          model: ai.model,
+          referer: typeof location === "undefined" ? undefined : location.origin,
+          title: "ROM Nova",
+        },
+      );
+      setThread((t) =>
+        t.map((a) => (a === base ? (out.ok ? { ...a, narrated: out.text } : { ...a, narrationNote: out.reason }) : a)),
+      );
     } finally {
       setBusy(false);
     }
@@ -77,15 +114,123 @@ export default function ResearchPage() {
               <button key={s} className="chip cursor-pointer hover:border-[var(--accent)]" onClick={() => ask(s)}>{s}</button>
             ))}
           </div>
-          <div className="text-[10px] faint mt-2">
-            Answers are built from structured queries against the app database — every claim carries its evidence and source timestamp. No generative model is involved.
+          <div className="text-[10px] faint mt-2 flex items-center justify-between gap-3 flex-wrap">
+            <span>
+              Answers are built from structured queries against the app database — every claim carries its
+              evidence and source timestamp.{" "}
+              {ai.enabled ? "A model rewords them; it never supplies a number." : "No generative model is involved."}
+            </span>
+            <button className="chip cursor-pointer shrink-0" onClick={() => setShowAi((v) => !v)}>
+              AI phrasing: {ai.enabled ? "on" : "off"}
+            </button>
           </div>
+
+          {showAi && (
+            <div className="mt-2.5 border-t border-[var(--border)] pt-2.5 text-[11.5px] space-y-2">
+              <div className="dim leading-relaxed">
+                Optional. Paste your own{" "}
+                <a
+                  className="text-[var(--accent)]"
+                  href="https://openrouter.ai/keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  OpenRouter key
+                </a>{" "}
+                to have a free model reword each answer. The key is stored in this browser only, is sent to
+                openrouter.ai and nowhere else, and every number the model writes is checked against the
+                evidence — invented figures are discarded and the computed answer stands.
+              </div>
+
+              {ai.apiKey ? (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="num chip">{maskKey(ai.apiKey)}</span>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={ai.enabled}
+                      onChange={() => saveAi({ ...ai, enabled: !ai.enabled })}
+                      className="accent-[#38e1ff]"
+                    />
+                    enabled
+                  </label>
+                  <button
+                    className="btn text-[11px]"
+                    onClick={() => {
+                      clearAi();
+                      setKeyDraft("");
+                    }}
+                  >
+                    Remove key
+                  </button>
+                </div>
+              ) : (
+                <div className="flex gap-2 flex-wrap">
+                  <input
+                    type="password"
+                    value={keyDraft}
+                    onChange={(e) => setKeyDraft(e.target.value)}
+                    placeholder="sk-or-v1-…"
+                    spellCheck={false}
+                    autoComplete="off"
+                    className="input flex-1 min-w-[220px]"
+                  />
+                  <button
+                    className="btn btn-primary"
+                    disabled={!looksLikeKey(keyDraft)}
+                    onClick={() => {
+                      saveAi({ ...ai, apiKey: keyDraft.trim(), enabled: true });
+                      setKeyDraft("");
+                    }}
+                  >
+                    Save
+                  </button>
+                </div>
+              )}
+              {keyDraft !== "" && !looksLikeKey(keyDraft) && (
+                <div className="text-[10.5px] neg">
+                  That does not look like an OpenRouter key — they start with{" "}
+                  <span className="num">sk-or-v1-</span>. Check for surrounding quotes or a truncated paste.
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <span className="faint">model</span>
+                <select
+                  value={ai.model}
+                  onChange={(e) => saveAi({ ...ai, model: e.target.value })}
+                  className="input flex-1 text-[11.5px]"
+                >
+                  {FREE_MODELS.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label} — {m.note}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="faint text-[10px]">
+                Every listed model is free tier on OpenRouter — no card, no charge.
+              </div>
+            </div>
+          )}
         </div>
 
         {thread.map((a, i) => (
           <div key={i} className="panel p-3.5 fade-up">
             <div className="text-[11px] faint mb-1.5">Q · {a.question}</div>
-            <div className="text-[13px] leading-relaxed">{a.answer}</div>
+            {/* The reworded version sits ABOVE the computed answer, never in
+                place of it. Both are shown because the second is what the first
+                was made from, and a reader deserves to be able to check. */}
+            {a.narrated && (
+              <div className="text-[13px] leading-relaxed mb-2">
+                {a.narrated}
+                <span className="chip ml-2 align-middle text-[9.5px]">reworded</span>
+              </div>
+            )}
+            <div className={`leading-relaxed ${a.narrated ? "text-[12px] dim" : "text-[13px]"}`}>{a.answer}</div>
+            {a.narrationNote && (
+              <div className="text-[10px] faint mt-1">AI phrasing skipped — {a.narrationNote}</div>
+            )}
             {a.evidence.length > 0 && (
               <div className="mt-2.5 border-t border-[var(--border)] pt-2 space-y-1">
                 {a.evidence.map((e, j) => (

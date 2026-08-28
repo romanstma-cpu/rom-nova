@@ -93,5 +93,9 @@ export function extractFeatures(store: DemoStore, mint: string, asOf: number): F
     regime: market.regime,
     sampleSize: trades.length + Math.min(candles.length, 48) + totalTrades1h,
     worstStalenessMs: Math.max(0, asOf - candles[i].t - (store.livePrice.has(mint) ? 0 : 0)),
+    // Carried, not recomputed. Whichever provider built the snapshot is the
+    // only thing that knows what it could not see, and the scorer needs that
+    // to drop those factors rather than read their zeros as good news.
+    unmeasured: snap.unmeasured,
   };
 }

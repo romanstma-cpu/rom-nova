@@ -15,6 +15,7 @@ import {
   type SignalKind,
   type SignalLabel,
   type StrategyProfileId,
+  type UnmeasuredField,
 } from "../types";
 
 const clamp = (x: number, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, x));
@@ -26,6 +27,27 @@ interface FactorDef {
   name: string;
   normalize: (f: FeatureVector) => number; // 0..1, higher = more bullish
   explain: (f: FeatureVector, norm: number) => string;
+  /**
+   * Feature fields this factor reads that a provider might not have.
+   *
+   * The simulator knows its own universe completely, so every factor was
+   * always computable and this was not needed. Real providers changed that:
+   * DEX Screener and GeckoTerminal publish price, liquidity and trade counts
+   * and nothing about who holds the supply. Scoring `top10Pct: 0` gives a
+   * PERFECT distribution mark and raises no concentration flag — the most
+   * flattering possible reading of a token nobody has examined.
+   *
+   * So a factor whose inputs are unmeasured is dropped from the weighted mean
+   * entirely rather than contributing a fictional number, and its weight
+   * leaves the denominator with it.
+   */
+  needs?: readonly UnmeasuredField[];
+}
+
+/** Whether every input this factor depends on was actually observed. */
+function measured(def: FactorDef, f: FeatureVector): boolean {
+  if (!def.needs || !f.unmeasured?.length) return true;
+  return !def.needs.some((n) => f.unmeasured!.includes(n));
 }
 
 const usd = (x: number) =>
@@ -75,18 +97,21 @@ export const FACTORS: FactorDef[] = [
     name: "Holder Growth",
     normalize: (f) => clamp(0.5 + Math.tanh(f.holderGrowthPct / 15) * 0.5),
     explain: (f) => `holders ${pct(f.holderGrowthPct)} over 24h`,
+    needs: ["holders"],
   },
   {
     key: "distribution",
     name: "Holder Distribution",
     normalize: (f) => clamp(1 - (f.top10Pct - 0.1) / 0.5),
     explain: (f) => `top 10 wallets hold ${(f.top10Pct * 100).toFixed(0)}% of supply`,
+    needs: ["top10Pct"],
   },
   {
     key: "organic",
     name: "Organic Activity",
     normalize: (f) => f.organicScore,
     explain: (f) => `organic-activity score ${(f.organicScore * 100).toFixed(0)}/100`,
+    needs: ["organicScore"],
   },
   {
     key: "age_opportunity",
@@ -109,6 +134,7 @@ export const FACTORS: FactorDef[] = [
     name: "Social / Attention",
     normalize: (f) => clamp(f.socialScore * 0.7 + f.socialAccel * 2),
     explain: (f) => `attention ${(f.socialScore * 100).toFixed(0)}/100${f.socialAccel > 0.05 ? ", accelerating" : ""}`,
+    needs: ["socialScore"],
   },
 ];
 
@@ -119,18 +145,21 @@ export const RISK_FACTORS: FactorDef[] = [
     name: "Insider Risk",
     normalize: (f) => clamp(f.insiderPct / 0.3),
     explain: (f) => `insider-linked wallets hold ~${(f.insiderPct * 100).toFixed(0)}% of supply`,
+    needs: ["insiderPct"],
   },
   {
     key: "bundler_sniper",
     name: "Bundler / Sniper Risk",
     normalize: (f) => clamp((f.bundlerPct + f.sniperPct) / 0.3),
     explain: (f) => `bundlers ${(f.bundlerPct * 100).toFixed(1)}%, snipers ${(f.sniperPct * 100).toFixed(1)}% of supply`,
+    needs: ["bundlerPct", "sniperPct"],
   },
   {
     key: "dev_risk",
     name: "Dev Activity",
     normalize: (f) => clamp(f.devHoldsPct / 0.15) * (f.devSold ? 1 : 0.5) + (f.devSold ? 0.3 : 0),
     explain: (f) => (f.devSold ? `dev wallet has been selling (holds ${(f.devHoldsPct * 100).toFixed(1)}%)` : `dev holds ${(f.devHoldsPct * 100).toFixed(1)}%`),
+    needs: ["devHoldsPct"],
   },
   {
     key: "exit_liquidity",
@@ -321,17 +350,58 @@ export function computeSignal(
 ): Signal | undefined {
   const f = extractFeatures(store, mint, asOf);
   if (!f) return undefined;
+  return scoreFeatures(f, mint, asOf, profileId);
+}
+
+/**
+ * Scores a feature vector, wherever it came from.
+ *
+ * Split out of computeSignal so a vector assembled from live providers goes
+ * through byte-for-byte the same scoring, gating and abstention as one read
+ * from the simulator. A second scorer written for live data would drift from
+ * this one within a week, and the divergence would show up as a signal that
+ * says one thing in the backtest and another in the terminal.
+ */
+export function scoreFeatures(
+  f: FeatureVector,
+  mint: string,
+  asOf: number,
+  profileId: StrategyProfileId = "balanced",
+): Signal {
   const profile = PROFILES[profileId];
 
   const factors: SignalFactor[] = [];
   let weighted = 0;
   let totalWeight = 0;
+  /** Weight the model wanted but could not use, for the confidence penalty. */
+  let unmeasuredWeight = 0;
+  /** Risk factors that could not be assessed at all. */
+  let unmeasuredRisks = 0;
   for (const def of FACTORS) {
     const weight = profile.weights[def.key] ?? 0;
+    const absW = Math.abs(weight);
+
+    // A factor nobody could measure is removed from the average, not scored
+    // as zero. It still appears in the breakdown, saying so — a reader who
+    // sees nine factors where there were eleven deserves to know which two
+    // are missing and why, and an empty row is how the score stays auditable.
+    if (!measured(def, f)) {
+      unmeasuredWeight += absW;
+      factors.push({
+        key: def.key,
+        name: def.name,
+        raw: 0,
+        normalized: 0,
+        weight: 0,
+        contribution: 0,
+        explanation: `not measured — this data source does not publish ${(def.needs ?? []).join(", ")}`,
+      });
+      continue;
+    }
+
     const raw = def.normalize(f);
     // negative weights invert the factor (mean reversion wants weak momentum)
     const norm = weight >= 0 ? raw : 1 - raw;
-    const absW = Math.abs(weight);
     weighted += norm * absW;
     totalWeight += absW;
     factors.push({
@@ -350,6 +420,23 @@ export function computeSignal(
   // risk penalty
   let penalty = 0;
   for (const def of RISK_FACTORS) {
+    // An unmeasured risk is the dangerous case: normalize() over zeros returns
+    // "no insiders, no bundlers, clean dev", so the token would be rewarded
+    // with a zero penalty for data nobody has. Skipped instead, and counted
+    // against confidence below.
+    if (!measured(def, f)) {
+      unmeasuredRisks++;
+      factors.push({
+        key: def.key,
+        name: def.name,
+        raw: 0,
+        normalized: 0,
+        weight: 0,
+        contribution: 0,
+        explanation: `not measured — no ${(def.needs ?? []).join(", ")} from this source, so no penalty could be assessed`,
+      });
+      continue;
+    }
     const sev = def.normalize(f);
     const points = sev * 9 * profile.riskWeight;
     penalty += points;
@@ -377,13 +464,26 @@ export function computeSignal(
     }
   }
 
-  const confidence = confidenceOf(f);
+  // Confidence falls by the share of the model that could not be evaluated.
+  // A score built from two thirds of its factors is a weaker claim than the
+  // same number built from all of them, and the difference has to be visible
+  // somewhere or the missing third costs nothing.
+  const coverage = totalWeight + unmeasuredWeight > 0 ? totalWeight / (totalWeight + unmeasuredWeight) : 1;
+  const confidence = clamp(confidenceOf(f) * coverage, 0, 0.98);
   const risks = riskFlags(f);
   const highRisks = risks.filter((r) => r.severity === "high").length;
 
   // NO TRADE gates — the engine is allowed to abstain
   let noTrade: string | null = null;
-  if (confidence < profile.minConfidence) noTrade = `confidence ${(confidence * 100).toFixed(0)}% below the ${profile.name} floor`;
+  // Two or more unassessable risk factors means the things most likely to take
+  // the position to zero — insiders, bundlers, a dev holding half the supply —
+  // are all simply unknown. Abstaining is the only honest output there, and it
+  // is checked first because it does not depend on the score being meaningful.
+  if (unmeasuredRisks >= 2) {
+    noTrade = `${unmeasuredRisks} risk factors could not be assessed from this data source`;
+  } else if (coverage < 0.6) {
+    noTrade = `only ${(coverage * 100).toFixed(0)}% of the model's inputs were available`;
+  } else if (confidence < profile.minConfidence) noTrade = `confidence ${(confidence * 100).toFixed(0)}% below the ${profile.name} floor`;
   else if (f.liquidityUsd < profile.minLiquidityUsd) noTrade = `liquidity ${usd(f.liquidityUsd)} below the ${profile.name} floor of ${usd(profile.minLiquidityUsd)}`;
   else if (highRisks >= 3) noTrade = `${highRisks} independent high-severity risks`;
   else if (f.sampleSize < 12) noTrade = "insufficient sample behind the features";
@@ -421,6 +521,7 @@ export function computeSignal(
     score,
     confidence: Number(confidence.toFixed(2)),
     label,
+    ...(noTrade ? { noTradeReason: noTrade } : {}),
     profile: profileId,
     factors,
     risks,

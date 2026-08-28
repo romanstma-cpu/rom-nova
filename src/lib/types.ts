@@ -33,8 +33,39 @@ export interface TokenInfo {
   hue: number;
 }
 
+/**
+ * Inputs a data source may simply not have.
+ *
+ * The simulator knows everything about its own universe, so until real
+ * providers arrived every field below was always populated and "absent" was
+ * not a state the engine could be in. It is now, and absence is dangerous in
+ * one specific direction: DEX Screener publishes price, liquidity and trade
+ * counts but nothing about who holds the supply. Left as zeros, a token with
+ * unknown concentration scores `clamp(1 - (0 - 0.1) / 0.5)` = a PERFECT
+ * distribution mark, raises no concentration flag, and reports no insiders, no
+ * bundlers and no snipers — the most reassuring possible reading of a token
+ * nobody has checked.
+ *
+ * So absence is named rather than defaulted. A factor whose input is listed
+ * here is dropped from the score instead of scored as zero, and the confidence
+ * falls by the weight that went unmeasured.
+ */
+export type UnmeasuredField =
+  | "top10Pct"
+  | "devHoldsPct"
+  | "insiderPct"
+  | "bundlerPct"
+  | "sniperPct"
+  | "organicScore"
+  | "socialScore"
+  | "holders"
+  | "uniqueBuyers1h"
+  | "uniqueSellers1h";
+
 /** Point-in-time market state for a token. `ts` is when it was observed. */
 export interface TokenSnapshot {
+  /** Fields this source could not supply. Absent or empty means all present. */
+  unmeasured?: readonly UnmeasuredField[];
   mint: string;
   ts: number;
   priceUsd: number;
@@ -263,6 +294,12 @@ export interface FeatureVector {
   sampleSize: number;
   /** ms since the stalest input */
   worstStalenessMs: number;
+  /**
+   * Fields carried through from the snapshot that no provider could supply.
+   * The scorer drops the factors that depend on them rather than reading their
+   * zeros as good news.
+   */
+  unmeasured?: readonly UnmeasuredField[];
 }
 
 export interface SignalFactor {
@@ -316,6 +353,16 @@ export interface Signal {
   score: number; // 0..100
   confidence: number; // 0..1
   label: SignalLabel;
+  /**
+   * Why the engine abstained, when it did.
+   *
+   * The label already says NO TRADE; this says which gate closed — confidence
+   * below the profile floor, liquidity too thin, or the newer one that matters
+   * on live data: too much of the model unavailable. Abstaining is a headline
+   * property of this engine and it was previously unauditable, because the
+   * reason was computed, used to pick a label, and thrown away.
+   */
+  noTradeReason?: string;
   profile: StrategyProfileId;
   factors: SignalFactor[];
   risks: RiskFlag[];

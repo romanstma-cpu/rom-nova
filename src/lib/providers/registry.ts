@@ -8,6 +8,8 @@ import { healthOf } from "./http";
 import { JupiterTokenProvider } from "./jupiter";
 import { BirdeyeMarketProvider, BirdeyeSecurityProvider } from "./birdeye";
 import { HeliusWalletProvider } from "./helius";
+import { DexScreenerMarketProvider, DexScreenerTokenProvider } from "./dexscreener";
+import { GeckoTerminalMarketProvider, GeckoTerminalTokenProvider } from "./geckoterminal";
 import type {
   MarketDataProvider,
   ProviderSet,
@@ -27,7 +29,9 @@ export const FLAGS = {
   birdeye: () => flag("ENABLE_BIRDEYE") && Boolean(process.env.BIRDEYE_API_KEY),
   helius: () => flag("ENABLE_HELIUS") && Boolean(process.env.HELIUS_API_KEY),
   nansen: () => flag("ENABLE_NANSEN") && Boolean(process.env.NANSEN_API_KEY),
-  dexscreener: () => flag("ENABLE_DEXSCREENER", false),
+  // Keyless, so on by default. This is what lets a fresh install show real
+  // Solana tokens instead of the simulator.
+  dexscreener: () => flag("ENABLE_DEXSCREENER"),
   // keyless public reference sources — live by default, even in demo mode
   coingecko: () => flag("ENABLE_COINGECKO"),
   cryptocom: () => flag("ENABLE_CRYPTOCOM"),
@@ -120,19 +124,58 @@ class DemoSecurityProvider implements SecurityDataProvider {
 
 let cached: ProviderSet | undefined;
 
+/**
+ * Resolves each capability to the best source configured for it.
+ *
+ * The order below is a claim about data quality, not about who was written
+ * first. Keyed vendors win where they are configured because they answer
+ * questions the keyless ones cannot — Birdeye and Helius see holder
+ * distribution and wallet-level flow, which is most of what this app is about.
+ *
+ * The change that matters is the tail. GeckoTerminal and DEX Screener need no
+ * key at all, so an unconfigured install no longer falls all the way back to
+ * the simulator for market and token data: it shows Solana. GeckoTerminal
+ * takes the market slot ahead of DEX Screener for one specific reason — it is
+ * the only keyless source with HISTORY (a thousand hourly bars, some six
+ * weeks), and DEX Screener has no OHLCV endpoint at all.
+ *
+ * Wallet activity has no keyless source, so it stays on the simulator until
+ * Helius is configured. That is a real seam and /status names it rather than
+ * blending the two silently.
+ */
 export function getProviders(): ProviderSet {
   if (cached) return cached;
-  const liveToken = FLAGS.jupiter();
-  const liveMarket = FLAGS.birdeye();
   const liveWallet = FLAGS.helius();
-  const anyLive = liveToken || liveMarket || liveWallet;
+
+  const token: TokenDataProvider = FLAGS.jupiter()
+    ? new JupiterTokenProvider()
+    : FLAGS.coingecko()
+      ? new GeckoTerminalTokenProvider()
+      : FLAGS.dexscreener()
+        ? new DexScreenerTokenProvider()
+        : new DemoTokenProvider();
+
+  const market: MarketDataProvider = FLAGS.birdeye()
+    ? new BirdeyeMarketProvider()
+    : FLAGS.coingecko()
+      ? new GeckoTerminalMarketProvider()
+      : FLAGS.dexscreener()
+        ? new DexScreenerMarketProvider()
+        : new DemoMarketProvider();
+
+  const anyLive =
+    token.name !== "demo" || market.name !== "demo" || liveWallet;
 
   cached = {
     mode: anyLive ? "live" : "demo",
-    token: liveToken ? new JupiterTokenProvider() : new DemoTokenProvider(),
-    market: liveMarket ? new BirdeyeMarketProvider() : new DemoMarketProvider(),
+    token,
+    market,
     wallet: liveWallet ? new HeliusWalletProvider() : new DemoWalletProvider(),
-    security: liveMarket ? new BirdeyeSecurityProvider() : new DemoSecurityProvider(),
+    // Security grading needs holder distribution, which only Birdeye supplies.
+    // The keyless sources deliberately do NOT fill this slot: a security
+    // provider that returns zeros would report every token as having no
+    // concentration and revoked authorities.
+    security: FLAGS.birdeye() ? new BirdeyeSecurityProvider() : new DemoSecurityProvider(),
     health: providerHealth,
   };
   return cached;
@@ -156,10 +199,31 @@ export function providerHealth(): ProviderHealth[] {
   rows.push(FLAGS.birdeye() ? healthOf("birdeye", "live") : { ...demoHealth("birdeye"), mode: "disabled", status: "down", note: "needs server mode + BIRDEYE_API_KEY — simulated data serves market data" });
   rows.push(FLAGS.helius() ? healthOf("helius", "live") : { ...demoHealth("helius"), mode: "disabled", status: "down", note: "needs server mode + HELIUS_API_KEY — simulated data serves wallet activity" });
   rows.push(FLAGS.nansen() ? healthOf("nansen", "live") : { ...demoHealth("nansen"), mode: "disabled", status: "down", note: "optional enrichment — not configured" });
-  rows.push(FLAGS.dexscreener() ? healthOf("dexscreener", "live") : { ...demoHealth("dexscreener"), mode: "disabled", status: "down", note: "fallback source — not enabled" });
+  // These two say "adapter ready", not "serving the app", and the difference
+  // is the whole point. getProviders() resolves to them, but nothing calls
+  // getProviders() — every page and handler still reads the demo store, so a
+  // row claiming "live" here would tell a reader the terminal is showing
+  // Solana when it is showing the simulator.
+  rows.push(
+    FLAGS.dexscreener()
+      ? {
+          ...healthOf("dexscreener", "live"),
+          note:
+            "keyless adapter, tested and NOT YET CONSUMED — the signal engine still reads the " +
+            "demo store. Supplies price, pooled liquidity, 24h volume and trade counts summed " +
+            "across all Solana pools. No holder data, no OHLCV; 'trending' is paid boosts",
+        }
+      : { ...demoHealth("dexscreener"), mode: "disabled", status: "down", note: "disabled via ENABLE_DEXSCREENER" },
+  );
   rows.push(
     FLAGS.coingecko()
-      ? { ...healthOf("coingecko", "live"), note: "live SOL reference price (keyless public API)" }
+      ? {
+          ...healthOf("coingecko", "live"),
+          note:
+            "keyless. LIVE NOW: the SOL reference price in the header. Tested but NOT YET " +
+            "CONSUMED: GeckoTerminal on-chain OHLCV (~1,000 hourly bars per pool) and trending " +
+            "Solana pools, which the backtester cannot use until it stops taking a DemoStore",
+        }
       : { ...demoHealth("coingecko"), mode: "disabled", status: "down", note: "disabled via ENABLE_COINGECKO" },
   );
   rows.push(

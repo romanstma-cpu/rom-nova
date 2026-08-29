@@ -31,6 +31,7 @@ import {
   handleTokenDetail,
   handleTokens,
   handleWalletDetail,
+  handleWalletProfile,
   handleWallets,
   handleWatchlistOp,
   handleWatchlists,
@@ -95,6 +96,15 @@ export async function localGet(url: string): Promise<LocalResponse> {
         };
     }
     if (p === "/api/wallets") return { status: 200, body: handleWallets(store) };
+    {
+      // Ordered before the bare-address route on purpose: `[^/]+` would
+      // otherwise swallow "<address>/profile" and hand the simulator an
+      // address it has never heard of.
+      const m = p.match(/^\/api\/wallets\/([^/]+)\/profile$/);
+      // Awaited: in the static build this is the visitor's own browser reading
+      // Solana directly. Nothing is uploaded and no server is involved.
+      if (m) return { status: 200, body: await handleWalletProfile(m[1]) };
+    }
     {
       const m = p.match(/^\/api\/wallets\/([^/]+)$/);
       if (m) return { status: 200, body: handleWalletDetail(store, m[1]) };

@@ -25,12 +25,14 @@
 // back. Silent degradation to the simulator, wearing a live label, is the one
 // outcome this file exists to make impossible.
 
-import type { Candle, TokenInfo, TokenSnapshot } from "../types";
+import type { Candle, TokenInfo, TokenSnapshot, WalletProfile } from "../types";
 import type { MarketDataProvider } from "../providers/types";
 import type { DemoStore } from "../demo/store";
 import { FLAGS, getProviders } from "../providers/registry";
 import { DexScreenerTokenProvider } from "../providers/dexscreener";
 import { JupiterTokenProvider } from "../providers/jupiter";
+import { ChainWalletProvider, isPlausibleAddress } from "../providers/wallet-chain";
+import { assembleProfile } from "../engine/wallet-profile";
 import { liveSignal } from "../engine/live-features";
 import { buildLiveTokenRows, riskLevelOf, type TokenRow } from "./rows";
 
@@ -354,4 +356,109 @@ async function scoreRows(
  */
 export function provenanceLabel(p: Provenance): string {
   return p.real ? p.source.toUpperCase() : "SIMULATED";
+}
+
+// -------------------------------------------------------------- real wallets
+
+/**
+ * How long a wallet profile stays fresh enough to reuse.
+ *
+ * One profile is a signature page plus up to six hundred `getTransaction`
+ * calls plus a balance read plus four price batches. The wallet page polls, so
+ * without this a single open tab would re-issue several hundred requests a
+ * minute at one public endpoint and get itself throttled into the fallback —
+ * which on this page means showing a simulated wallet under a real address.
+ */
+export const WALLET_CACHE_MS = 45_000;
+
+const walletCache = new Map<string, { at: number; value: Sourced<WalletProfile> }>();
+const walletInFlight = new Map<string, Promise<Sourced<WalletProfile> | null>>();
+
+/**
+ * The realest thing in this app: a Solana address the user typed, profiled.
+ *
+ * Returns null when there is no keyless wallet source configured, which the
+ * caller answers by falling back to the simulator AND SAYING SO. It does not
+ * return null for a wallet with no trades — an address that has done nothing in
+ * the readable window is a real answer, and the coverage block says so more
+ * usefully than a 404 would.
+ */
+export async function walletProfile(address: string): Promise<Sourced<WalletProfile> | null> {
+  if (!isPlausibleAddress(address)) return null;
+  const providers = getProviders();
+  if (providers.wallet.name !== "solana-rpc") return null;
+
+  const hit = walletCache.get(address);
+  if (hit && Date.now() - hit.at < WALLET_CACHE_MS) return hit.value;
+  const flying = walletInFlight.get(address);
+  if (flying) return flying;
+
+  const job = buildWalletProfile(address).finally(() => walletInFlight.delete(address));
+  walletInFlight.set(address, job);
+  const fresh = await job;
+  if (fresh) walletCache.set(address, { at: Date.now(), value: fresh });
+  // A failed refresh serves the last good profile rather than dropping to the
+  // simulator, on the same reasoning as the token list: stale real beats fresh
+  // fake, and the coverage block already carries the timestamps.
+  return fresh ?? hit?.value ?? null;
+}
+
+async function buildWalletProfile(address: string): Promise<Sourced<WalletProfile> | null> {
+  const providers = getProviders();
+  const chain = new ChainWalletProvider();
+
+  // Both reads at once. They are independent measurements of the same wallet
+  // and neither blocks the other; sequencing them would double the wait for no
+  // benefit, and the balance read is the slower of the two.
+  const [activity, holdings] = await Promise.all([
+    chain.getActivity(address).catch(() => null),
+    providers.holdings?.getHoldings(address).catch(() => null) ?? Promise.resolve(null),
+  ]);
+  if (!activity) return null;
+
+  // Price the traded mints first, then the rest of the bag. The price budget is
+  // finite, and a reader asking about a wallet cares about what it just bought
+  // before it cares about the dust it has been sitting on.
+  const traded: string[] = [];
+  const seen = new Set<string>();
+  for (const f of activity.fills) {
+    if (seen.has(f.mint)) continue;
+    seen.add(f.mint);
+    traded.push(f.mint);
+  }
+  for (const t of holdings?.tokens ?? []) {
+    if (seen.has(t.mint)) continue;
+    seen.add(t.mint);
+    traded.push(t.mint);
+  }
+  const prices = providers.holdings
+    ? await providers.holdings.priceMints(traded).catch(() => new Map<string, number>())
+    : new Map<string, number>();
+
+  // Symbols are cosmetic and must never gate a figure, so one failed lookup is
+  // an address on screen instead of a missing row.
+  const symbols = new Map<string, string>();
+  const profile = assembleProfile({
+    address,
+    fills: activity.fills,
+    coverage: activity.coverage,
+    holdings: holdings ? { source: holdings.source, solBalance: holdings.solBalance, tokens: holdings.tokens } : null,
+    prices,
+    symbols,
+  });
+
+  return {
+    data: profile,
+    provenance: {
+      source: activity.coverage.source,
+      real: true,
+      note: activity.coverage.note,
+    },
+  };
+}
+
+/** Tests and probes reach for this; the app should not. */
+export function __resetWalletCache(): void {
+  walletCache.clear();
+  walletInFlight.clear();
 }

@@ -13,6 +13,8 @@ import { GeckoTerminalMarketProvider, GeckoTerminalTokenProvider } from "./gecko
 import { SolanaRpcSecurityProvider } from "./solana-rpc";
 import { SqdFlowProvider } from "./sqd";
 import { RugCheckRiskProvider } from "./rugcheck";
+import { ChainWalletProvider } from "./wallet-chain";
+import { JupiterHoldingsProvider } from "./holdings";
 import type {
   MarketDataProvider,
   ProviderSet,
@@ -51,6 +53,17 @@ export const FLAGS = {
   // the liquidity pool is locked — the mechanic behind most memecoin losses,
   // which no amount of supply analysis catches.
   rugcheck: () => flag("ENABLE_RUGCHECK"),
+  // Solana's own RPC, read for WALLET HISTORY rather than mint metadata.
+  // Keyless and browser-reachable, and it closes the last entirely synthetic
+  // capability in the app: every wallet used to come from the demo universe
+  // with an invented name. Its ceiling is retention, measured at ~2 days, so it
+  // serves a WINDOW and every figure derived from it names that window.
+  walletChain: () => flag("ENABLE_WALLET_CHAIN"),
+  // Jupiter's Ultra holdings endpoint. Keyless, and the only way to read a
+  // wallet's balances at all — getTokenAccountsByOwner returns 403 on every
+  // free RPC. Without it, positions could only be replayed out of the trade
+  // window, which would make them exactly as incomplete as the window is.
+  walletHoldings: () => flag("ENABLE_WALLET_HOLDINGS"),
   // keyless public reference sources — live by default, even in demo mode
   coingecko: () => flag("ENABLE_COINGECKO"),
   cryptocom: () => flag("ENABLE_CRYPTOCOM"),
@@ -162,13 +175,21 @@ let cached: ProviderSet | undefined;
  * what Birdeye was wanted for. GeckoTerminal keeps the MARKET slot for the one
  * thing Jupiter has no equivalent of: real OHLCV, a thousand hourly bars.
  *
- * Wallet activity has no keyless source, so it stays on the simulator until
- * Helius is configured. That is a real seam and /status names it rather than
- * blending the two silently.
+ * Wallet activity used to say "has no keyless source, so it stays on the
+ * simulator until Helius is configured". That was true when it was written and
+ * is now false. Solana's public RPC answers `getSignaturesForAddress` and
+ * `getTransaction` for free, from a browser origin, and balance deltas out of
+ * `jsonParsed` transactions ARE the wallet's fills. Helius still wins the slot
+ * where it is configured, because its retention is not two days.
+ *
+ * That retention limit is the whole caveat and it does not go away: the
+ * keyless path serves a WINDOW. It is wired in anyway because a real
+ * forty-eight hours beats a synthetic eternity, and because every number built
+ * on it carries the window with it.
  */
 export function getProviders(): ProviderSet {
   if (cached) return cached;
-  const liveWallet = FLAGS.helius();
+  const liveWallet = FLAGS.helius() || FLAGS.walletChain();
 
   const token: TokenDataProvider = FLAGS.jupiter()
     ? new JupiterTokenProvider()
@@ -193,7 +214,15 @@ export function getProviders(): ProviderSet {
     mode: anyLive ? "live" : "demo",
     token,
     market,
-    wallet: liveWallet ? new HeliusWalletProvider() : new DemoWalletProvider(),
+    // Helius first where a key exists — it reads a wallet's whole life, which
+    // the keyless path cannot. Below it the chain itself, for the last two
+    // days. Below that the simulator, which is now only reached by turning the
+    // keyless path off on purpose.
+    wallet: FLAGS.helius()
+      ? new HeliusWalletProvider()
+      : FLAGS.walletChain()
+        ? new ChainWalletProvider()
+        : new DemoWalletProvider(),
     // Birdeye first: it is the only source here with holder distribution, and
     // concentration is the larger half of a security grade.
     //
@@ -217,6 +246,11 @@ export function getProviders(): ProviderSet {
     // Same contract as flow: absent means nobody graded this token, which the
     // UI must render as silence and never as a clean bill of health.
     risk: FLAGS.rugcheck() ? new RugCheckRiskProvider() : undefined,
+    // No demo stand-in here either. Without a balance read there is no
+    // independent check on the fill-derived positions, and the reconciliation
+    // that makes a cost basis trustworthy stops being possible — which a caller
+    // must report as "cost basis unknown", not paper over with the simulator.
+    holdings: FLAGS.walletHoldings() ? new JupiterHoldingsProvider() : undefined,
     health: providerHealth,
   };
   return cached;
@@ -241,18 +275,42 @@ export interface DataMode {
   overall: "live" | "mixed" | "demo";
   live: string[];
   simulated: string[];
+  /**
+   * Real, and narrower than a reader would assume.
+   *
+   * A third column, because two were not enough once wallet history arrived.
+   * "Wallet activity — simulated" was honest. "Wallet activity — live" would
+   * not be: it is live for about forty-eight hours and silent before that, and
+   * a reader who sees LIVE beside a realized-PnL figure will read it as the
+   * wallet's performance rather than as two days of it. Listing it as live and
+   * saying nothing would be the most damaging kind of true.
+   */
+  bounded: string[];
 }
 
 export function dataMode(): DataMode {
   const p = getProviders();
   const live: string[] = [];
   const simulated: string[] = [];
+  const bounded: string[] = [];
 
   (p.token.name === "demo" ? simulated : live).push("tokens");
   (p.market.name === "demo" ? simulated : live).push("prices & candles");
   (p.security.name === "demo" ? simulated : live).push("mint & freeze authority");
   (p.flow ? live : simulated).push("whale flow");
-  (p.wallet.name === "demo" ? simulated : live).push("wallet activity");
+  if (p.wallet.name === "demo") {
+    simulated.push("wallet activity");
+  } else if (p.wallet.name === "solana-rpc") {
+    live.push("wallet activity");
+    bounded.push("wallet trade history — last ~48h only (public RPC retention)");
+  } else {
+    live.push("wallet activity");
+  }
+  if (p.holdings) {
+    live.push("wallet positions");
+  } else {
+    bounded.push("wallet positions — derived from the trade window, not read whole");
+  }
   // This line used to read `FLAGS.birdeye()` and put holder distribution in the
   // simulated column on every keyless install, with the note that "no keyless
   // source publishes holder distribution". Jupiter does — holderCount, its 24h
@@ -260,11 +318,18 @@ export function dataMode(): DataMode {
   // is now false.
   (FLAGS.birdeye() || FLAGS.jupiter() ? live : simulated).push("holder distribution");
   (p.risk ? live : simulated).push("rug & LP-lock risk");
-  // Smart money needs wallet reputation, which nothing here carries at all.
+  // Smart money still needs wallet reputation, which nothing here carries. Real
+  // fills changed what can be MEASURED about a wallet and not what can be
+  // CLAIMED about it: win rate over two days is a sample. The real wallet
+  // provider returns no labels at all rather than minting one.
   simulated.push("smart-money scoring");
 
-  const overall = live.length === 0 ? "demo" : simulated.length === 0 ? "live" : "mixed";
-  return { overall, live, simulated };
+  // The old rule was `simulated.length === 0` for "live". With a bounded
+  // capability present that would call the whole terminal live while one of its
+  // headline numbers covers two days, so a bound keeps it at "mixed".
+  const overall =
+    live.length === 0 ? "demo" : simulated.length === 0 && bounded.length === 0 ? "live" : "mixed";
+  return { overall, live, simulated, bounded };
 }
 
 export function providerHealth(): ProviderHealth[] {
@@ -300,7 +365,19 @@ export function providerHealth(): ProviderHealth[] {
       : { ...demoHealth("jupiter"), mode: "disabled", status: "down", note: "disabled via ENABLE_JUPITER" },
   );
   rows.push(FLAGS.birdeye() ? healthOf("birdeye", "live") : { ...demoHealth("birdeye"), mode: "disabled", status: "down", note: "needs server mode + BIRDEYE_API_KEY — simulated data serves market data" });
-  rows.push(FLAGS.helius() ? healthOf("helius", "live") : { ...demoHealth("helius"), mode: "disabled", status: "down", note: "needs server mode + HELIUS_API_KEY — simulated data serves wallet activity" });
+  rows.push(
+    FLAGS.helius()
+      ? healthOf("helius", "live")
+      : {
+          ...demoHealth("helius"),
+          mode: "disabled",
+          status: "down",
+          note:
+            "needs server mode + HELIUS_API_KEY. No longer the only route to wallet activity — " +
+            "the keyless chain read serves it now — but still the only route to a wallet's FULL " +
+            "history, which public RPC retention puts out of reach",
+        },
+  );
   rows.push(FLAGS.nansen() ? healthOf("nansen", "live") : { ...demoHealth("nansen"), mode: "disabled", status: "down", note: "optional enrichment — not configured" });
   // These two used to say "adapter ready", not "serving the app", because
   // getProviders() resolved to them and nothing called it. That gap is closed —
@@ -379,8 +456,57 @@ export function providerHealth(): ProviderHealth[] {
       : { ...demoHealth("rugcheck"), mode: "disabled", status: "down", note: "disabled via ENABLE_RUGCHECK — LP lock state and third-party risk scoring unavailable" },
   );
   rows.push(
+    FLAGS.walletChain()
+      ? {
+          ...healthOf("solana-rpc-wallet", "live"),
+          note:
+            "keyless wallet history, straight off the chain. THE LAST SYNTHETIC CAPABILITY IN THE " +
+            "APP: until now every wallet came from the demo universe with an invented name. Reads " +
+            "getSignaturesForAddress plus getTransaction and recovers fills from pre/post token " +
+            "balance deltas — real entries, real exits, real prices. HARD CEILING: publicnode " +
+            "retains ~2 days of signatures (measured: a quiet years-old address stopped at 2.02 " +
+            "days and paging further returned nothing), and it is the ONLY keyless endpoint that " +
+            "answers the method at all — mainnet-beta, Ankr, drpc, solflare, onfinality and " +
+            "BlockPI all refuse. So this is a WINDOW, never a lifetime, and every figure built on " +
+            "it carries its coverage. 46% of token movements have no quote leg belonging to the " +
+            "wallet (transfers, claims, token-for-token rotations) and are recorded UNPRICED",
+        }
+      : {
+          ...demoHealth("solana-rpc-wallet"),
+          mode: "disabled",
+          status: "down",
+          note: "disabled via ENABLE_WALLET_CHAIN — wallet activity falls back to the simulator",
+        },
+  );
+  rows.push(
+    FLAGS.walletHoldings()
+      ? {
+          ...healthOf("jupiter-holdings", "live"),
+          note:
+            "keyless wallet balances (lite-api.jup.ag/ultra), ~150ms, CORS reflects app://rom-nova. " +
+            "The only source here that can read what a wallet HOLDS: getTokenAccountsByOwner is " +
+            "403 on publicnode and on every other free RPC tried. Its real job is the " +
+            "reconciliation — a position read whole, set against a position replayed from a " +
+            "two-day window, is what proves whether a cost basis is knowable at all",
+        }
+      : {
+          ...demoHealth("jupiter-holdings"),
+          mode: "disabled",
+          status: "down",
+          note: "disabled via ENABLE_WALLET_HOLDINGS — positions can only be derived from the trade window",
+        },
+  );
+  rows.push(
     FLAGS.cryptocom()
-      ? { ...healthOf("cryptocom", "live"), note: "live SOL_USD ticker, Crypto.com Exchange public API" }
+      ? {
+          ...healthOf("cryptocom", "live"),
+          note:
+            "live SOL_USD ticker, Crypto.com Exchange public API — and now the HOURLY SOL/USD " +
+            "series that prices SOL-denominated wallet fills at the hour they happened. SOL moved " +
+            "$74 to $105 across the bars this reads, so valuing an old entry at today's price " +
+            "would put the whole error into the PnL. Binance is the obvious alternative and is " +
+            "geo-blocked with no CORS header at all; Coinbase is the fallback",
+        }
       : { ...demoHealth("cryptocom"), mode: "disabled", status: "down", note: "disabled via ENABLE_CRYPTOCOM" },
   );
   rows.push(

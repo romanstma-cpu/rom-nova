@@ -18,7 +18,7 @@ const MAX_EDGES = 420;
  *  and static positions must not be able to crowd them out. */
 const MAX_TRADE_EDGES = 160;
 import { buildFlowSeries, buildTokenRows, buildWalletRows } from "./rows";
-import { DEMO, candlesFor, trendingRows } from "./source";
+import { DEMO, candlesFor, trendingRows, walletProfile } from "./source";
 import { dataMode, providerHealth } from "../providers/registry";
 import type { AlertCondition, BacktestConfig, StrategyProfileId } from "../types";
 
@@ -171,6 +171,30 @@ export async function handleCandles(store: DemoStore, mint: string, from?: numbe
 
 export function handleWallets(store: DemoStore) {
   return { rows: buildWalletRows(store), demo: true };
+}
+
+/**
+ * A real Solana address, profiled from the chain.
+ *
+ * Kept apart from `handleWalletDetail` rather than folded into it, because the
+ * two return genuinely different objects and merging them would mean inventing
+ * the simulator's fields — smart-money score, behavioural profile, known
+ * entity, cluster membership — for a wallet that has none of them. The page
+ * renders whichever it gets and says which.
+ *
+ * A 404 here means "no keyless wallet source is configured", not "no such
+ * wallet": an address with nothing in the readable window still returns a
+ * profile, with a coverage block that explains the emptiness.
+ */
+export async function handleWalletProfile(address: string) {
+  const sourced = await walletProfile(address);
+  if (!sourced) {
+    throw new ApiError(
+      404,
+      "no live wallet source — set ENABLE_WALLET_CHAIN, or the address is not a Solana pubkey",
+    );
+  }
+  return { profile: sourced.data, provenance: sourced.provenance, demo: false };
 }
 
 export function handleWalletDetail(store: DemoStore, address: string) {

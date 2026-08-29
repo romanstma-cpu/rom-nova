@@ -22,6 +22,7 @@ const CAPABILITIES = [
   "mint & freeze authority",
   "whale flow",
   "wallet activity",
+  "wallet positions",
   "holder distribution",
   "rug & LP-lock risk",
   "smart-money scoring",
@@ -72,14 +73,37 @@ describe("dataMode — the chip cannot outlive the truth", () => {
     expect(FLAGS.rugcheck() ? m.live : m.simulated).toContain("rug & LP-lock risk");
   });
 
-  it("reserves 'demo' for nothing being live, and 'live' for nothing simulated", () => {
+  it("reserves 'demo' for nothing being live, and 'live' for nothing qualified", () => {
     const m = dataMode();
     if (m.overall === "demo") expect(m.live).toHaveLength(0);
-    if (m.overall === "live") expect(m.simulated).toHaveLength(0);
+    if (m.overall === "live") {
+      expect(m.simulated).toHaveLength(0);
+      // A bound is a qualification, and "LIVE" beside a qualified number is the
+      // more damaging half-truth — a reader sees LIVE next to a PnL figure and
+      // reads it as the wallet's record rather than as two days of it.
+      expect(m.bounded).toHaveLength(0);
+    }
     if (m.overall === "mixed") {
       expect(m.live.length).toBeGreaterThan(0);
-      expect(m.simulated.length).toBeGreaterThan(0);
+      expect(m.simulated.length + m.bounded.length).toBeGreaterThan(0);
     }
+  });
+
+  // Real wallet history is the capability that needs a third column. It comes
+  // off the chain and it covers roughly forty-eight hours, and putting it in
+  // either of the other two columns tells the reader something false.
+  it("qualifies wallet history rather than calling it flatly live", () => {
+    const m = dataMode();
+    if (!FLAGS.walletChain() || FLAGS.helius()) return;
+    expect(m.live).toContain("wallet activity");
+    expect(m.bounded.join(" ")).toMatch(/wallet trade history/i);
+    // And the bound must name the limit, not merely gesture at one.
+    expect(m.bounded.join(" ")).toMatch(/48h|retention/i);
+  });
+
+  it("never lists the same claim as both live and bounded", () => {
+    const m = dataMode();
+    for (const b of m.bounded) expect(m.live).not.toContain(b);
   });
 
   // The state this app is actually in, and the one the old flat chip described

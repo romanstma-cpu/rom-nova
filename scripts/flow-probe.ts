@@ -9,6 +9,7 @@
 
 import { SqdFlowProvider, coveragePct, toUnits } from "../src/lib/providers/sqd";
 import { getProviders } from "../src/lib/providers/registry";
+import { liveSignal } from "../src/lib/engine/live-features";
 
 const WSOL = "So11111111111111111111111111111111111111112";
 
@@ -51,4 +52,26 @@ void (async () => {
   }
 
   await show("WORST CASE: wSOL", WSOL, 9, 10);
+
+  // The point of all of it: does a scored token now KNOW its whale flow, or is
+  // this another adapter nothing calls?
+  if (pick) {
+    const p = getProviders();
+    const sig = await liveSignal(pick.mint, {
+      token: p.token,
+      market: p.market,
+      security: p.security,
+      flow: p.flow,
+    });
+    console.log(`\n=== SCORED WITH FLOW`);
+    if (!sig) {
+      console.log("  no signal (candles unavailable)");
+    } else {
+      const f = sig.result.features;
+      console.log(`  score ${sig.signal.score}  confidence ${sig.signal.confidence}`);
+      console.log(`  whaleNetFlowUsd  ${f.whaleNetFlowUsd.toFixed(0)}`);
+      console.log(`  whaleBuys ${f.whaleBuys}  whaleSells ${f.whaleSells}`);
+      for (const line of sig.result.provenance) console.log(`    · ${line}`);
+    }
+  }
 })();

@@ -39,6 +39,7 @@ import type {
   MarketDataProvider,
   SecurityDataProvider,
   TokenDataProvider,
+  TokenFlowProvider,
 } from "../providers/types";
 
 const HOUR = 3_600_000;
@@ -48,7 +49,29 @@ export interface LiveSources {
   market: MarketDataProvider;
   /** Optional: only a keyed provider has holder data. */
   security?: SecurityDataProvider;
+  /** Optional: wallet-level flow. Absent means whale movement is unmeasured. */
+  flow?: TokenFlowProvider;
 }
+
+/**
+ * A movement this size in USD counts as a whale.
+ *
+ * Matches the demo path's own threshold in `buildFlowSeries`, deliberately: a
+ * live vector and a simulated one have to mean the same thing when they reach
+ * the scorer, or the two worlds stop being comparable.
+ */
+export const WHALE_USD = 20_000;
+
+/** How much chain history one live vector will pay for. */
+const FLOW_MINUTES = 10;
+
+/**
+ * How deep into the mover ranking to look for whales.
+ *
+ * Forty each way. The scan is free once the stream is already folded, and the
+ * cost of guessing too low is a whale reported as no whale.
+ */
+const FLOW_MOVERS = 40;
 
 export interface LiveFeatureResult {
   features: FeatureVector;
@@ -232,15 +255,64 @@ export async function liveFeatures(
   const liquidityUsd = snapshot.liquidityUsd;
   const ageHours = info.createdAt > 0 ? (now - info.createdAt) / HOUR : c.bars;
 
+  // ------------------------------------------------------------- wallet flow
+  //
+  // The five flow fields have been zeros since this file was written, and
+  // unlike the holder fields they are NOT in UnmeasuredField — so the scorer
+  // has been reading "no whale has touched this" as a measured fact rather than
+  // an absence. A flow provider closes the whale half of that.
+  //
+  // Smart money is deliberately NOT closed. It needs wallet reputation, and
+  // nothing here knows which addresses are good; inferring it from a ten-minute
+  // window would be inventing a track record.
+  let whaleNetFlowUsd = 0;
+  let whaleBuys = 0;
+  let whaleSells = 0;
+  if (sources.flow) {
+    // topMovers is asked for generously because whale detection happens HERE,
+    // not in the provider: only this layer knows the mint's decimals and price,
+    // so only it can convert a raw delta into dollars. The provider's default
+    // of five would silently cap the search at the ten biggest wallets, and a
+    // whale in eleventh place would read as no whale at all.
+    const f = await sources.flow
+      .getTokenFlow(mint, { minutes: FLOW_MINUTES, topMovers: FLOW_MOVERS })
+      .catch(() => null);
+    if (f && f.movements > 0) {
+      const decimals = info.decimals ?? 9;
+      for (const mover of f.largest) {
+        const usd = (Number(mover.deltaUnits) / 10 ** decimals) * price;
+        if (Math.abs(usd) < WHALE_USD) continue;
+        whaleNetFlowUsd += usd;
+        if (usd > 0) whaleBuys++;
+        else whaleSells++;
+      }
+      const window = f.complete
+        ? `${FLOW_MINUTES} min`
+        : `${(f.blocksCovered / 150).toFixed(1)} min of ${FLOW_MINUTES} requested`;
+      provenance.push(
+        `${f.source}: ${f.movements} balance changes across ${f.wallets} wallets over ${window}` +
+          (f.complete ? "" : " — byte budget reached, window truncated") +
+          `; ${whaleBuys + whaleSells} moved $${WHALE_USD.toLocaleString()}+`,
+      );
+    } else {
+      provenance.push(
+        `${sources.flow.name}: no wallet movement returned — whale flow stays unmeasured`,
+      );
+    }
+  } else {
+    provenance.push("no flow provider configured — whale and smart-money flow unmeasured");
+  }
+
   const features: FeatureVector = {
     asOf: now,
-    mint,
-    // No wallet-flow source at this price point. Declared, not faked.
+    // Smart money needs wallet reputation no source here has. Still zero, and
+    // still an absence rather than a finding.
     smartMoneyNetFlowUsd: 0,
     smartMoneyWallets: 0,
-    whaleNetFlowUsd: 0,
-    whaleBuys: 0,
-    whaleSells: 0,
+    mint,
+    whaleNetFlowUsd,
+    whaleBuys,
+    whaleSells,
     momentum1h: c.momentum1h,
     momentum5m: c.momentum5m,
     momentum24h: c.momentum24h,

@@ -35,6 +35,12 @@ const DEX_UNMEASURED: readonly UnmeasuredField[] = [
   "holders",
   "uniqueBuyers1h",
   "uniqueSellers1h",
+  // No authority state, no token extensions, no LP lock. The adapter's
+  // hardcoded not-revoked flags are a fail-safe default, not a reading, and
+  // declaring that keeps the scorer from treating either as measured.
+  "authorities",
+  "permanentDelegate",
+  "lpLocked",
 ];
 
 interface DexPair {

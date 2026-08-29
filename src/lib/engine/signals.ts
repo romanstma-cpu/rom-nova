@@ -157,10 +157,80 @@ export const FACTORS: FactorDef[] = [
 // risk factors subtract from the score
 export const RISK_FACTORS: FactorDef[] = [
   {
+    key: "mint_authority",
+    name: "Mint Authority",
+    // The single most load-bearing safety fact about an SPL token, and until
+    // now the scorer could not see it at all — the flag lived on TokenInfo,
+    // never on the vector, so the security panel and the score were reading
+    // different worlds. A token whose deployer could still mint rendered
+    // POSITIVE beside a panel saying the supply was not fixed.
+    needs: ["authorities"],
+    normalize: (f) => (f.mintAuthorityRevoked ? 0 : 1),
+    explain: (f) =>
+      f.mintAuthorityRevoked
+        ? "mint authority revoked — the supply is fixed"
+        : "MINT AUTHORITY IS LIVE — whoever holds that key can inflate the supply at will",
+  },
+  {
+    key: "freeze_authority",
+    name: "Freeze Authority",
+    needs: ["authorities"],
+    normalize: (f) => (f.freezeAuthorityRevoked ? 0 : 1),
+    explain: (f) =>
+      f.freezeAuthorityRevoked
+        ? "freeze authority revoked — balances cannot be frozen"
+        : "FREEZE AUTHORITY IS LIVE — balances can be frozen in place, including yours",
+  },
+  {
+    key: "permanent_delegate",
+    name: "Permanent Delegate",
+    needs: ["permanentDelegate"],
+    normalize: (f) => (f.permanentDelegate ? 1 : 0),
+    explain: (f) =>
+      f.permanentDelegate
+        ? "PERMANENT DELEGATE SET — that key can move any balance without permission"
+        : "no permanent delegate",
+  },
+  {
+    key: "lp_lock",
+    name: "LP Lock",
+    // The mechanic behind most memecoin losses. Every other risk here is about
+    // supply; a deployer who can withdraw the pool does not need a mint
+    // authority to take the money. Half the pool locked is treated as the point
+    // where withdrawal stops being the obvious move.
+    needs: ["lpLocked"],
+    normalize: (f) => clamp(1 - f.lpLockedPct / 0.5),
+    explain: (f) =>
+      `${(f.lpLockedPct * 100).toFixed(1)}% of the pool's LP is locked or burned` +
+      (f.lpLockedPct < 0.5
+        ? " — the rest can be withdrawn, though nothing here says by whom, and a mature token spread over many independent providers reads low for a reason that is not a rug"
+        : ""),
+  },
+  {
+    key: "concentration_risk",
+    name: "Supply Concentration",
+    // `distribution` above is a positive-family factor: it bottoms out at zero
+    // around 60% and cannot go below it, so an extremely concentrated token
+    // could only fail to gain points, never lose any. This is the other half —
+    // deliberately starting where that factor has already saturated, so the two
+    // do not double-count the same supply.
+    needs: ["top10Pct"],
+    normalize: (f) => clamp((f.top10Pct - 0.5) / 0.35),
+    explain: (f) => `top 10 wallets hold ${(f.top10Pct * 100).toFixed(0)}% of supply`,
+  },
+  {
     key: "insider_risk",
     name: "Insider Risk",
     normalize: (f) => clamp(f.insiderPct / 0.3),
-    explain: (f) => `insider-linked wallets hold ~${(f.insiderPct * 100).toFixed(0)}% of supply`,
+    // Says what it MEASURES. The old wording claimed a share of supply, which
+    // put "insider-linked wallets hold ~0% of supply" on the same screen as
+    // "3 insider networks, 12 wallets" — the field only sums insider flags
+    // among the top holders the source published, so a network that never
+    // cracks the top twenty reads as zero here.
+    explain: (f) =>
+      f.insiderPct > 0
+        ? `insider-flagged wallets among the published top holders hold ~${(f.insiderPct * 100).toFixed(1)}% of supply`
+        : "no insider flag on any of the published top holders — networks outside them are not counted here",
     needs: ["insiderPct"],
   },
   {
@@ -312,17 +382,60 @@ function riskFlags(f: FeatureVector): RiskFlag[] {
   const flags: RiskFlag[] = [];
   const add = (key: string, name: string, severity: RiskFlag["severity"], detail: string) =>
     flags.push({ key, name, severity, detail });
+  /** Whether a field was actually observed. A zero from an absent field must
+   *  not raise a flag, and — worse — must not be read as the flag's absence. */
+  const missing = f.unmeasured ?? [];
+  const has = (k: UnmeasuredField) => !missing.includes(k);
 
-  if (f.top10Pct > 0.4) add("concentration", "Extreme concentration", "high", `top 10 hold ${(f.top10Pct * 100).toFixed(0)}%`);
-  else if (f.top10Pct > 0.28) add("concentration", "Concentrated supply", "medium", `top 10 hold ${(f.top10Pct * 100).toFixed(0)}%`);
-  if (f.devSold) add("dev", "Dev selling", "high", "the deployer wallet has reduced its position");
-  else if (f.devHoldsPct > 0.08) add("dev", "Dev holdings", "medium", `dev holds ${(f.devHoldsPct * 100).toFixed(1)}%`);
-  if (f.insiderPct > 0.15) add("insider", "Insider exposure", "high", `insider-linked supply ~${(f.insiderPct * 100).toFixed(0)}%`);
-  if (f.bundlerPct + f.sniperPct > 0.18) add("bundler", "Bundler/sniper supply", "medium", `${((f.bundlerPct + f.sniperPct) * 100).toFixed(0)}% of supply from bundlers/snipers`);
+  // The security facts, first, because they are the ones that take a position
+  // to zero regardless of how the tape looks. These reach `bearCase` through
+  // this list, which is why "WHAT COULD MAKE THIS FAIL" used to list momentum
+  // risk on a token whose deployer could mint more supply at will.
+  if (has("authorities")) {
+    if (!f.mintAuthorityRevoked) {
+      add("mint_authority", "Mint authority is LIVE", "high", "the supply can be inflated at any time by the key holder");
+    }
+    if (!f.freezeAuthorityRevoked) {
+      add("freeze_authority", "Freeze authority is LIVE", "high", "balances can be frozen in place by the key holder");
+    }
+  } else {
+    add("authority_unknown", "Authorities unverified", "high", "no source could read the mint account, so neither authority is known");
+  }
+  if (has("permanentDelegate") && f.permanentDelegate) {
+    add("permanent_delegate", "Permanent delegate set", "high", "that key can move any balance without the holder's permission");
+  }
+  // Deliberately never "high", however low the figure.
+  //
+  // An unlocked pool is only a rug when ONE party holds the LP, and nothing in
+  // this stack publishes the deployer's share of it. The aggregate runs near
+  // zero on large tokens by construction — measured at 0.04% for PUMP across
+  // 435 pools and 43 independent LP providers, none of whom withdrawing is a
+  // rug — so grading it high-severity fired EXTREME RISK on exactly the tokens
+  // where it means least. The penalty still scales; the alarm does not.
+  if (has("lpLocked") && f.lpLockedPct < 0.5) {
+    add(
+      "lp_lock",
+      "Liquidity pool largely unlocked",
+      "medium",
+      `${(f.lpLockedPct * 100).toFixed(1)}% of LP locked — whoever holds the rest can withdraw it, ` +
+        `and no source here says who that is`,
+    );
+  }
+
+  if (has("top10Pct")) {
+    if (f.top10Pct > 0.4) add("concentration", "Extreme concentration", "high", `top 10 hold ${(f.top10Pct * 100).toFixed(0)}%`);
+    else if (f.top10Pct > 0.28) add("concentration", "Concentrated supply", "medium", `top 10 hold ${(f.top10Pct * 100).toFixed(0)}%`);
+  }
+  if (has("devHoldsPct")) {
+    if (f.devSold) add("dev", "Dev selling", "high", "the deployer wallet has reduced its position");
+    else if (f.devHoldsPct > 0.08) add("dev", "Dev holdings", "medium", `dev holds ${(f.devHoldsPct * 100).toFixed(1)}%`);
+  }
+  if (has("insiderPct") && f.insiderPct > 0.15) add("insider", "Insider exposure", "high", `insider-flagged top holders hold ~${(f.insiderPct * 100).toFixed(0)}% of supply`);
+  if (has("bundlerPct") && has("sniperPct") && f.bundlerPct + f.sniperPct > 0.18) add("bundler", "Bundler/sniper supply", "medium", `${((f.bundlerPct + f.sniperPct) * 100).toFixed(0)}% of supply from bundlers/snipers`);
   if (f.exitDepthUsd < 15_000) add("exit", "Thin exit liquidity", "high", `~${usd(f.exitDepthUsd)} exitable near price`);
   else if (f.exitDepthUsd < 40_000) add("exit", "Modest exit liquidity", "medium", `~${usd(f.exitDepthUsd)} exitable near price`);
   if (f.liquidityChangePct < -25) add("liq_drop", "Liquidity draining", "high", `pool ${pct(f.liquidityChangePct)} in 24h`);
-  if (f.organicScore < 0.35) add("organic", "Low organic activity", "medium", "trading pattern looks partly inorganic");
+  if (has("organicScore") && f.organicScore < 0.35) add("organic", "Low organic activity", "medium", "trading pattern looks partly inorganic");
   if (f.ageHours < 24) add("age", "Very young token", "medium", `${f.ageHours.toFixed(0)} hours since launch`);
   if (f.momentum24h > 150) add("extended", "Vertically extended", "medium", `24h ${pct(f.momentum24h)} — chase risk`);
   return flags;
@@ -330,6 +443,9 @@ function riskFlags(f: FeatureVector): RiskFlag[] {
 
 function classifyKind(f: FeatureVector, factors: SignalFactor[], score: number): SignalKind {
   const get = (k: string) => factors.find((x) => x.key === k)?.normalized ?? 0.5;
+  // A verified-live authority is the loudest thing that can be true about a
+  // token, so it names the signal rather than being outvoted by the tape.
+  if (securityVetoOf(f)) return "rug_risk_escalation";
   if (f.liquidityChangePct < -35) return "liquidity_collapse";
   if (f.devSold && f.top10Pct > 0.3) return "rug_risk_escalation";
   if (score < 40 && f.whaleNetFlowUsd < -40_000) return "whale_exit_warning";
@@ -346,8 +462,48 @@ function classifyKind(f: FeatureVector, factors: SignalFactor[], score: number):
   return "momentum_ignition";
 }
 
-function labelOf(score: number, confidence: number, highRisks: number, noTrade: string | null): SignalLabel {
+/**
+ * A measured, disqualifying security fact, or null.
+ *
+ * Only ever set when a source actually READ the field. An unverified authority
+ * returns null here and routes to abstention instead — "we looked and it is
+ * dangerous" and "nobody looked" are different findings and must not collapse
+ * into one verdict.
+ *
+ * This exists because a weight cannot express a veto. The risk factors above
+ * subtract nine points each; a token with deep liquidity, 240% volume
+ * acceleration and a 97/100 organic score absorbs that and still renders
+ * POSITIVE, which is exactly what a live mint authority must never be allowed
+ * to do. The score stays an honest weighted mean of what was measured, and the
+ * LABEL carries the veto.
+ */
+export function securityVetoOf(f: FeatureVector): string | null {
+  const missing = f.unmeasured ?? [];
+  if (!missing.includes("authorities")) {
+    if (!f.mintAuthorityRevoked) {
+      return "the mint authority is LIVE — supply can be inflated out from under a holder at any time";
+    }
+    if (!f.freezeAuthorityRevoked) {
+      return "the freeze authority is LIVE — balances can be frozen in place, including yours";
+    }
+  }
+  if (!missing.includes("permanentDelegate") && f.permanentDelegate) {
+    return "a permanent delegate is set — that key can move any balance without permission";
+  }
+  return null;
+}
+
+function labelOf(
+  score: number,
+  confidence: number,
+  highRisks: number,
+  noTrade: string | null,
+  securityVeto: string | null,
+): SignalLabel {
   if (noTrade) return "NO TRADE";
+  // Checked before every score band. A token that can mint more supply is not
+  // a WATCH with a caveat.
+  if (securityVeto) return "EXTREME RISK";
   if (highRisks >= 2 && score < 55) return "EXTREME RISK";
   if (score >= 88 && confidence >= 0.6) return "EXTREME POSITIVE";
   if (score >= 76) return "STRONG POSITIVE";
@@ -489,23 +645,42 @@ export function scoreFeatures(
   const risks = riskFlags(f);
   const highRisks = risks.filter((r) => r.severity === "high").length;
 
+  const securityVeto = securityVetoOf(f);
+
   // NO TRADE gates — the engine is allowed to abstain
   let noTrade: string | null = null;
-  // Two or more unassessable risk factors means the things most likely to take
-  // the position to zero — insiders, bundlers, a dev holding half the supply —
-  // are all simply unknown. Abstaining is the only honest output there, and it
-  // is checked first because it does not depend on the score being meaningful.
-  if (unmeasuredRisks >= 2) {
-    noTrade = `${unmeasuredRisks} risk factors could not be assessed from this data source`;
+  // Whether anybody could read the mint account, first.
+  //
+  // This is a NAMED gate rather than a count, because "nobody could tell me
+  // whether the deployer can still mint" is a specific and actionable reason to
+  // abstain, and the old generic count said nothing a reader could act on.
+  if ((f.unmeasured ?? []).includes("authorities")) {
+    noTrade = "the mint and freeze authorities could not be read — the two facts most likely to take a position to zero are unknown";
+  }
+  // Then the SHARE of the risk model that could be assessed, not a raw count.
+  //
+  // `unmeasuredRisks >= 2` was the old rule and it stopped meaning anything:
+  // Jupiter never publishes bundlerPct or sniperPct, so that factor is always
+  // unmeasured, and a second gap took every token to NO TRADE. Five of six
+  // mints in review abstained through it, which is a verdict carrying no
+  // information. The share scales with the eight risk factors there are now,
+  // and — critically — the two that were making it fire constantly are no
+  // longer the only ones: the authorities and the LP lock ARE measured.
+  else if (RISK_FACTORS.length - unmeasuredRisks < RISK_FACTORS.length / 2) {
+    noTrade = `only ${RISK_FACTORS.length - unmeasuredRisks} of ${RISK_FACTORS.length} risk factors could be assessed from this data source`;
   } else if (coverage < 0.6) {
     noTrade = `only ${(coverage * 100).toFixed(0)}% of the model's inputs were available`;
   } else if (confidence < profile.minConfidence) noTrade = `confidence ${(confidence * 100).toFixed(0)}% below the ${profile.name} floor`;
   else if (f.liquidityUsd < profile.minLiquidityUsd) noTrade = `liquidity ${usd(f.liquidityUsd)} below the ${profile.name} floor of ${usd(profile.minLiquidityUsd)}`;
-  else if (highRisks >= 3) noTrade = `${highRisks} independent high-severity risks`;
+  // The generic count is suppressed when a veto is present, because the veto is
+  // the SPECIFIC version of the same claim. "4 independent high-severity risks"
+  // and "the mint authority is LIVE" describe one token; the second is the one
+  // a reader can act on, and letting the count win buried it.
+  else if (highRisks >= 3 && !securityVeto) noTrade = `${highRisks} independent high-severity risks`;
   else if (f.sampleSize < 12) noTrade = "insufficient sample behind the features";
   else if (f.worstStalenessMs > 3 * HOUR) noTrade = "inputs are stale";
 
-  const label = labelOf(score, confidence, highRisks, noTrade);
+  const label = labelOf(score, confidence, highRisks, noTrade, securityVeto);
   const kind = classifyKind(f, factors, score);
 
   const positives = factors
@@ -523,6 +698,9 @@ export function scoreFeatures(
   ];
 
   const bearCase = [
+    // The veto leads, because it is not one bear argument among several — it is
+    // the reason the label says EXTREME RISK whatever the tape did.
+    ...(securityVeto ? [`Disqualifying: ${securityVeto}`] : []),
     ...risks.map((r) => `${r.name}: ${r.detail}`),
     f.momentum24h > 60 ? "entry is late in the move — favorable expectancy decays fast after vertical legs" : "the setup depends on continued participation; volume fading invalidates it",
   ];
@@ -538,6 +716,7 @@ export function scoreFeatures(
     confidence: Number(confidence.toFixed(2)),
     label,
     ...(noTrade ? { noTradeReason: noTrade } : {}),
+    ...(securityVeto ? { securityVeto } : {}),
     profile: profileId,
     factors,
     risks,

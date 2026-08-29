@@ -64,6 +64,21 @@ interface JupMint {
   decimals: number;
   createdAt?: string;
   dev?: string;
+  icon?: string;
+  twitter?: string;
+  telegram?: string;
+  website?: string;
+  /**
+   * The authority ADDRESSES, present only when they are still live.
+   *
+   * Undocumented and easy to miss, and it is what makes this adapter a real
+   * authority reader rather than a fail-safe default: SKHY carries both fields
+   * and carries NO `audit.mintAuthorityDisabled` at all, so reading the audit
+   * block alone reported "unknown" for a token whose mint authority is
+   * demonstrably live. Verified against the chain on the same mint.
+   */
+  mintAuthority?: string;
+  freezeAuthority?: string;
   holderCount?: number;
   organicScore?: number;
   organicScoreLabel?: string;
@@ -120,8 +135,47 @@ function frac(pct: number | undefined): number | undefined {
   return pct / 100;
 }
 
+/**
+ * Whether the mint and freeze authorities are revoked, and whether this payload
+ * actually SAYS.
+ *
+ * Two independent signals, and both are needed. `audit.mintAuthorityDisabled`
+ * answers when the audit ran; the top-level `mintAuthority` address answers
+ * when it did not, because Jupiter only emits that field while the authority is
+ * live. Measured across the trending list: PUMP and ANSEM answer through the
+ * audit block, SKHY answers only through the addresses — and SKHY is the one
+ * where the answer is dangerous, which is the worst possible token to report as
+ * unknown.
+ *
+ * `known: false` keeps "authorities" in the unmeasured set, so the scorer drops
+ * the two authority factors and the engine abstains instead of grading an
+ * unexamined mint. The revoked flags still fail safe for anything that reads
+ * them directly.
+ */
+export function authorityState(m: {
+  audit?: { mintAuthorityDisabled?: boolean; freezeAuthorityDisabled?: boolean };
+  mintAuthority?: string;
+  freezeAuthority?: string;
+}): { mintRevoked: boolean; freezeRevoked: boolean; known: boolean } {
+  const read = (disabled: boolean | undefined, liveAddress: string | undefined) => {
+    if (liveAddress) return { revoked: false, known: true };
+    if (disabled !== undefined) return { revoked: disabled, known: true };
+    return { revoked: false, known: false };
+  };
+  const mint = read(m.audit?.mintAuthorityDisabled, m.mintAuthority);
+  const freeze = read(m.audit?.freezeAuthorityDisabled, m.freezeAuthority);
+  return {
+    mintRevoked: mint.revoked,
+    freezeRevoked: freeze.revoked,
+    // One mint account read yields both, so a payload that answers only half of
+    // it has not answered. Treated as unknown rather than half-trusted.
+    known: mint.known && freeze.known,
+  };
+}
+
 export function toInfo(m: JupMint): TokenInfo {
   const graduated = m.graduatedAt ? Date.parse(m.graduatedAt) : NaN;
+  const authority = authorityState(m);
   return {
     mint: m.id,
     name: m.name,
@@ -130,12 +184,20 @@ export function toInfo(m: JupMint): TokenInfo {
     decimals: m.decimals,
     narrative: "Community",
     verified: Boolean(m.isVerified),
-    // Jupiter's audit block is the only keyless source that ships these in the
-    // same payload as the price. Absent means the audit did not run, which is
-    // graded as not-revoked — an unexamined token must never read as safe.
-    mintAuthorityRevoked: Boolean(m.audit?.mintAuthorityDisabled),
-    freezeAuthorityRevoked: Boolean(m.audit?.freezeAuthorityDisabled),
+    // Jupiter is the only keyless source that ships these in the same payload
+    // as the price. Where it says nothing the flags fail safe to not-revoked
+    // AND the snapshot declares "authorities" unmeasured, so nothing downstream
+    // can mistake the default for a reading.
+    mintAuthorityRevoked: authority.mintRevoked,
+    freezeAuthorityRevoked: authority.freezeRevoked,
+    // Never reported here. The risk vendor's token_extensions block is the only
+    // source in this stack that sees it, and the snapshot says so.
     permanentDelegate: false,
+    icon: m.icon,
+    links:
+      m.twitter || m.telegram || m.website
+        ? { twitter: m.twitter, telegram: m.telegram, website: m.website }
+        : undefined,
     devWallet: m.dev ?? "",
     hue: Math.abs([...m.id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)) % 360,
     launchpad: m.launchpad,
@@ -189,6 +251,13 @@ export function toSnapshot(m: JupMint, now = Date.now()): TokenSnapshot {
   push("insiderPct");
   push("bundlerPct");
   push("sniperPct");
+  // The security facts, declared the same way as every other gap. Until these
+  // existed the scorer had no field to read the authorities from at all, so a
+  // token whose deployer could still mint was graded purely on its tape.
+  if (!authorityState(m).known) push("authorities");
+  // Neither of these is in this payload at any depth.
+  push("permanentDelegate");
+  push("lpLocked");
 
   return {
     mint: m.id,
@@ -217,6 +286,7 @@ export function toSnapshot(m: JupMint, now = Date.now()): TokenSnapshot {
     momentum1h: s1h.priceChange,
     momentum24h: s24h.priceChange,
     momentum5m: s5m.priceChange,
+    momentum6h: s6h.priceChange,
     volumeAccel: accel,
     holderGrowthPct: s24h.holderChange,
     liquidityChangePct: s24h.liquidityChange,

@@ -1,5 +1,11 @@
 # W3 — the token detail page
 
+> **Iteration 2.** A blind review failed the first pass on one disqualifying finding and six
+> smaller ones. The section at the end, *"Second pass: the score could not see the security
+> panel"*, records what was wrong and what changed. Everything above it still holds except where
+> that section says otherwise.
+
+
 ## The thing that was actually broken
 
 Every row in the live scanner linked to `/token?m=<real Solana mint>`. That page called
@@ -192,6 +198,111 @@ before this work, unrelated to it.
 
 `npm run probe:detail -- <mint>` prints the whole assembled payload from a terminal, including the
 factors that stood down and any disagreements, without a browser.
+
+## Second pass: the score could not see the security panel
+
+A blind review of six real mints found the page's central claim was false. It was right.
+
+### The disqualifying one
+
+`src/lib/engine/signals.ts` contained zero references to `mintAuthorityRevoked`,
+`freezeAuthorityRevoked`, `permanentDelegate` or `lpLocked`. Those facts lived on `TokenInfo` and
+never on `FeatureVector`, so **the scorer could not read them even in principle**. The page said
+otherwise in two places, and the scanner's hint text claimed the score weighed "chain-read mint &
+freeze authority". It did not.
+
+What that produced: **SKHY** — live mint authority, live freeze authority, permanent delegate set,
+0% LP locked, RugCheck 81/100 — scored **60**, four points *below* fixed-supply PUMP. **ANSEM**
+rendered 69/POSITIVE in green beside a red 43/100, and its "WHAT COULD MAKE THIS FAIL" list
+mentioned none of the security panel's findings.
+
+The fix makes the claim true rather than deleting it:
+
+- Four fields added to `FeatureVector`: `mintAuthorityRevoked`, `freezeAuthorityRevoked`,
+  `permanentDelegate`, `lpLockedPct`. Three new `UnmeasuredField` keys — `authorities`,
+  `permanentDelegate`, `lpLocked` — so every adapter declares what it did not read.
+- Five new risk factors: **Mint Authority**, **Freeze Authority**, **Permanent Delegate**,
+  **LP Lock**, and **Supply Concentration**. The last one exists because `distribution` is a
+  positive-family factor that bottoms out at zero around 60%, so extreme concentration could only
+  fail to add points, never cost any (the review's item 6). It starts where `distribution` has
+  already saturated, so the two do not double-count.
+- A **veto**, not a weight. A risk factor is worth nine points; a vector with deep liquidity, 240%
+  volume acceleration and a 97/100 organic score absorbs that and still renders POSITIVE. So
+  `securityVetoOf()` returns a measured, disqualifying fact and `labelOf` forces `EXTREME RISK`
+  ahead of every score band. The score stays an honest weighted mean; the label carries the veto.
+- **"Unverified" and "verified live" stay distinct**, which is the whole design. Verified-live →
+  penalty plus veto. Unverified → the factors stand down, a named gate abstains
+  (*"the mint and freeze authorities could not be read"*), and nothing is graded as safe.
+
+Measured before → after, same four mints:
+
+| | before | after |
+|---|---|---|
+| SKHY (mint + freeze live, delegate set, 0% LP) | 60, scored | **35, EXTREME RISK** |
+| PUMP (both revoked) | — | 53, NEUTRAL |
+| PENGU | — | 55, WATCH |
+| ANSEM (both revoked, 46% LP locked) | 69, POSITIVE | 65, POSITIVE |
+
+The most dangerous token tested is now the lowest-scoring one, and the verdict moves when the
+authorities do. `tests/token-detail.test.ts` proves a live mint authority cannot produce a positive
+label **in any of the nine strategy profiles**, including `high_risk`.
+
+### A source that reads what nobody noticed
+
+Jupiter publishes top-level `mintAuthority` / `freezeAuthority` **addresses**, present only while
+the authority is live. SKHY carries both and carries no `audit.mintAuthorityDisabled` at all — so
+reading the audit block alone reported "unknown" for the one token in the sample where the answer
+was dangerous. `authorityState()` reads both signals. RugCheck's `token` block is wired in as a
+second reader, and where two readers disagree the **dangerous** answer wins. That is why the
+authorities now read `solana-rpc + rugcheck` instead of the review's observed UNVERIFIED: one
+rate-limited RPC call no longer blanks a fact two other sources have.
+
+### The other findings
+
+- **A zero standing in for "not indexed yet".** RugCheck returns `totalHolders: 0` on fresh mints
+  with twenty populated rows, and the page printed "0 holders in total" above them. Two consumers
+  had written two different guards for one field. Normalised once, in the provider.
+- **The self-contradicting insider claim.** "insider-linked wallets hold ~0% of supply" beside
+  "3 insider networks, 12 wallets". The field only sums insider flags among the *published top
+  holders*; both sentences now say their scope, and the zero case says outright that networks
+  outside the top holders are not counted there.
+- **No price-change strip.** 5m/1h/6h/24h now sits second in the header. `momentum6h` was added to
+  `TokenSnapshot` — `rows.ts` had been filling its 6h column with the 24h figure.
+- **No socials.** Website, X and Telegram from the Jupiter payload already being fetched.
+- **NO TRADE carried no information.** Five of six mints abstained through `unmeasuredRisks >= 2`,
+  which fires permanently because Jupiter never publishes `bundlerPct`/`sniperPct`. Replaced with a
+  proportional rule over the eight risk factors, plus the named authority gate. The scanner now
+  shows a 30–90 spread that tracks the third-party risk column instead of a wall of dashes.
+
+### One thing the fix got wrong first
+
+Grading LP lock as *high* severity pushed **PUMP** to EXTREME RISK on 0.042% locked. That number
+runs near zero on any mature token by construction — PUMP has 435 pools and 43 independent LP
+providers, none of whom withdrawing is a rug — and an unlocked pool is only a rug when *one* party
+holds the LP, which nothing in this stack publishes. The severity is now capped at medium, the
+penalty still scales, and the factor's own explanation states the limitation. This is the same
+"most wrong on the largest tokens" trap that killed the pool-excluded concentration figure.
+
+### Also fixed while there
+
+A rate-limited token provider used to surface as **"unknown mint"** — a permanent-sounding claim
+about the token standing in for a temporary fact about us. `liveTokenDetail` no longer swallows the
+error; the handler carries the reason and only reports it if the simulator misses too, so a demo
+mint still resolves during an outage.
+
+### Gates, second pass
+
+```
+npx tsc --noEmit          clean
+npm test                  17 files, 249 tests passed
+npm run build:static      clean
+npx eslint <touched>      clean
+```
+
+Verified in Chrome at 1440x900 and 1280x800 against the static export: SKHY renders the red veto
+banner and score 34, its holder panel reads "2,945 holders in total", its 5m change cell renders a
+**dash** because Jupiter published none; ANSEM renders site/X/TG links, `solana-rpc + rugcheck` on
+both authorities, and a bear case that finally leads with the LP lock and the concentration.
 
 ## What this is not
 

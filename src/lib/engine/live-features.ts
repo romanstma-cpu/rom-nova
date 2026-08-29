@@ -240,13 +240,18 @@ export async function liveFeatures(
   /**
    * Whether anything actually CHECKED the authorities.
    *
-   * The keyless providers report both as not-revoked, which is the right
-   * default for grading — a token nobody examined must not be treated as
-   * safely renounced. But reporting that default as "mint authority is LIVE"
-   * states a fact nobody established, and for an established token it is
-   * simply false. Grading fails safe; prose must say "unverified".
+   * Seeded from the token provider, because one of them genuinely reads them:
+   * Jupiter ships the audit flags, and the live authority ADDRESSES when the
+   * audit is silent. Anything that did not read the mint account leaves
+   * "authorities" in the unmeasured set above, and the two authority risk
+   * factors stand down rather than grading a token nobody examined.
+   *
+   * The flags themselves still fail safe to not-revoked, so a reader that
+   * ignores the unmeasured set can never conclude a token is renounced. Prose
+   * must say "unverified"; grading abstains.
    */
-  let authorityChecked = false;
+  let authorityChecked = !unmeasured.has("authorities");
+  let authoritySource = authorityChecked ? sources.token.name : undefined;
   if (sources.security) {
     // The failure REASON is the diagnostic. Swallowing it into a null told the
     // caller "no holder data" whether the key was rejected, the endpoint had
@@ -272,9 +277,15 @@ export async function liveFeatures(
         top10Pct = raw > 1 ? raw / 100 : raw;
         unmeasured.delete("top10Pct");
       }
+      // A chain read outranks a vendor's audit flag, so this overwrites rather
+      // than reconciles. Where the two disagree the caller surfaces both — see
+      // `findDisagreements` — and the disagreement panel says to treat the more
+      // dangerous answer as operative.
       mintRevoked = sec.mintAuthorityRevoked;
       freezeRevoked = sec.freezeAuthorityRevoked;
       authorityChecked = true;
+      authoritySource = sources.security.name;
+      unmeasured.delete("authorities");
       // "top-10 holders 0.0%" is the zeros problem wearing prose. A provider
       // that did not read concentration must not have its placeholder printed
       // as a measurement — the line says unmeasured, exactly like the vector.
@@ -388,6 +399,28 @@ export async function liveFeatures(
       // unmeasured set, which is the mirror of the bug this machinery exists to
       // stop: refusing to record a real negative result.
       if (r.insiderPct !== undefined) unmeasured.delete("insiderPct");
+
+      // The vendor is a genuine reader of the mint account, not just an
+      // opinion: its `token` block carries the authority addresses, null when
+      // revoked. That matters because the chain RPC is the flakiest source here
+      // — one rate-limited call used to leave the authorities UNVERIFIED on a
+      // token two other sources had already read.
+      //
+      // Where both read them and disagree, the DANGEROUS answer wins. The
+      // disagreement panel shows both claims; the score is not the place to
+      // split the difference on whether someone can mint more supply.
+      if (r.mintAuthority !== undefined && r.freezeAuthority !== undefined) {
+        const vendorMint = r.mintAuthority === null;
+        const vendorFreeze = r.freezeAuthority === null;
+        mintRevoked = authorityChecked ? mintRevoked && vendorMint : vendorMint;
+        freezeRevoked = authorityChecked ? freezeRevoked && vendorFreeze : vendorFreeze;
+        authoritySource = authorityChecked ? `${authoritySource} + ${r.source}` : r.source;
+        authorityChecked = true;
+        unmeasured.delete("authorities");
+      }
+      // The only source in this stack that sees a permanent delegate at all.
+      if (r.permanentDelegate !== undefined) unmeasured.delete("permanentDelegate");
+      if (r.lpLockedPct !== undefined) unmeasured.delete("lpLocked");
     } else {
       provenance.push(`${sources.risk.name}: no report for this mint — risk ungraded`);
     }
@@ -493,6 +526,16 @@ export async function liveFeatures(
     sniperPct: snapshot.sniperPct,
     devHoldsPct: snapshot.devHoldsPct,
     devSold: false,
+    // The security facts, in the VECTOR at last. They have been on TokenInfo
+    // since the day it was written and the scorer had no field to read them
+    // from, so mint authority, freeze authority, the permanent delegate and the
+    // LP lock moved no number at all — while the page beside the score printed
+    // them as the reasons to stay away. Any of these that nobody read is in the
+    // unmeasured set, and the factors that read it stand down.
+    mintAuthorityRevoked: mintRevoked,
+    freezeAuthorityRevoked: freezeRevoked,
+    permanentDelegate: risk?.permanentDelegate != null,
+    lpLockedPct: risk?.lpLockedPct ?? 0,
     // Same 18% rule the simulator uses, so the two are comparable.
     exitDepthUsd: liquidityUsd * 0.18,
     regime: regimeOf(c?.momentum24h ?? 0, c?.volumeAccel ?? 1, liquidityUsd),
@@ -505,29 +548,35 @@ export async function liveFeatures(
     unmeasured: [...unmeasured],
   };
 
-  // The authority flags are not FeatureVector fields but they are the loudest
-  // facts about a memecoin, so they reach the caller through provenance —
-  // phrased according to whether anyone actually looked.
+  // The authorities now reach the SCORE through the vector above. They still
+  // get a provenance line, phrased according to whether anyone actually looked,
+  // and it now names who did.
   if (authorityChecked) {
-    if (!mintRevoked) provenance.push("WARNING: mint authority is LIVE — supply can be inflated");
-    if (!freezeRevoked) provenance.push("WARNING: freeze authority is LIVE — transfers can be frozen");
-    if (mintRevoked && freezeRevoked) provenance.push("mint and freeze authorities both revoked");
+    if (!mintRevoked) provenance.push(`WARNING (${authoritySource}): mint authority is LIVE — supply can be inflated`);
+    if (!freezeRevoked) provenance.push(`WARNING (${authoritySource}): freeze authority is LIVE — transfers can be frozen`);
+    if (mintRevoked && freezeRevoked) provenance.push(`${authoritySource}: mint and freeze authorities both revoked`);
   } else {
     provenance.push(
-      "mint and freeze authorities UNVERIFIED — no keyless source publishes them. " +
-        "Graded as not-revoked so an unexamined token is never treated as safe, " +
-        "which is not the same as knowing they are live",
+      "mint and freeze authorities UNVERIFIED — nothing here could read the mint account. " +
+        "The two authority factors STAND DOWN rather than grading an unexamined token as safe, " +
+        "and the engine abstains",
     );
   }
+  if (unmeasured.has("lpLocked")) {
+    provenance.push("LP lock UNMEASURED — no source reported it, so the LP factor stands down");
+  }
 
-  // The verified authorities are written back into the info the caller gets.
-  // Without this the token provider's placeholder survives — coingecko hardcodes
-  // both to false — so anything reading `result.info` saw "mint authority live"
-  // on a token the chain had just confirmed renounced, while the provenance
-  // beside it said revoked. Two answers to one question is worse than either.
-  const verified: TokenInfo = authorityChecked
-    ? { ...(info as TokenInfo), mintAuthorityRevoked: mintRevoked, freezeAuthorityRevoked: freezeRevoked }
-    : (info as TokenInfo);
+  // The verified authorities and the permanent delegate are written back into
+  // the info the caller gets. Without this the token provider's placeholder
+  // survives — coingecko hardcodes both to false — so anything reading
+  // `result.info` saw "mint authority live" on a token the chain had just
+  // confirmed renounced, while the provenance beside it said revoked. Two
+  // answers to one question is worse than either.
+  const verified: TokenInfo = {
+    ...(info as TokenInfo),
+    ...(authorityChecked ? { mintAuthorityRevoked: mintRevoked, freezeAuthorityRevoked: freezeRevoked } : {}),
+    ...(risk?.permanentDelegate !== undefined ? { permanentDelegate: risk.permanentDelegate !== null } : {}),
+  };
 
   return {
     features,
@@ -538,7 +587,7 @@ export async function liveFeatures(
     flow: flowDetail,
     risk,
     authorityChecked,
-    authoritySource: authorityChecked ? sources.security?.name : undefined,
+    authoritySource,
   };
 }
 

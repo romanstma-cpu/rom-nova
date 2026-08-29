@@ -43,6 +43,13 @@ const GT_UNMEASURED: readonly UnmeasuredField[] = [
   "holders",
   "uniqueBuyers1h",
   "uniqueSellers1h",
+  // Nor the security facts. This API returns no authority state at any depth,
+  // and the adapter's hardcoded `mintAuthorityRevoked: false` below is a
+  // fail-safe default rather than a reading — declared so the scorer drops the
+  // authority factors instead of penalising a token nobody examined.
+  "authorities",
+  "permanentDelegate",
+  "lpLocked",
 ];
 
 // ---------------------------------------------------------------- rate limit

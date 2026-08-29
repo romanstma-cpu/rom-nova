@@ -93,7 +93,11 @@ function TokenInner() {
   if (!mint || error) {
     return (
       <Empty>
-        {error ? `Could not load this token: ${error}. ` : "Token not found. "}
+        {/* The message carries the reason from the handler, which distinguishes
+            a mint nobody lists from a source that was rate-limited. Rendered
+            as-is rather than reworded, because the handler is the only thing
+            that knows which of the two happened. */}
+        <div className="max-w-[520px] mx-auto leading-relaxed">{error ?? "No mint given."}</div>
         <Link className="link" href="/scanner">
           Back to the scanner.
         </Link>
@@ -166,7 +170,7 @@ function LiveToken({ detail }: { detail: LiveTokenDetail }) {
               {d.source.toUpperCase()}
             </span>
           </div>
-          <div className="flex items-center gap-2 mt-0.5">
+          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <button
               className="num text-[10.5px] faint hover:text-[var(--accent)]"
               onClick={() => {
@@ -185,10 +189,31 @@ function LiveToken({ detail }: { detail: LiveTokenDetail }) {
             >
               explorer ↗
             </a>
+            {/* Not a safety signal — anybody can put a link in token metadata —
+                but a memecoin with no site, no X and no group is a different
+                object from one with all three, and every reference terminal
+                shows them. */}
+            {LINK_KINDS.map(([key, label]) => {
+              const href = info.links?.[key];
+              return href ? (
+                <a key={key} className="link text-[10.5px]" href={href} target="_blank" rel="noreferrer">
+                  {label} ↗
+                </a>
+              ) : null;
+            })}
+            {!info.links && (
+              <span className="faint text-[10.5px]" title={`${d.source} carried no website, X or Telegram for this mint`}>
+                no socials listed
+              </span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-5 ml-auto num text-[13px] flex-wrap">
           <HeaderStat label="Price">{fmtUsd(snap.priceUsd)}</HeaderStat>
+          {/* The four windows every reference terminal leads with. This page
+              opened on Price/Mcap/Liquidity and made a reader hunt the chart for
+              the single most-glanced-at number on a token screen. */}
+          <ChangeStrip snap={snap} source={d.source} />
           <HeaderStat label="Mcap">{fmtUsd(snap.marketCapUsd)}</HeaderStat>
           <HeaderStat label="Liquidity">{fmtUsd(snap.liquidityUsd)}</HeaderStat>
           <HeaderStat label="24h vol">{fmtUsd(snap.volume24hUsd)}</HeaderStat>
@@ -222,6 +247,28 @@ function LiveToken({ detail }: { detail: LiveTokenDetail }) {
         </div>
       </div>
 
+      {/* The verdict's own headline, above everything. A score of 35 beside a
+          green bar meant nothing until the label could be vetoed; now that it
+          can, the reason for the veto is the first thing on the page. */}
+      {signal.securityVeto && (
+        <div className="panel p-3 border-l-2" style={{ borderLeftColor: "var(--neg)" }}>
+          <div className="text-[13px] neg font-semibold">EXTREME RISK — {signal.securityVeto}</div>
+          <div className="text-[11px] faint mt-1 leading-snug">
+            This is a veto on the verdict, not a weight in it. The score below is still the honest
+            weighted mean of everything that was measured; no amount of liquidity, momentum or
+            organic activity is allowed to label this token positive while that is true.
+          </div>
+        </div>
+      )}
+      {signal.noTradeReason && !signal.securityVeto && (
+        <div className="panel p-3 border-l-2" style={{ borderLeftColor: "var(--warn)" }}>
+          <div className="text-[12.5px] warn font-semibold">NO TRADE — {signal.noTradeReason}</div>
+          <div className="text-[11px] faint mt-1 leading-snug">
+            The engine is allowed to abstain, and this is an abstention rather than a verdict: it
+            says the evidence was not there, not that the token is bad.
+          </div>
+        </div>
+      )}
       {d.disagreements.length > 0 && <Disagreements items={d.disagreements} />}
 
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-3">
@@ -597,13 +644,18 @@ function SecurityPanel({ detail }: { detail: LiveTokenDetail }) {
     <div className="panel p-3">
       <div className="panel-title mb-2">Security · who says so</div>
 
+      {/* The unverified wording used to claim the score "graded it as live".
+          Nothing graded it — the authorities were not in the feature vector at
+          all. They are now, and the true statement is the one below: the
+          factors stand down and the engine abstains, which is neither treating
+          the token as safe nor asserting a danger nobody established. */}
       <Attributed
         ok={info.mintAuthorityRevoked}
         verified={authorityChecked}
         by={authorityChecked ? (authoritySource ?? "chain") : source}
         okText="Mint authority revoked — supply is fixed"
         badText="Mint authority LIVE — supply can be inflated"
-        unverifiedText="Mint authority UNVERIFIED — graded as live so an unexamined token is never treated as safe"
+        unverifiedText="Mint authority UNVERIFIED — nobody could read the mint account, so the Mint Authority factor stands down and the engine abstains"
       />
       <Attributed
         ok={info.freezeAuthorityRevoked}
@@ -611,7 +663,7 @@ function SecurityPanel({ detail }: { detail: LiveTokenDetail }) {
         by={authorityChecked ? (authoritySource ?? "chain") : source}
         okText="Freeze authority revoked"
         badText="Freeze authority LIVE — balances can be frozen"
-        unverifiedText="Freeze authority UNVERIFIED — graded as live for the same reason"
+        unverifiedText="Freeze authority UNVERIFIED — same read, same stand-down"
       />
 
       {risk?.permanentDelegate !== undefined && (
@@ -660,9 +712,16 @@ function SecurityPanel({ detail }: { detail: LiveTokenDetail }) {
           {risk.insiderNetworks !== undefined && (
             <>
               {" · "}
-              <span className={risk.insiderNetworks > 0 ? "warn" : ""}>
+              {/* Scoped explicitly. This line and the Insider Risk factor sat on
+                  one screen saying "3 insider networks, 12 wallets" and
+                  "insider-linked wallets hold ~0% of supply" — both true of
+                  different populations, and read together, nonsense. */}
+              <span
+                className={risk.insiderNetworks > 0 ? "warn" : ""}
+                title="Found by the vendor's graph analysis across the whole holder base. The Insider Risk factor in the audit only sums insider flags among the published top holders, so a network below them scores zero there and still appears here."
+              >
                 {risk.insiderNetworks} insider network{risk.insiderNetworks === 1 ? "" : "s"}
-                {risk.graphInsiders !== undefined ? `, ${risk.graphInsiders} wallets` : ""}
+                {risk.graphInsiders !== undefined ? `, ${risk.graphInsiders} wallets` : ""} chain-wide
               </span>
             </>
           )}
@@ -830,6 +889,48 @@ function ProvenancePanel({ lines, asOf }: { lines: string[]; asOf: number }) {
 }
 
 // ---------------------------------------------------------------- shared bits
+
+/** Which social links to surface, and in what order. */
+const LINK_KINDS: readonly [keyof NonNullable<TokenInfo["links"]>, string][] = [
+  ["website", "site"],
+  ["twitter", "X"],
+  ["telegram", "TG"],
+];
+
+/**
+ * 5m / 1h / 6h / 24h price change.
+ *
+ * Every window that was not published renders a dash rather than +0.0%, which
+ * on a price-change strip is the most misleading zero on the page: a flat tape
+ * and an unfetched one look identical, and this is the number a reader glances
+ * at before anything else.
+ */
+function ChangeStrip({ snap, source }: { snap: TokenSnapshot; source: string }) {
+  const why = `${source} published no price change for this window`;
+  const windows: [string, number | undefined][] = [
+    ["5m", snap.momentum5m],
+    ["1h", snap.momentum1h],
+    ["6h", snap.momentum6h],
+    ["24h", snap.momentum24h],
+  ];
+  return (
+    <div className="text-right">
+      <div className="panel-title">Change</div>
+      <div className="mt-0.5 flex items-center gap-2.5">
+        {windows.map(([label, value]) => (
+          <span key={label} className="flex items-baseline gap-1">
+            <span className="faint text-[9.5px]">{label}</span>
+            {value === undefined ? (
+              <Dash why={why} />
+            ) : (
+              <span className={value >= 0 ? "pos" : "neg"}>{fmtPct(value)}</span>
+            )}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function HeaderStat({ label, children }: { label: string; children: React.ReactNode }) {
   return (

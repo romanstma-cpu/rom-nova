@@ -89,6 +89,15 @@ export function extractFeatures(store: DemoStore, mint: string, asOf: number): F
     sniperPct: stats.sniperPct,
     devHoldsPct: stats.devHoldsPct,
     devSold: stats.devSold,
+    // The simulator authored these when it generated the token, so unlike the
+    // live path they are always known here.
+    mintAuthorityRevoked: tok.info.mintAuthorityRevoked,
+    freezeAuthorityRevoked: tok.info.freezeAuthorityRevoked,
+    permanentDelegate: tok.info.permanentDelegate,
+    // The one security fact the simulator has no concept of. Declared below
+    // rather than invented: a synthetic 100% lock would be the most reassuring
+    // possible reading of something this universe does not model.
+    lpLockedPct: 0,
     exitDepthUsd: liqNow * 0.18,
     regime: market.regime,
     sampleSize: trades.length + Math.min(candles.length, 48) + totalTrades1h,
@@ -96,6 +105,10 @@ export function extractFeatures(store: DemoStore, mint: string, asOf: number): F
     // Carried, not recomputed. Whichever provider built the snapshot is the
     // only thing that knows what it could not see, and the scorer needs that
     // to drop those factors rather than read their zeros as good news.
-    unmeasured: snap.unmeasured,
+    //
+    // Plus the one gap the SIMULATOR itself has: it does not model liquidity
+    // locking, so the LP factor stands down here exactly as it would against a
+    // provider that did not publish it.
+    unmeasured: [...(snap.unmeasured ?? []), "lpLocked" as const],
   };
 }

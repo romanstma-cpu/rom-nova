@@ -105,11 +105,29 @@ export async function handleTokenDetail(
   asOf?: number,
   profile: StrategyProfileId = "balanced",
 ) {
+  // A live FAILURE and an unlisted mint are different answers and used to
+  // produce the same one. With the token provider rate-limited, every real mint
+  // fell through to a simulator that has never heard of it and the page said
+  // "unknown mint" — a permanent-sounding claim about the token standing in for
+  // a temporary fact about us. The reason is carried and only surfaces if the
+  // simulator misses too, so a demo mint still resolves normally.
+  let liveError: string | null = null;
   if (asOf === undefined) {
-    const live = await liveTokenDetail(mint, profile).catch(() => null);
-    if (live) return { ...live, demo: false };
+    try {
+      const live = await liveTokenDetail(mint, profile);
+      if (live) return { ...live, demo: false };
+    } catch (err) {
+      liveError = err instanceof Error ? err.message : String(err);
+    }
   }
-  return demoTokenDetail(store, mint, asOf, profile);
+  try {
+    return demoTokenDetail(store, mint, asOf, profile);
+  } catch (err) {
+    if (liveError && err instanceof ApiError && err.status === 404) {
+      throw new ApiError(503, `live data unavailable — ${liveError}. This is a source problem, not a verdict on the token.`);
+    }
+    throw err;
+  }
 }
 
 function demoTokenDetail(store: DemoStore, mint: string, asOf?: number, profile: StrategyProfileId = "balanced") {

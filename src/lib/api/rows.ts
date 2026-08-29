@@ -218,9 +218,10 @@ export function buildLiveTokenRows(
       // "+0.0%" must never stand in for "nobody looked".
       m5: snap.momentum5m ?? 0,
       h1: snap.momentum1h ?? 0,
-      // 6h has no dedicated field on the snapshot; 24h is the nearest published
-      // window and is labelled as such rather than interpolated into a 6h claim.
-      h6: snap.momentum24h ?? 0,
+      // The real 6h window now that the snapshot carries one. This used to be
+      // the 24h figure standing in for it, which is a different measurement
+      // wearing the wrong label.
+      h6: snap.momentum6h ?? 0,
       h24: snap.momentum24h ?? 0,
       volumeAccel: snap.volumeAccel ?? 0,
       buys1h: snap.buys1h,

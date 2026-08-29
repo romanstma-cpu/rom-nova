@@ -48,6 +48,16 @@ export interface TokenInfo {
    */
   devMints?: number;
   devMigrations?: number;
+  /**
+   * Where the project says it lives, when the source carries it.
+   *
+   * Not a safety signal — anybody can put a link in token metadata — but a
+   * memecoin with no site, no X account and no group is a different object from
+   * one with all three, and every reference terminal shows them.
+   */
+  links?: { twitter?: string; telegram?: string; website?: string };
+  /** Hosted logo, when the source has one. Absent falls back to `hue`. */
+  icon?: string;
 }
 
 /**
@@ -98,7 +108,38 @@ export type UnmeasuredField =
    * knowing who moved is not knowing whether they are any good, and no source
    * here carries wallet reputation.
    */
-  | "smartMoney";
+  | "smartMoney"
+  /**
+   * Mint and freeze authority, together, because one source reads the mint
+   * account and gets both or neither.
+   *
+   * These reached the UI for a long time and never reached the SCORE. The
+   * scorer had no field to read them from, so a token whose deployer could
+   * still mint at will was graded on liquidity and momentum like any other,
+   * and could render POSITIVE inches from a security panel saying the supply
+   * was not fixed.
+   *
+   * Declaring them makes the three states distinct, which is the whole point:
+   * REVOKED is a measured good result, LIVE is a measured bad one, and
+   * UNVERIFIED is neither — the factor stands down and the engine abstains
+   * rather than treating an unexamined mint as a safe one.
+   */
+  | "authorities"
+  /**
+   * A permanent delegate — an SPL-2022 extension whose holder can move any
+   * balance without permission. Only the risk vendor reports it; every token
+   * adapter hardcodes `permanentDelegate: false`, which is a default and not
+   * a reading.
+   */
+  | "permanentDelegate"
+  /**
+   * Share of the liquidity pool that is locked or burned.
+   *
+   * The actual rug mechanic. Nothing else in this stack sees it, and the
+   * simulator does not model it at all, so a demo vector declares it here
+   * rather than inventing a lock.
+   */
+  | "lpLocked";
 
 /** Point-in-time market state for a token. `ts` is when it was observed. */
 export interface TokenSnapshot {
@@ -149,6 +190,12 @@ export interface TokenSnapshot {
   momentum1h?: number;
   momentum24h?: number;
   momentum5m?: number;
+  /**
+   * The 6h window, carried because every reference terminal leads with
+   * 5m/1h/6h/24h and this was the one of the four nothing here published.
+   * `rows.ts` was filling its 6h column with the 24h figure.
+   */
+  momentum6h?: number;
   /** 6h volume over its trailing baseline; 1.0 is "running at its usual rate". */
   volumeAccel?: number;
   /** 24h change in holder count, percent. */
@@ -349,11 +396,33 @@ export interface FeatureVector {
   socialAccel: number;
   ageHours: number;
   buySellImbalance: number; // -1..1
+  /**
+   * Share of supply held by insider-flagged wallets AMONG THE TOP HOLDERS the
+   * source published — not of the whole cap table.
+   *
+   * Named carefully because the two readings contradict each other on screen.
+   * RugCheck's graph analysis found three insider networks of twelve wallets on
+   * a token whose top-twenty rows carried no insider flag at all, and the
+   * factor built on this field said "insider-linked wallets hold ~0% of supply"
+   * directly beside it. Zero here means "none of the top holders examined was
+   * flagged", never "there are no insiders".
+   */
   insiderPct: number;
   bundlerPct: number;
   sniperPct: number;
   devHoldsPct: number;
   devSold: boolean;
+  /**
+   * Whether a source actually READ the mint account and found the authority
+   * null. False means live — the key holder can still inflate supply or freeze
+   * balances — and `unmeasured` carrying "authorities" means nobody looked.
+   */
+  mintAuthorityRevoked: boolean;
+  freezeAuthorityRevoked: boolean;
+  /** True when a permanent delegate is SET. */
+  permanentDelegate: boolean;
+  /** Share of LP locked or burned, 0..1. */
+  lpLockedPct: number;
   exitDepthUsd: number; // how much can exit within 5% impact
   regime: MarketRegime;
   /** count of independent data points behind this vector */
@@ -429,6 +498,21 @@ export interface Signal {
    * reason was computed, used to pick a label, and thrown away.
    */
   noTradeReason?: string;
+  /**
+   * A measured, disqualifying security fact — set only when a source actually
+   * READ it and the answer was bad.
+   *
+   * A weight cannot express this. A live mint authority means the supply can be
+   * inflated out from under a holder at any moment, and no amount of liquidity,
+   * momentum or organic activity trades that away — but a risk factor worth
+   * nine points cannot stop a strong token from rendering POSITIVE. So it is a
+   * veto on the LABEL rather than a subtraction from the score, and the score
+   * stays an honest weighted mean of what was measured.
+   *
+   * Absent when the authorities are merely unverified. That is a different
+   * state and it routes to abstention, not to a verdict.
+   */
+  securityVeto?: string;
   profile: StrategyProfileId;
   factors: SignalFactor[];
   risks: RiskFlag[];

@@ -201,7 +201,13 @@ export class RugCheckRiskProvider implements TokenRiskProvider {
       topHolders,
       labelledHolders: labelled,
       insiderPct,
-      totalHolders: full.totalHolders,
+      // A zero here is the vendor saying "not indexed yet", never "nobody holds
+      // this" — it arrives on freshly-launched mints alongside twenty populated
+      // holder rows, and it reached the page as the sentence "0 holders in
+      // total" printed directly above them. Reproducible on CYBER, PRSCOIN and
+      // FROGGY. Normalised HERE rather than at each reader, because two
+      // consumers had already written two different guards for it.
+      totalHolders: full.totalHolders && full.totalHolders > 0 ? full.totalHolders : undefined,
       rugged: full.rugged,
       creator: full.creator || undefined,
       creatorHoldsPct: creatorShare(full),

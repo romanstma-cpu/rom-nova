@@ -230,6 +230,13 @@ async function assemble(
   const providers = getProviders();
   if (providers.token.name === "demo") return null;
 
+  // Deliberately NOT `.catch(() => null)`.
+  //
+  // A swallowed error and an unlisted mint both became null, so a rate-limited
+  // token provider fell through to the simulator, missed there too, and reached
+  // the reader as "unknown mint" — a definite claim about the token standing in
+  // for a temporary fact about us. Returning null still means "not listed, try
+  // the simulator"; a throw now carries the real reason up to the handler.
   const scored = await liveSignal(
     mint,
     {
@@ -244,7 +251,7 @@ async function assemble(
     // The full report, which is what a detail page is for: top holders with
     // per-holder shares, the label map, the insider graph and the creator.
     true,
-  ).catch(() => null);
+  );
   if (!scored) return null;
 
   const { signal, result } = scored;
@@ -376,8 +383,10 @@ export function findDisagreements(
   if (!risk) return out;
 
   // ---- how many people hold this
+  // `totalHolders` is normalised to undefined-or-positive by the provider, so
+  // this no longer carries its own `> 0` rule. One field, one guard, one place.
   const jupHolders = unmeasured.includes("holders") ? undefined : snapshot.holders;
-  if (jupHolders !== undefined && jupHolders > 0 && risk.totalHolders !== undefined && risk.totalHolders > 0) {
+  if (jupHolders !== undefined && jupHolders > 0 && risk.totalHolders !== undefined) {
     const ratio = Math.max(jupHolders, risk.totalHolders) / Math.min(jupHolders, risk.totalHolders);
     if (ratio >= HOLDER_DISAGREEMENT_RATIO) {
       out.push({

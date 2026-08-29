@@ -22,11 +22,12 @@ import {
   HOLDER_DISAGREEMENT_RATIO,
 } from "@/lib/api/detail";
 import { DemoStore } from "@/lib/demo/store";
-import { handleCandles } from "@/lib/api/handlers";
-import { computeSignal, auditFactors, scoreFeatures, PROFILES } from "@/lib/engine/signals";
+import { handleCandles, handleTokenDetail } from "@/lib/api/handlers";
+import { computeSignal, auditFactors, scoreFeatures, PROFILES, RISK_FACTORS } from "@/lib/engine/signals";
 import { extractFeatures } from "@/lib/engine/features";
+import { authorityState } from "@/lib/providers/jupiter";
 import type { TokenFlow, TokenRisk } from "@/lib/providers/types";
-import type { TokenInfo, TokenSnapshot, UnmeasuredField } from "@/lib/types";
+import type { FeatureVector, StrategyProfileId, TokenInfo, TokenSnapshot, UnmeasuredField } from "@/lib/types";
 
 const MINT = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263";
 const CREATOR = "9ENSWnedBEAvVB7jJKZrLRZ9vuVuJdBE7uJt2oAsG1jr";
@@ -124,6 +125,67 @@ describe("asking for more detail must not return less", () => {
   });
 });
 
+describe("a vendor's zero that means 'not indexed yet'", () => {
+  it("does not print '0 holders in total' above twenty populated rows", async () => {
+    // Live DOM on a one-minute-old mint: the panel header said 0 holders while
+    // the table below it listed twenty, and the page header said 80. A freshly
+    // launched token gets `totalHolders: 0` from the vendor before its indexer
+    // catches up; it is a silence, not a count.
+    mockByPath({ report: { ...REPORT, totalHolders: 0 }, summary: SUMMARY });
+    const r = await new RugCheckRiskProvider().getTokenRisk(MINT, true);
+    expect(r?.totalHolders).toBeUndefined();
+    expect(holderTable(r ?? undefined).totalHolders).toBeUndefined();
+    // The rows are real and must survive the correction.
+    expect(holderTable(r ?? undefined).rows.length).toBe(3);
+  });
+
+  it("keeps the guard in ONE place, so no reader has to re-derive it", () => {
+    // The bug shipped because the page and the disagreement finder each wrote
+    // their own rule for the same field, and only one of them was right.
+    const zeroed = { ...RISK, totalHolders: undefined };
+    expect(findDisagreements("jupiter", info(), snap(), zeroed, true, "solana-rpc").some((d) =>
+      d.question.includes("How many wallets"),
+    )).toBe(false);
+  });
+});
+
+describe("authorityState — Jupiter as a real reader, not a default", () => {
+  it("reads the audit flags when the audit ran", () => {
+    expect(authorityState({ audit: { mintAuthorityDisabled: true, freezeAuthorityDisabled: true } })).toEqual({
+      mintRevoked: true,
+      freezeRevoked: true,
+      known: true,
+    });
+  });
+
+  it("reads the live ADDRESSES when the audit is silent", () => {
+    // SKHY's exact shape: no audit flags at all, both authority addresses
+    // present, and both genuinely live on chain. Reading the audit block alone
+    // reported "unknown" for the single most dangerous token in the sample.
+    expect(
+      authorityState({
+        audit: { topHoldersPercentage: 32.3 } as never,
+        mintAuthority: "Bv1CLW7r7JNv18Zgp8bebE6KPjhkaeFHCHgNDHHXjkYD",
+        freezeAuthority: "2cVYpagTt7ZGc3mmTXBa7fAznUtx5DUu6aCq8uVDaf4a",
+      }),
+    ).toEqual({ mintRevoked: false, freezeRevoked: false, known: true });
+  });
+
+  it("reports unknown, and fails safe, when the payload says neither", () => {
+    const a = authorityState({});
+    expect(a.known).toBe(false);
+    // Unknown must never read as renounced for anything that ignores `known`.
+    expect(a.mintRevoked).toBe(false);
+    expect(a.freezeRevoked).toBe(false);
+  });
+
+  it("treats a half-answer as no answer", () => {
+    // One read of the mint account yields both. A payload carrying only one is
+    // not a reading of that account.
+    expect(authorityState({ audit: { mintAuthorityDisabled: true } }).known).toBe(false);
+  });
+});
+
 describe("creatorShare — arithmetic on one source, or nothing", () => {
   it("divides the vendor's own two fields", () => {
     expect(creatorShare({ creatorBalance: 250_000, token: { supply: 1_000_000_000 } })).toBeCloseTo(0.00025, 8);
@@ -165,9 +227,11 @@ describe("auditFactors — the score, fully auditable", () => {
     const sig = computeSignal(store, demoMint, now)!;
     const audit = auditFactors(sig);
     const profileKeys = Object.keys(PROFILES.balanced.weights).length;
-    // Signal factors plus the four risk factors that subtract from the score.
+    // Counted against the definitions rather than a literal, so adding a factor
+    // updates the expectation instead of failing a test that was only ever
+    // asserting "nobody touched this".
     expect(audit.rows.filter((r) => r.kind === "signal").length).toBe(profileKeys);
-    expect(audit.rows.filter((r) => r.kind === "risk").length).toBe(4);
+    expect(audit.rows.filter((r) => r.kind === "risk").length).toBe(RISK_FACTORS.length);
   });
 
   it("carries the weight the profile WANTED, not the zero the scorer stored", () => {
@@ -206,15 +270,216 @@ describe("auditFactors — the score, fully auditable", () => {
   it("counts risk factors that could not be assessed at all", () => {
     const blind = { ...extractFeatures(store, demoMint, now)!, unmeasured: BLIND };
     const audit = auditFactors(scoreFeatures(blind, demoMint, now, "balanced"));
-    // insider, bundler/sniper and dev all read blinded fields.
-    expect(audit.unmeasuredRisks).toBe(3);
+    // concentration, insider, bundler/sniper and dev all read blinded fields.
+    // The authority and LP factors do not: BLIND is what a keyless SNAPSHOT
+    // cannot see, and those come from elsewhere.
+    expect(audit.rows.filter((r) => r.kind === "risk" && !r.measured).map((r) => r.key).sort()).toEqual(
+      ["bundler_sniper", "concentration_risk", "dev_risk", "insider_risk"].sort(),
+    );
+    expect(audit.unmeasuredRisks).toBe(4);
   });
 
-  it("marks everything measured when nothing is missing", () => {
+  it("leaves exactly one gap on a simulated token: the LP lock it does not model", () => {
+    // The simulator authors its own authorities and delegate, so those are
+    // measured here. It has no concept of liquidity locking, and inventing a
+    // 100% lock would be the most reassuring possible reading of something this
+    // universe does not simulate.
     const audit = auditFactors(computeSignal(store, demoMint, now)!);
-    expect(audit.rows.every((r) => r.measured)).toBe(true);
+    expect(audit.rows.filter((r) => !r.measured).map((r) => r.key)).toEqual(["lp_lock"]);
+    // Coverage weighs the SIGNAL factors only, and none of those is missing.
     expect(audit.coverage).toBe(1);
-    expect(audit.unmeasuredRisks).toBe(0);
+    expect(audit.unmeasuredRisks).toBe(1);
+  });
+});
+
+// ------------------------------------------------- the security veto
+
+/**
+ * The strongest possible token: deep liquidity, running hot, organic, well
+ * distributed, whales accumulating. Every input the scorer likes.
+ *
+ * Used to prove the veto rather than the arithmetic. A penalty of nine points
+ * cannot stop a vector this good from rendering POSITIVE, which is exactly why
+ * a live mint authority must be a veto on the LABEL and not a weight.
+ */
+function strongVector(over: Partial<FeatureVector> = {}): FeatureVector {
+  return {
+    ...extractFeatures(store, demoMint, now)!,
+    liquidityUsd: 5_000_000,
+    liquidityChangePct: 20,
+    holderGrowthPct: 25,
+    momentum1h: 8,
+    momentum24h: 30,
+    volumeAccel: 2.6,
+    organicScore: 0.97,
+    socialScore: 0.8,
+    top10Pct: 0.12,
+    devHoldsPct: 0,
+    insiderPct: 0,
+    bundlerPct: 0,
+    sniperPct: 0,
+    devSold: false,
+    buySellImbalance: 0.4,
+    exitDepthUsd: 900_000,
+    smartMoneyNetFlowUsd: 300_000,
+    smartMoneyWallets: 6,
+    whaleNetFlowUsd: 400_000,
+    whaleBuys: 5,
+    whaleSells: 0,
+    ageHours: 400,
+    sampleSize: 120,
+    worstStalenessMs: 0,
+    regime: "risk_on",
+    mintAuthorityRevoked: true,
+    freezeAuthorityRevoked: true,
+    permanentDelegate: false,
+    lpLockedPct: 1,
+    unmeasured: [],
+    ...over,
+  };
+}
+
+const POSITIVE_LABELS = ["EXTREME POSITIVE", "STRONG POSITIVE", "POSITIVE", "WATCH"];
+
+describe("a token that can still be minted must never read POSITIVE", () => {
+  it("scores the strongest possible vector as positive when it is actually safe", () => {
+    // The control. Without this the tests below would pass on a scorer that
+    // labels everything EXTREME RISK.
+    const s = scoreFeatures(strongVector(), demoMint, now, "balanced");
+    expect(POSITIVE_LABELS).toContain(s.label);
+    expect(s.securityVeto).toBeUndefined();
+  });
+
+  it("vetoes the label on a LIVE mint authority, however good the tape is", () => {
+    const s = scoreFeatures(strongVector({ mintAuthorityRevoked: false }), demoMint, now, "balanced");
+    expect(s.label).toBe("EXTREME RISK");
+    expect(POSITIVE_LABELS).not.toContain(s.label);
+    expect(s.securityVeto).toMatch(/mint authority is LIVE/);
+  });
+
+  it("vetoes the label on a LIVE freeze authority", () => {
+    const s = scoreFeatures(strongVector({ freezeAuthorityRevoked: false }), demoMint, now, "balanced");
+    expect(s.label).toBe("EXTREME RISK");
+    expect(s.securityVeto).toMatch(/freeze authority is LIVE/);
+  });
+
+  it("vetoes the label on a permanent delegate", () => {
+    const s = scoreFeatures(strongVector({ permanentDelegate: true }), demoMint, now, "balanced");
+    expect(s.label).toBe("EXTREME RISK");
+    expect(s.securityVeto).toMatch(/permanent delegate/);
+  });
+
+  it("holds the veto across every strategy profile", () => {
+    // A profile is a set of weights. None of them is allowed to weigh its way
+    // past "the supply can be inflated at will" — including high_risk, whose
+    // whole point is tolerating risk.
+    for (const id of Object.keys(PROFILES) as StrategyProfileId[]) {
+      const s = scoreFeatures(strongVector({ mintAuthorityRevoked: false }), demoMint, now, id);
+      expect(POSITIVE_LABELS, `profile ${id} let a live mint authority through`).not.toContain(s.label);
+    }
+  });
+
+  it("actually subtracts points as well as vetoing", () => {
+    // The veto handles the label; the risk factors have to move the number too,
+    // or the score beside the label still says the token is fine.
+    const safe = scoreFeatures(strongVector(), demoMint, now, "balanced");
+    const unsafe = scoreFeatures(
+      strongVector({ mintAuthorityRevoked: false, freezeAuthorityRevoked: false, permanentDelegate: true, lpLockedPct: 0 }),
+      demoMint,
+      now,
+      "balanced",
+    );
+    expect(unsafe.score).toBeLessThan(safe.score);
+    const drop = safe.score - unsafe.score;
+    expect(drop, `only ${drop} points for four disqualifying findings`).toBeGreaterThanOrEqual(15);
+  });
+
+  it("puts the disqualifying fact at the top of the bear case", () => {
+    // The review found ANSEM's "WHAT COULD MAKE THIS FAIL" listing momentum
+    // risk and nothing about the security panel beside it.
+    const s = scoreFeatures(strongVector({ mintAuthorityRevoked: false }), demoMint, now, "balanced");
+    expect(s.bearCase[0]).toMatch(/^Disqualifying: .*mint authority is LIVE/);
+    expect(s.risks.some((r) => r.key === "mint_authority" && r.severity === "high")).toBe(true);
+    expect(s.kind).toBe("rug_risk_escalation");
+  });
+
+  it("does NOT veto when the authorities were merely unverified", () => {
+    // The distinction the whole design turns on. "We looked and it is live" is
+    // a verdict; "nobody looked" is an absence, and collapsing them would put a
+    // red EXTREME RISK on every token whose RPC call timed out.
+    const s = scoreFeatures(
+      strongVector({ mintAuthorityRevoked: false, unmeasured: ["authorities"] }),
+      demoMint,
+      now,
+      "balanced",
+    );
+    expect(s.securityVeto).toBeUndefined();
+    expect(s.label).toBe("NO TRADE");
+    expect(s.noTradeReason).toMatch(/could not be read/);
+  });
+
+  it("stands the authority factors down when unverified rather than penalising", () => {
+    const s = scoreFeatures(strongVector({ unmeasured: ["authorities"] }), demoMint, now, "balanced");
+    const rows = auditFactors(s).rows;
+    for (const key of ["mint_authority", "freeze_authority"]) {
+      const row = rows.find((r) => r.key === key)!;
+      expect(row.measured, `${key} should stand down`).toBe(false);
+      expect(row.contribution).toBe(0);
+    }
+    // And it must not be silently scored as safe either — the flag is raised.
+    expect(s.risks.some((r) => r.key === "authority_unknown")).toBe(true);
+  });
+
+  it("penalises an unlocked pool and rewards a locked one", () => {
+    const locked = scoreFeatures(strongVector({ lpLockedPct: 1 }), demoMint, now, "balanced");
+    const open = scoreFeatures(strongVector({ lpLockedPct: 0 }), demoMint, now, "balanced");
+    expect(open.score).toBeLessThan(locked.score);
+    expect(open.risks.some((r) => r.key === "lp_lock")).toBe(true);
+  });
+
+  it("lets extreme concentration subtract, not merely fail to add", () => {
+    // 65% in the top ten scored +0.0 before: the floor of a positive-family
+    // factor. A cap table that concentrated has to be able to cost points.
+    const spread = scoreFeatures(strongVector({ top10Pct: 0.12 }), demoMint, now, "balanced");
+    const concentrated = scoreFeatures(strongVector({ top10Pct: 0.8 }), demoMint, now, "balanced");
+    const risk = auditFactors(concentrated).rows.find((r) => r.key === "concentration_risk")!;
+    expect(risk.measured).toBe(true);
+    expect(risk.contribution).toBeLessThan(0);
+    expect(concentrated.score).toBeLessThan(spread.score);
+  });
+});
+
+describe("the abstention gate says something a reader can act on", () => {
+  it("names the authorities rather than counting anonymous risk factors", () => {
+    const s = scoreFeatures(strongVector({ unmeasured: ["authorities"] }), demoMint, now, "balanced");
+    expect(s.noTradeReason).toContain("mint and freeze authorities");
+  });
+
+  it("does not abstain merely because one source omits bundler data", () => {
+    // The old rule was `unmeasuredRisks >= 2`, and Jupiter never publishes
+    // bundlerPct or sniperPct — so a single further gap took every live token
+    // to NO TRADE. Five of six mints in review abstained through it, which is a
+    // verdict carrying no information.
+    const s = scoreFeatures(
+      strongVector({ unmeasured: ["bundlerPct", "sniperPct", "smartMoney"] }),
+      demoMint,
+      now,
+      "balanced",
+    );
+    expect(s.label).not.toBe("NO TRADE");
+  });
+
+  it("still abstains when most of the risk model is blind", () => {
+    const s = scoreFeatures(
+      strongVector({
+        unmeasured: ["bundlerPct", "sniperPct", "insiderPct", "devHoldsPct", "top10Pct", "lpLocked"],
+      }),
+      demoMint,
+      now,
+      "balanced",
+    );
+    expect(s.label).toBe("NO TRADE");
+    expect(s.noTradeReason).toMatch(/risk factors could be assessed/);
   });
 });
 
@@ -443,6 +708,28 @@ describe("findDisagreements — two answers to one question, both printed", () =
 
   it("says nothing at all when nobody graded the token", () => {
     expect(findDisagreements("jupiter", info(), snap(), undefined, true, "solana-rpc")).toEqual([]);
+  });
+});
+
+describe("a rate-limited source is not a verdict on the token", () => {
+  it("says the source failed rather than 'unknown mint'", async () => {
+    // Jupiter answers a burst with 429. Every real mint then missed in the
+    // simulator too and the page reported "unknown mint" — a permanent-sounding
+    // claim about the token standing in for a temporary fact about us.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("Rate limit exceeded, please try again later.", { status: 429 }),
+    );
+    await expect(handleTokenDetail(new DemoStore(5), MINT)).rejects.toThrow(/live data unavailable/);
+  });
+
+  it("still resolves a simulated mint while the live source is down", async () => {
+    // The fallback has to keep working, or one provider outage takes the whole
+    // demo universe with it.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("nope", { status: 429 }));
+    const store = new DemoStore(77);
+    const demoMintId = store.tokenList()[0].info.mint;
+    const out = (await handleTokenDetail(store, demoMintId)) as { mode: string };
+    expect(out.mode).toBe("demo");
   });
 });
 

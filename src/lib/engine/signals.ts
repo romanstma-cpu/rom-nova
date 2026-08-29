@@ -550,6 +550,103 @@ export function scoreFeatures(
   };
 }
 
+// ---------------------------------------------------------------- audit
+
+/**
+ * One row of the score, as a reader should see it.
+ *
+ * `SignalFactor` records what the scorer USED, which means a factor that stood
+ * down carries `weight: 0` — indistinguishable, in a table, from a factor this
+ * profile genuinely does not care about. The weight the profile WANTED lives in
+ * PROFILES and nowhere in the signal, so joining the two here keeps that join
+ * next to the weights instead of copying them into a page component where they
+ * would drift the first time a profile is retuned.
+ */
+export interface FactorAudit {
+  key: string;
+  name: string;
+  kind: "signal" | "risk";
+  /** What this profile assigns. Risk factors carry the profile's riskWeight. */
+  intendedWeight: number;
+  /** False when the factor's inputs were unmeasured and it left the average. */
+  measured: boolean;
+  normalized: number;
+  /** Signed points on the 0-100 scale. Negative for risk penalties. */
+  contribution: number;
+  explanation: string;
+}
+
+export interface ScoreAudit {
+  rows: FactorAudit[];
+  /**
+   * Share of the profile's signal weight that could actually be evaluated.
+   *
+   * Recomputed here from the same two inputs the scorer used, so it reproduces
+   * the number behind `noTradeReason` rather than approximating it.
+   */
+  coverage: number;
+  /** Weight the model wanted and could not use. */
+  missingWeight: number;
+  /** Risk factors that could not be assessed at all. */
+  unmeasuredRisks: number;
+}
+
+export function auditFactors(signal: Signal): ScoreAudit {
+  const profile = PROFILES[signal.profile] ?? PROFILES.balanced;
+  const byKey = new Map(signal.factors.map((f) => [f.key, f]));
+
+  const rows: FactorAudit[] = [];
+  let usedWeight = 0;
+  let missingWeight = 0;
+  let unmeasuredRisks = 0;
+
+  // Whether each factor stood down is read from the FEATURE VECTOR, not from
+  // the stored `weight: 0`. A profile is free to assign a factor zero weight,
+  // and then "dropped for lack of data" and "weighted at nothing" would look
+  // identical in the table — two different findings under one appearance.
+  for (const def of FACTORS) {
+    const f = byKey.get(def.key);
+    if (!f) continue;
+    const intended = profile.weights[def.key] ?? 0;
+    const ok = measured(def, signal.features);
+    if (ok) usedWeight += Math.abs(intended);
+    else missingWeight += Math.abs(intended);
+    rows.push({
+      key: def.key,
+      name: def.name,
+      kind: "signal",
+      intendedWeight: intended,
+      measured: ok,
+      normalized: f.normalized,
+      contribution: f.contribution,
+      explanation: f.explanation,
+    });
+  }
+
+  for (const def of RISK_FACTORS) {
+    const f = byKey.get(def.key);
+    if (!f) continue;
+    const ok = measured(def, signal.features);
+    if (!ok) unmeasuredRisks++;
+    rows.push({
+      key: def.key,
+      name: def.name,
+      kind: "risk",
+      intendedWeight: -profile.riskWeight,
+      measured: ok,
+      normalized: f.normalized,
+      contribution: f.contribution,
+      explanation: f.explanation,
+    });
+  }
+
+  // Guard the degenerate case rather than dividing by it: a profile with every
+  // signal weight at zero would otherwise report NaN coverage, which renders as
+  // a confident-looking blank.
+  const total = usedWeight + missingWeight;
+  return { rows, coverage: total > 0 ? usedWeight / total : 1, missingWeight, unmeasuredRisks };
+}
+
 // ---------------------------------------------------------------- batch + cache
 
 const cache = new Map<string, Signal[]>();

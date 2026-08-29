@@ -88,10 +88,13 @@ export async function localGet(url: string): Promise<LocalResponse> {
     }
     {
       const m = p.match(/^\/api\/tokens\/([^/]+)$/);
+      // Awaited for the same reason candles are: the detail path consults live
+      // providers now, so in the static build this is real network work done
+      // from the visitor's own browser.
       if (m)
         return {
           status: 200,
-          body: handleTokenDetail(store, m[1], num(q.get("asOf")), (q.get("profile") ?? "balanced") as StrategyProfileId),
+          body: await handleTokenDetail(store, m[1], num(q.get("asOf")), (q.get("profile") ?? "balanced") as StrategyProfileId),
         };
     }
     if (p === "/api/wallets") return { status: 200, body: handleWallets(store) };

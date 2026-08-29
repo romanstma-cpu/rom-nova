@@ -19,6 +19,7 @@ const MAX_EDGES = 420;
 const MAX_TRADE_EDGES = 160;
 import { buildFlowSeries, buildTokenRows, buildWalletRows } from "./rows";
 import { DEMO, candlesFor, trendingRows } from "./source";
+import { liveTokenDetail } from "./detail";
 import { dataMode, providerHealth } from "../providers/registry";
 import type { AlertCondition, BacktestConfig, StrategyProfileId } from "../types";
 
@@ -87,7 +88,31 @@ export async function handleTokens(store: DemoStore, q: TokensQuery) {
   };
 }
 
-export function handleTokenDetail(store: DemoStore, mint: string, asOf?: number, profile: StrategyProfileId = "balanced") {
+/**
+ * One token, in depth — real where it can be.
+ *
+ * Live first, because every link out of the live scanner points here with a
+ * real Solana mint, and the simulator's store has never heard of one. Until
+ * this branch existed, clicking any row in the scanner reached "Token not
+ * found": the most-clicked path in the app was a dead end.
+ *
+ * `asOf` forces the simulator for the same reason `handleTokens` does — it is a
+ * request to replay a past moment, and no live source can answer that.
+ */
+export async function handleTokenDetail(
+  store: DemoStore,
+  mint: string,
+  asOf?: number,
+  profile: StrategyProfileId = "balanced",
+) {
+  if (asOf === undefined) {
+    const live = await liveTokenDetail(mint, profile).catch(() => null);
+    if (live) return { ...live, demo: false };
+  }
+  return demoTokenDetail(store, mint, asOf, profile);
+}
+
+function demoTokenDetail(store: DemoStore, mint: string, asOf?: number, profile: StrategyProfileId = "balanced") {
   const tok = store.token(mint);
   const snap = store.snapshot(mint, asOf);
   if (!tok || !snap) throw new ApiError(404, "unknown mint");
@@ -132,6 +157,7 @@ export function handleTokenDetail(store: DemoStore, mint: string, asOf?: number,
     .slice(0, 12);
 
   return {
+    mode: "demo" as const,
     info: tok.info,
     archetype: tok.archetype,
     supply: tok.supply,
@@ -160,7 +186,13 @@ export function handleTokenDetail(store: DemoStore, mint: string, asOf?: number,
  */
 export async function handleCandles(store: DemoStore, mint: string, from?: number, to?: number) {
   const { data: candles, provenance } = await candlesFor(store, mint, from, to);
-  if (!candles.length) throw new ApiError(404, "unknown mint or empty range");
+  // The REASON, not a generic 404. "unknown mint or empty range" told a reader
+  // nothing about a real Solana token that simply has no OHLCV — measured on
+  // SKHY, where GeckoTerminal lists no pool at all — and the panel showing it
+  // sat on "LOADING CHART…" forever because it had nothing to print.
+  if (!candles.length) {
+    throw new ApiError(404, provenance.note ?? `no price history for this mint from ${provenance.source}`);
+  }
   return {
     candles,
     live: store.livePrice.get(mint) ?? null,

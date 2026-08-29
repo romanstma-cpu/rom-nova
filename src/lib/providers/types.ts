@@ -135,6 +135,51 @@ export interface TokenRisk {
   /** Whether the vendor has flagged this mint as already rugged. */
   rugged?: boolean;
   /**
+   * The deployer, per the vendor, and what it still holds.
+   *
+   * A second opinion on the two facts the token provider also publishes. They
+   * do not always agree, and a detail page that shows one without the other is
+   * picking a winner silently.
+   */
+  creator?: string;
+  /** Creator balance as a share of supply, 0..1, from the vendor's own two fields. */
+  creatorHoldsPct?: number;
+  /**
+   * Mint and freeze authority ADDRESSES, null when revoked.
+   *
+   * A third answer to the question the token provider and the chain both
+   * answer. Kept as the address rather than a boolean because "revoked" and
+   * "held by 2cVYpag…" are different amounts of information, and the address is
+   * the half a reader can check.
+   */
+  mintAuthority?: string | null;
+  freezeAuthority?: string | null;
+  /**
+   * A permanent delegate, when the mint has one — an SPL-2022 extension that
+   * lets its holder move any balance without permission.
+   *
+   * No other source in this stack reports it, and `TokenInfo.permanentDelegate`
+   * is hardcoded false by every adapter that fills it.
+   */
+  permanentDelegate?: string | null;
+  /** Transfer fee the mint charges, 0..1 of the transferred amount. */
+  transferFeePct?: number;
+  /** Pools the vendor found, and the liquidity it totals across them. */
+  markets?: number;
+  totalMarketLiquidityUsd?: number;
+  totalLpProviders?: number;
+  /** Launchpad name per the vendor, when it names one. */
+  launchpad?: string;
+  /**
+   * Insider clusters the vendor's graph analysis found, and how many wallets.
+   *
+   * Separate from `insiderPct`, which only counts insiders inside the TOP
+   * holders. A network of thirteen coordinated wallets none of which cracks the
+   * top twenty is invisible to that percentage and visible here.
+   */
+  insiderNetworks?: number;
+  graphInsiders?: number;
+  /**
    * The top holders, as published, with a label WHERE ONE EXISTS.
    *
    * No derived "concentration excluding pools" figure accompanies this, and
@@ -147,10 +192,20 @@ export interface TokenRisk {
    */
   topHolders?: {
     owner: string;
+    /**
+     * The token ACCOUNT holding the balance, when published.
+     *
+     * Distinct from the owner and worth carrying: the vendor's label map is
+     * keyed by both, and a reader checking a holder on an explorer wants the
+     * account that actually holds the tokens.
+     */
+    account?: string;
     pct: number;
     /** "Meteora DLMM Pool", "Streamflow Vault", "Creator" — undefined if unknown. */
     label?: string;
     insider?: boolean;
+    /** True when this row's owner or account IS the deployer the vendor named. */
+    isCreator?: boolean;
   }[];
   /** How many of `topHolders` carried a label, so a reader can judge the rest. */
   labelledHolders?: number;

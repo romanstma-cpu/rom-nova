@@ -103,6 +103,18 @@ export interface LiveFeatureResult {
    * that silently moved the number Nova is claiming as its own.
    */
   risk?: TokenRisk;
+  /**
+   * Whether a source actually READ the mint and freeze authorities, and which.
+   *
+   * `info.mintAuthorityRevoked` alone cannot say. The keyless token providers
+   * report both as not-revoked whether they checked or not, and this function
+   * overwrites them when a security provider answers — so the flag a caller
+   * receives is sometimes a chain read and sometimes a fail-safe default, and
+   * the two are worth very different amounts to a reader. A UI that cannot tell
+   * them apart will print "mint authority LIVE" on a token nobody examined.
+   */
+  authorityChecked: boolean;
+  authoritySource?: string;
   /** Human-readable account of where each part came from, for the caller to print. */
   provenance: string[];
 }
@@ -196,10 +208,17 @@ export async function liveFeatures(
   const candles = await sources.market
     .getCandles(mint, now - 45 * 24 * HOUR, now)
     .catch(() => [] as Candle[]);
+  // What the market source returned, and nothing about what that costs — the
+  // block below decides whether momentum is actually unavailable or comes from
+  // the token provider's published stats instead. This line used to assert
+  // "momentum and volume acceleration unavailable" and was then followed, four
+  // lines later, by "momentum from its 1h/24h stats": two answers to one
+  // question in the same report, which is the failure this file already fixed
+  // once for concentration.
   provenance.push(
     candles.length
       ? `${sources.market.name}: ${candles.length} hourly bars`
-      : `${sources.market.name}: NO candles — momentum and volume acceleration unavailable`,
+      : `${sources.market.name}: no bars returned`,
   );
 
   const price = snapshot.priceUsd;
@@ -510,7 +529,17 @@ export async function liveFeatures(
     ? { ...(info as TokenInfo), mintAuthorityRevoked: mintRevoked, freezeAuthorityRevoked: freezeRevoked }
     : (info as TokenInfo);
 
-  return { features, info: verified, snapshot, candles, provenance, flow: flowDetail, risk };
+  return {
+    features,
+    info: verified,
+    snapshot,
+    candles,
+    provenance,
+    flow: flowDetail,
+    risk,
+    authorityChecked,
+    authoritySource: authorityChecked ? sources.security?.name : undefined,
+  };
 }
 
 /** Convenience: assemble and score in one call. */

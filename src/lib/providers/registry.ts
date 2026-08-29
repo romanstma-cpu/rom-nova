@@ -11,6 +11,7 @@ import { HeliusWalletProvider } from "./helius";
 import { DexScreenerMarketProvider, DexScreenerTokenProvider } from "./dexscreener";
 import { GeckoTerminalMarketProvider, GeckoTerminalTokenProvider } from "./geckoterminal";
 import { SolanaRpcSecurityProvider } from "./solana-rpc";
+import { SqdFlowProvider } from "./sqd";
 import type {
   MarketDataProvider,
   ProviderSet,
@@ -36,6 +37,10 @@ export const FLAGS = {
   // Solana's own JSON-RPC. Keyless, browser-reachable, and the only free way
   // to know whether a mint's authorities are actually revoked.
   solanaRpc: () => flag("ENABLE_SOLANA_RPC"),
+  // SQD's Solana Portal. Keyless and browser-reachable, and the only source in
+  // this stack with WALLET-LEVEL FLOW — the gap every live feature vector has
+  // carried as a declared zero since the day it was written.
+  sqd: () => flag("ENABLE_SQD"),
   // keyless public reference sources — live by default, even in demo mode
   coingecko: () => flag("ENABLE_COINGECKO"),
   cryptocom: () => flag("ENABLE_CRYPTOCOM"),
@@ -191,6 +196,10 @@ export function getProviders(): ProviderSet {
       : FLAGS.solanaRpc()
         ? new SolanaRpcSecurityProvider()
         : new DemoSecurityProvider(),
+    // Left undefined rather than filled with a demo stand-in. There is no
+    // synthetic answer to "who bought this", and a caller that finds nothing
+    // here should say the flow is unmeasured, not read a simulated one.
+    flow: FLAGS.sqd() ? new SqdFlowProvider() : undefined,
     health: providerHealth,
   };
   return cached;
@@ -240,6 +249,20 @@ export function providerHealth(): ProviderHealth[] {
             "Solana pools, which the backtester cannot use until it stops taking a DemoStore",
         }
       : { ...demoHealth("coingecko"), mode: "disabled", status: "down", note: "disabled via ENABLE_COINGECKO" },
+  );
+  rows.push(
+    FLAGS.sqd()
+      ? {
+          ...healthOf("sqd", "live"),
+          note:
+            "keyless Solana Portal, browser-reachable. The only source here with WALLET-LEVEL " +
+            "FLOW — preOwner/postOwner balance deltas per mint, which every live feature vector " +
+            "has carried as a declared zero until now. Reads are BOUNDED: measured at 26MB for " +
+            "80 seconds of wSOL, so a busy mint returns a PARTIAL window and says which blocks " +
+            "it covered rather than truncating silently. Most rows are accounts merely touched " +
+            "by a transaction (75-93% depending on the mint) and are discarded",
+        }
+      : { ...demoHealth("sqd"), mode: "disabled", status: "down", note: "disabled via ENABLE_SQD — wallet flow unmeasured" },
   );
   rows.push(
     FLAGS.solanaRpc()

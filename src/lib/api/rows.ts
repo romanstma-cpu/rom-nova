@@ -75,7 +75,7 @@ export interface TokenRow {
 /** Numeric columns a keyless snapshot cannot fill without candle history. */
 export const NO_CANDLE_COLUMNS = ["m5", "h1", "h6", "h24", "volumeAccel"] as const;
 
-function riskLevelOf(s: Signal): RiskLevel {
+export function riskLevelOf(s: Signal): RiskLevel {
   const high = s.risks.filter((r) => r.severity === "high").length;
   const med = s.risks.filter((r) => r.severity === "medium").length;
   return high >= 2 ? "high" : high === 1 || med >= 3 ? "medium" : "low";

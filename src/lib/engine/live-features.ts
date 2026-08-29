@@ -89,6 +89,10 @@ const NEVER_AVAILABLE: readonly UnmeasuredField[] = [
   "uniqueSellers1h",
   // Requires a social-listening product.
   "socialScore",
+  // A flow provider says WHO moved; nothing here says whether they are any
+  // good. Wallet reputation needs a track record no source in this stack
+  // publishes, so smart money stays unmeasured even when whale flow is real.
+  "smartMoney",
 ];
 
 /**
@@ -242,18 +246,33 @@ export async function liveFeatures(
     provenance.push("no security provider configured — holder data unmeasured (set BIRDEYE_API_KEY)");
   }
 
+  // Without candles there is no momentum and no volume acceleration. This used
+  // to refuse the whole vector — "rather than emit zeros that mean flat" — and
+  // that was the right instinct with the wrong remedy, because it also threw
+  // away liquidity, trade imbalance, age, the authorities and the wallet flow,
+  // all of which were known. It is also what made a scored token LIST
+  // impossible: candles cost 4.4s each and zero of twelve arrived under any
+  // concurrency, so refusing on their absence meant refusing every row.
+  //
+  // Declaring beats refusing. The two candle-derived factors step aside, the
+  // confidence falls by exactly their weight, and everything else still counts.
   const c = fromCandles(candles, price);
   if (!c) {
-    // Without candles there is no momentum, no volume acceleration and no
-    // sample to speak of. Rather than emit a vector whose zeros mean "flat",
-    // refuse — the caller can say why.
-    provenance.push("fewer than 3 hourly bars; refusing to build a vector");
-    return null;
+    unmeasured.add("momentum");
+    unmeasured.add("volumeAccel");
+    provenance.push(
+      "fewer than 3 hourly bars — momentum and volume acceleration unmeasured, " +
+        "scored on what remains",
+    );
   }
 
   const totalTrades1h = snapshot.buys1h + snapshot.sells1h;
   const liquidityUsd = snapshot.liquidityUsd;
-  const ageHours = info.createdAt > 0 ? (now - info.createdAt) / HOUR : c.bars;
+  // Bar count is the fallback age when the pool's creation time is unknown.
+  // With no candles there is no fallback either, so age is zero and reads as
+  // brand new — the cautious direction, and the one `age_opportunity` already
+  // treats as highest risk.
+  const ageHours = info.createdAt > 0 ? (now - info.createdAt) / HOUR : (c?.bars ?? 0);
 
   // ------------------------------------------------------------- wallet flow
   //
@@ -295,11 +314,16 @@ export async function liveFeatures(
           `; ${whaleBuys + whaleSells} moved $${WHALE_USD.toLocaleString()}+`,
       );
     } else {
+      // A provider that answered with nothing has not established that nobody
+      // traded — it may have been rate-limited, or the window may have been
+      // truncated to almost nothing by the byte budget. Unmeasured, not quiet.
+      unmeasured.add("whaleFlow");
       provenance.push(
         `${sources.flow.name}: no wallet movement returned — whale flow stays unmeasured`,
       );
     }
   } else {
+    unmeasured.add("whaleFlow");
     provenance.push("no flow provider configured — whale and smart-money flow unmeasured");
   }
 
@@ -313,10 +337,13 @@ export async function liveFeatures(
     whaleNetFlowUsd,
     whaleBuys,
     whaleSells,
-    momentum1h: c.momentum1h,
-    momentum5m: c.momentum5m,
-    momentum24h: c.momentum24h,
-    volumeAccel: c.volumeAccel,
+    // Zeros here are inert: both factors that read them are declared
+    // unmeasured above, so the scorer drops them rather than reading a flat
+    // tape.
+    momentum1h: c?.momentum1h ?? 0,
+    momentum5m: c?.momentum5m ?? 0,
+    momentum24h: c?.momentum24h ?? 0,
+    volumeAccel: c?.volumeAccel ?? 0,
     liquidityUsd,
     liquidityChangePct: 0,
     holderGrowthPct: 0,
@@ -333,9 +360,13 @@ export async function liveFeatures(
     devSold: false,
     // Same 18% rule the simulator uses, so the two are comparable.
     exitDepthUsd: liquidityUsd * 0.18,
-    regime: regimeOf(c.momentum24h, c.volumeAccel, liquidityUsd),
-    sampleSize: Math.min(c.bars, 48) + totalTrades1h,
-    worstStalenessMs: Math.max(0, now - c.newestTs),
+    regime: regimeOf(c?.momentum24h ?? 0, c?.volumeAccel ?? 1, liquidityUsd),
+    // Sample size drives confidence, so a candle-less vector must not borrow
+    // any: what remains is the 1h trade count and nothing else.
+    sampleSize: Math.min(c?.bars ?? 0, 48) + totalTrades1h,
+    // No bars means no bar to be stale, and the freshest thing we have is the
+    // snapshot itself.
+    worstStalenessMs: Math.max(0, now - (c?.newestTs ?? snapshot.ts)),
     unmeasured: [...unmeasured],
   };
 

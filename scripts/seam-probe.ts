@@ -50,4 +50,13 @@ void (async () => {
   }
   const unscored = list.rows.filter((r) => !r.scored).length;
   console.log(`  unscored: ${unscored}/${list.rows.length}`);
+
+  console.log(`\n  SCORES — is the confidence honest about what stood down?`);
+  for (const r of list.rows.slice(0, 5)) {
+    console.log(
+      `  ${(r.symbol || "?").padEnd(10)} score ${String(r.signalScore).padStart(3)}  ` +
+        `conf ${r.confidence.toFixed(2)}  risk ${r.riskLevel.padEnd(6)}  ` +
+        `unmeasured: ${(r.unmeasured ?? []).join(", ") || "none"}`,
+    );
+  }
 })();

@@ -58,6 +58,11 @@ export const FACTORS: FactorDef[] = [
   {
     key: "smart_money",
     name: "Smart Money Accumulation",
+    // Unmeasurable outside the simulator. Knowing which wallets moved is not
+    // knowing whether they are any good, and nothing in the live stack carries
+    // wallet reputation — so on a real token this used to score a placeholder
+    // zero as "no smart money is touching this", a verdict nobody reached.
+    needs: ["smartMoney"],
     normalize: (f) =>
       clamp(0.5 + Math.tanh(f.smartMoneyNetFlowUsd / 120_000) * 0.5) * clamp(0.4 + f.smartMoneyWallets / 8, 0, 1),
     explain: (f) =>
@@ -68,6 +73,10 @@ export const FACTORS: FactorDef[] = [
   {
     key: "whale_flow",
     name: "Whale Accumulation",
+    // Real when a flow provider is configured, absent without one. The
+    // difference matters: "no whale bought this" and "nobody looked" point a
+    // reader in opposite directions.
+    needs: ["whaleFlow"],
     normalize: (f) => clamp(0.5 + Math.tanh(f.whaleNetFlowUsd / 250_000) * 0.5),
     explain: (f) =>
       f.whaleBuys + f.whaleSells > 0
@@ -77,12 +86,19 @@ export const FACTORS: FactorDef[] = [
   {
     key: "momentum",
     name: "Momentum",
+    // Needs candles. A list of tokens cannot afford them, so rather than
+    // refusing to score the whole token this factor steps aside and the
+    // confidence falls by its weight.
+    needs: ["momentum"],
     normalize: (f) => clamp(0.5 + Math.tanh(f.momentum1h / 12) * 0.3 + Math.tanh(f.momentum24h / 40) * 0.2),
     explain: (f) => `1h ${pct(f.momentum1h)}, 24h ${pct(f.momentum24h)}`,
   },
   {
     key: "volume_accel",
     name: "Volume Acceleration",
+    // Also derived from candles. Its own field rather than sharing momentum's,
+    // because a source could plausibly publish one without the other.
+    needs: ["volumeAccel"],
     normalize: (f) => clamp(Math.log2(Math.max(f.volumeAccel, 0.1)) / 4 + 0.5),
     explain: (f) => `6h volume running at ${(f.volumeAccel * 100).toFixed(0)}% of its trailing baseline`,
   },

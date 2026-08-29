@@ -186,6 +186,16 @@ describe("buildLiveTokenRows — real market data, no invented score", () => {
     const [r] = buildLiveTokenRows([entry()], "demo");
     expect(r.scored).toBe(false);
   });
+
+  // buildLiveTokenRows is the UNSCORED base; scoreRows layers a signal on top
+  // when one can be built. The base must never claim a score of its own, or a
+  // failure to score would silently ship a zero.
+  it("never invents a score of its own", () => {
+    const [r] = buildLiveTokenRows([entry()], "dexscreener");
+    expect(r.signalScore).toBe(0);
+    expect(r.confidence).toBe(0);
+    expect(r.signalLabel).toBe("not scored");
+  });
 });
 
 describe("provenanceLabel — origin, not freshness", () => {

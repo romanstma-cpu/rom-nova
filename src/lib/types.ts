@@ -60,7 +60,28 @@ export type UnmeasuredField =
   | "socialScore"
   | "holders"
   | "uniqueBuyers1h"
-  | "uniqueSellers1h";
+  | "uniqueSellers1h"
+  /**
+   * Price history. Needs candles, and candles are the one call a list of
+   * tokens cannot afford — measured at 4.4s each, and zero of twelve returned
+   * under any concurrency. Declaring it lets a token be scored on what IS
+   * known instead of refused outright.
+   */
+  | "momentum"
+  | "volumeAccel"
+  /**
+   * Wallet flow. Real when a flow provider is configured and nothing at all
+   * without one — and until it was declarable, the whale and smart-money
+   * factors scored their placeholder zeros as "nobody is accumulating this",
+   * which is a finding rather than the absence it actually was.
+   */
+  | "whaleFlow"
+  /**
+   * Smart money specifically, which stays unmeasured even WITH a flow provider:
+   * knowing who moved is not knowing whether they are any good, and no source
+   * here carries wallet reputation.
+   */
+  | "smartMoney";
 
 /** Point-in-time market state for a token. `ts` is when it was observed. */
 export interface TokenSnapshot {

@@ -25,11 +25,13 @@
 // back. Silent degradation to the simulator, wearing a live label, is the one
 // outcome this file exists to make impossible.
 
-import type { Candle } from "../types";
+import type { Candle, TokenInfo, TokenSnapshot } from "../types";
+import type { MarketDataProvider } from "../providers/types";
 import type { DemoStore } from "../demo/store";
 import { FLAGS, getProviders } from "../providers/registry";
 import { DexScreenerTokenProvider } from "../providers/dexscreener";
-import { buildLiveTokenRows, type TokenRow } from "./rows";
+import { liveSignal } from "../engine/live-features";
+import { buildLiveTokenRows, riskLevelOf, type TokenRow } from "./rows";
 
 export interface Provenance {
   /** The adapter that actually answered. "demo" is the simulator. */
@@ -172,14 +174,82 @@ export async function trendingRows(
     const entries = detailed.filter((d): d is NonNullable<typeof d> => d !== null);
     if (entries.length === 0) return null;
 
+    const scored = await scoreRows(entries, token.name);
     return {
-      data: buildLiveTokenRows(entries, token.name),
+      data: scored,
       provenance: { source: token.name, real: true },
     };
   } catch {
     // Caller falls back to the simulator and says so.
     return null;
   }
+}
+
+/**
+ * A market provider that never fetches candles, for the list view.
+ *
+ * The candle call is the one this path cannot afford — 4.4 seconds each, and
+ * zero of twelve arrive under any concurrency. Now that `liveFeatures` declares
+ * momentum unmeasured instead of refusing, the honest move is to not ask at all
+ * rather than to ask and be rate-limited into the same answer more slowly.
+ *
+ * Named so the provenance says why the bars are missing. Attributing it to
+ * "coingecko" would read as an outage at a vendor that was never called.
+ */
+const NO_CANDLES: MarketDataProvider = {
+  name: "none (list view — candles not fetched)",
+  getCandles: async () => [],
+  getPrice: async () => null,
+};
+
+/**
+ * Scores live rows on everything except price history.
+ *
+ * A list row now carries a real signal built from liquidity, trade imbalance,
+ * age, the chain-read authorities and — where a flow provider is configured —
+ * actual whale movement. Momentum and volume acceleration step aside and the
+ * confidence falls by their weight, which is the difference between a score
+ * that is partial and one that is invented.
+ */
+async function scoreRows(
+  entries: (TokenInfo & { snapshot: TokenSnapshot })[],
+  source: string,
+): Promise<TokenRow[]> {
+  const rows = buildLiveTokenRows(entries, source);
+  const providers = getProviders();
+
+  const signals = await pooled(entries, LIVE_LIST_CONCURRENCY, async (e) => {
+    try {
+      return await liveSignal(e.mint, {
+        token: { ...providers.token, getToken: async () => e },
+        market: NO_CANDLES,
+        security: providers.security,
+        flow: providers.flow,
+      });
+    } catch {
+      return null;
+    }
+  });
+
+  return rows.map((row, i) => {
+    const s = signals[i];
+    if (!s) return row;
+    const missing = s.result.features.unmeasured ?? [];
+    return {
+      ...row,
+      scored: true,
+      signalScore: s.signal.score,
+      signalLabel: s.signal.label,
+      signalKind: s.signal.kind,
+      signalId: s.signal.id,
+      confidence: s.signal.confidence,
+      riskLevel: riskLevelOf(s.signal),
+      // Carried through so a reader can see WHICH factors stood down; a score
+      // of 41 at 0.4 confidence and one at 0.9 are not the same claim.
+      unmeasured: missing,
+      unscoredReason: undefined,
+    };
+  });
 }
 
 /**

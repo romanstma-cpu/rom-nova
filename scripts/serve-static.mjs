@@ -7,7 +7,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "out");
-const PORT = 8788;
+// Overridable because two git worktrees of this repo both want :8788, and the
+// second one to start does not fail loudly — it EADDRINUSEs while a browser
+// pointed at the port happily renders the other worktree's build, which looks
+// exactly like your changes not having taken effect.
+const PORT = Number(process.env.PORT) || 8788;
 
 const MIME = {
   ".html": "text/html; charset=utf-8",

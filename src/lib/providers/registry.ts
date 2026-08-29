@@ -260,6 +260,11 @@ export function dataMode(): DataMode {
   // is now false.
   (FLAGS.birdeye() || FLAGS.jupiter() ? live : simulated).push("holder distribution");
   (p.risk ? live : simulated).push("rug & LP-lock risk");
+  // The launch feed refuses to fall back at all — see handleLaunches — so this
+  // line is not "which source is serving it" but "does the page exist". Listed
+  // because a reader looking at /status to work out what is real deserves to
+  // see the newest capability rather than infer it from the nav.
+  (FLAGS.jupiter() ? live : simulated).push("new-pool launch feed");
   // Smart money needs wallet reputation, which nothing here carries at all.
   simulated.push("smart-money scoring");
 
@@ -294,7 +299,10 @@ export function providerHealth(): ProviderHealth[] {
             "both in today's trending list. Its per-interval priceChange and volumeChange " +
             "also give momentum and volume acceleration WITHOUT candles, which is what un-" +
             "dashed four scanner columns. CAVEAT: topHoldersPercentage counts AMM pools as " +
-            "holders, so a high figure can mean deep liquidity rather than a whale" +
+            "holders, so a high figure can mean deep liquidity rather than a whale. ALSO SERVING " +
+            "THE LAUNCH FEED: its /recent endpoint indexes brand-new mints within ~2.3s of pool " +
+            "creation, the fastest keyless view of a launch measured here — but it caps at 30 " +
+            "rows with no cursor, so whatever falls off that page is gone" +
             (process.env.JUPITER_API_KEY ? " · API key present, higher rate limit" : ""),
         }
       : { ...demoHealth("jupiter"), mode: "disabled", status: "down", note: "disabled via ENABLE_JUPITER" },

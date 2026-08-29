@@ -386,6 +386,121 @@ export interface RiskFlag {
   detail: string;
 }
 
+// ---------------------------------------------------------------- launches
+
+/**
+ * The outcome of one triage check on a brand-new launch.
+ *
+ * Six states rather than a boolean, because a launch feed is the place where
+ * "we looked and it is fine" and "nobody has looked yet" are hardest to tell
+ * apart and most expensive to confuse. A token forty seconds old has had no
+ * time to accumulate findings, so an empty risk list is almost always silence
+ * rather than a clean bill.
+ *
+ *   pass       measured, and the measurement is good
+ *   warn       measured, and the measurement is soft-bad
+ *   fail       measured, and the measurement is bad
+ *   unchecked  nobody ran this check — renders as a dash, never as a pass
+ *   n/a        the check cannot apply to this token's structure yet, which is
+ *              its own answer and not a gap. A pre-graduation bonding-curve
+ *              token has no withdrawable LP, so "is the LP locked" has no
+ *              meaning for it and must not be answered either way.
+ */
+export type LaunchCheckState = "pass" | "warn" | "fail" | "unchecked" | "n/a";
+
+export interface LaunchCheck {
+  key: string;
+  name: string;
+  state: LaunchCheckState;
+  detail: string;
+  /**
+   * True when the state came from a fail-safe DEFAULT rather than a reading.
+   *
+   * House rule: absent mint-authority data is graded as not-revoked. That
+   * produces a `fail` which is correct to act on and wrong to describe as a
+   * measurement, and a reader deciding in ten seconds deserves to know which
+   * of the two they are looking at.
+   */
+  assumed?: boolean;
+}
+
+/**
+ * The feed's verdict on a launch.
+ *
+ * There is deliberately NO positive verdict. The best a token seconds old can
+ * earn is `unverified` — every check that could run, ran, and none of them
+ * found anything, which on a token this young mostly means the evidence does
+ * not exist yet. A green "SAFE" here would be the single most dangerous string
+ * this app could render.
+ */
+export type LaunchVerdict = "avoid" | "caution" | "unverified";
+
+export interface LaunchTriage {
+  verdict: LaunchVerdict;
+  checks: LaunchCheck[];
+  /** Checks that produced a real measurement, and how many there were. */
+  measured: number;
+  total: number;
+  /** Checks nobody ran. The honesty number: the headline is meaningless without it. */
+  unchecked: number;
+  /** Third-party grade, when one arrived. HIGHER IS RISKIER. */
+  riskScore?: number;
+  riskSource?: string;
+  /**
+   * ms from `firstSeenAt` to the moment triage finished, or undefined while it
+   * is still running. This is the number that says whether the feed is a filter
+   * or a firehose: a verdict that lands ninety seconds after the launch is not
+   * triage, it is a post-mortem.
+   */
+  completedInMs?: number;
+}
+
+/**
+ * One new pool or graduation, as observed.
+ *
+ * `poolCreatedAt` is the source's claim about the chain; `firstSeenAt` is when
+ * this process actually laid eyes on it. Their difference is the feed's real
+ * latency, and it is stored per-row rather than asserted once in a doc comment
+ * so the page can show its own measured lag instead of a marketing number.
+ */
+export interface LaunchObservation {
+  mint: string;
+  name: string;
+  symbol: string;
+  hue: number;
+  decimals: number;
+  poolCreatedAt: number;
+  firstSeenAt: number;
+  /** "pool" for a fresh mint, "graduation" when a launchpad curve completed. */
+  event: "pool" | "graduation";
+  /** The AMM or launchpad that hosts the pool, when the source names it. */
+  venue?: string;
+  launchpad?: string;
+  graduatedAt?: number;
+  dev?: string;
+  devMints?: number;
+  devMigrations?: number;
+  priceUsd?: number;
+  liquidityUsd?: number;
+  holders?: number;
+  top10Pct?: number;
+  devHoldsPct?: number;
+  organicScore?: number;
+  buys5m?: number;
+  sells5m?: number;
+  traders5m?: number;
+  /** Jupiter's own "this mint looks suspicious" flag, when it sets one. */
+  sus?: boolean;
+  mintAuthorityRevoked: boolean;
+  freezeAuthorityRevoked: boolean;
+  /** Whether the authority fields above were actually read, or defaulted. */
+  authorityKnown: boolean;
+  /** Which adapter saw it first. */
+  source: string;
+}
+
+export type TokenLaunch = LaunchObservation & { triage: LaunchTriage };
+
 export type SignalLifecycleState =
   | "created"
   | "confirmed"

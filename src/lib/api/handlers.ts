@@ -19,6 +19,7 @@ const MAX_EDGES = 420;
 const MAX_TRADE_EDGES = 160;
 import { buildFlowSeries, buildTokenRows, buildWalletRows } from "./rows";
 import { DEMO, candlesFor, trendingRows } from "./source";
+import { launchFeed, type LaunchFeed } from "./launches";
 import { dataMode, providerHealth } from "../providers/registry";
 import type { AlertCondition, BacktestConfig, StrategyProfileId } from "../types";
 
@@ -85,6 +86,23 @@ export async function handleTokens(store: DemoStore, q: TokensQuery) {
     provenance: DEMO,
     demo: true,
   };
+}
+
+/**
+ * The launch feed. Real or nothing.
+ *
+ * Every other read in this file falls back to the simulator when no provider
+ * answers, and that is right for them: a synthetic price chart is obviously a
+ * demonstration and labelled as one. It is wrong here. This page's entire claim
+ * is about TIME — a pool that came into existence eleven seconds ago — and the
+ * demo universe mints tokens on a schedule that has nothing to do with Solana.
+ * A simulated launch feed would be indistinguishable from a real one at a
+ * glance while being fiction about the only thing it measures.
+ *
+ * So the empty state is empty, and it says why.
+ */
+export async function handleLaunches(): Promise<{ feed: LaunchFeed | null; demo: boolean }> {
+  return { feed: await launchFeed(), demo: false };
 }
 
 export function handleTokenDetail(store: DemoStore, mint: string, asOf?: number, profile: StrategyProfileId = "balanced") {

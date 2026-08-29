@@ -24,6 +24,7 @@ const CAPABILITIES = [
   "wallet activity",
   "holder distribution",
   "rug & LP-lock risk",
+  "new-pool launch feed",
   "smart-money scoring",
 ] as const;
 
@@ -70,6 +71,15 @@ describe("dataMode — the chip cannot outlive the truth", () => {
   it("claims rug & LP-lock risk only when a risk provider is configured", () => {
     const m = dataMode();
     expect(FLAGS.rugcheck() ? m.live : m.simulated).toContain("rug & LP-lock risk");
+  });
+
+  // The launch feed is the one capability that never falls back — handleLaunches
+  // returns nothing rather than a simulated launch, because a synthetic feed
+  // would look identical to a real one while being fiction about the only thing
+  // it measures. So this line tracks whether the page can exist at all.
+  it("claims the launch feed only when its source is enabled", () => {
+    const m = dataMode();
+    expect(FLAGS.jupiter() ? m.live : m.simulated).toContain("new-pool launch feed");
   });
 
   it("reserves 'demo' for nothing being live, and 'live' for nothing simulated", () => {

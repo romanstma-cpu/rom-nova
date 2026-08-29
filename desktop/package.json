@@ -1,8 +1,8 @@
 {
   "name": "rom-nova-desktop",
   "productName": "ROM Nova",
-  "version": "1.2.0",
-  "description": "Solana on-chain intelligence terminal: live token, authority and wallet-flow data alongside clearly-labeled simulation. Part of ROM Apps.",
+  "version": "1.3.0",
+  "description": "Solana on-chain intelligence terminal: live token, holder, authority, wallet-flow and rug-risk data, with a forward-tested record of its own scoring. Part of ROM Apps.",
   "author": "ROM <roman3165@icloud.com>",
   "license": "MIT",
   "main": "main.js",

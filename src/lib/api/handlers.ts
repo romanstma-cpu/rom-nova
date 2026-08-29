@@ -18,6 +18,7 @@ const MAX_EDGES = 420;
  *  and static positions must not be able to crowd them out. */
 const MAX_TRADE_EDGES = 160;
 import { buildFlowSeries, buildTokenRows, buildWalletRows } from "./rows";
+import { candlesFor } from "./source";
 import { providerHealth } from "../providers/registry";
 import type { AlertCondition, BacktestConfig, StrategyProfileId } from "../types";
 
@@ -117,10 +118,25 @@ export function handleTokenDetail(store: DemoStore, mint: string, asOf?: number,
   };
 }
 
-export function handleCandles(store: DemoStore, mint: string, from?: number, to?: number) {
-  const candles = store.candles(mint, from, to);
+/**
+ * Candles, from whichever source is configured.
+ *
+ * The first handler to go through the provider seam rather than reaching into
+ * the store. Async because a real adapter is a network call; `demo` is now
+ * derived from what actually answered instead of being hardcoded true, and
+ * `provenance` travels with the payload so the panel can label itself.
+ *
+ * `live` is unrelated and keeps its meaning — the simulator's own price tick.
+ */
+export async function handleCandles(store: DemoStore, mint: string, from?: number, to?: number) {
+  const { data: candles, provenance } = await candlesFor(store, mint, from, to);
   if (!candles.length) throw new ApiError(404, "unknown mint or empty range");
-  return { candles, live: store.livePrice.get(mint) ?? null, demo: true };
+  return {
+    candles,
+    live: store.livePrice.get(mint) ?? null,
+    provenance,
+    demo: !provenance.real,
+  };
 }
 
 export function handleWallets(store: DemoStore) {

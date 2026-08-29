@@ -81,7 +81,10 @@ export async function localGet(url: string): Promise<LocalResponse> {
       };
     {
       const m = p.match(/^\/api\/tokens\/([^/]+)\/candles$/);
-      if (m) return { status: 200, body: handleCandles(store, m[1], num(q.get("from")), num(q.get("to"))) };
+      // Awaited: candles now go through the provider seam, so in the static
+      // build this is a real fetch from the visitor's own browser rather than a
+      // synchronous read of the simulator.
+      if (m) return { status: 200, body: await handleCandles(store, m[1], num(q.get("from")), num(q.get("to"))) };
     }
     {
       const m = p.match(/^\/api\/tokens\/([^/]+)$/);

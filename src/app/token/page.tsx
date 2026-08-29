@@ -55,7 +55,11 @@ export default function TokenPage() {
 function TokenInner() {
   const mint = useSearchParams().get("m") ?? "";
   const { data, error } = useApi<TokenDetail>(mint ? `/api/tokens/${mint}` : null, 15_000);
-  const { data: candleData } = useApi<{ candles: Candle[]; live: { ts: number; price: number } | null }>(
+  const { data: candleData } = useApi<{
+    candles: Candle[];
+    live: { ts: number; price: number } | null;
+    provenance?: { source: string; real: boolean; note?: string };
+  }>(
     mint ? `/api/tokens/${mint}/candles` : null,
     10_000,
   );
@@ -159,7 +163,24 @@ function TokenInner() {
           <div className="panel">
             <div className="flex items-center justify-between px-3 pt-2.5">
               <span className="panel-title">Price · hourly · whale markers ≥ $8K</span>
-              <Freshness ts={snap.ts} />
+              <span className="flex items-center gap-2">
+                {/* Per-panel provenance. The global SIMULATED DATA chip in the
+                    nav describes the app; this describes THIS chart, which is
+                    the only honest way to run one real panel beside synthetic
+                    ones. A fallback says so in its own title text rather than
+                    quietly wearing a live badge. */}
+                {candleData?.provenance && (
+                  <span
+                    className={`chip ${candleData.provenance.real ? "chip-accent" : "chip-warn"}`}
+                    title={candleData.provenance.note ?? "real market data"}
+                  >
+                    {candleData.provenance.real
+                      ? candleData.provenance.source.toUpperCase()
+                      : "SIMULATED"}
+                  </span>
+                )}
+                <Freshness ts={snap.ts} />
+              </span>
             </div>
             <div className="px-2 pb-2">
               {candleData ? (

@@ -35,12 +35,15 @@ import type {
   TokenSnapshot,
   UnmeasuredField,
 } from "../types";
+import { riskHeadline } from "../providers/rugcheck";
 import type {
   MarketDataProvider,
   SecurityDataProvider,
   TokenDataProvider,
   TokenFlow,
   TokenFlowProvider,
+  TokenRisk,
+  TokenRiskProvider,
 } from "../providers/types";
 
 const HOUR = 3_600_000;
@@ -52,6 +55,11 @@ export interface LiveSources {
   security?: SecurityDataProvider;
   /** Optional: wallet-level flow. Absent means whale movement is unmeasured. */
   flow?: TokenFlowProvider;
+  /**
+   * Optional: a third-party risk grade. Never scored — see the overlay block in
+   * `liveFeatures` for why a vendor's opinion stays out of the weighted mean.
+   */
+  risk?: TokenRiskProvider;
 }
 
 /**
@@ -87,6 +95,14 @@ export interface LiveFeatureResult {
    * reader can actually check on a block explorer.
    */
   flow?: TokenFlow;
+  /**
+   * The third-party risk grade, when one was fetched.
+   *
+   * Carried beside the features rather than folded into them, so a UI can show
+   * "RugCheck says 44/100" as somebody's opinion rather than as one more input
+   * that silently moved the number Nova is claiming as its own.
+   */
+  risk?: TokenRisk;
   /** Human-readable account of where each part came from, for the caller to print. */
   provenance: string[];
 }
@@ -158,6 +174,14 @@ export async function liveFeatures(
   mint: string,
   sources: LiveSources,
   now = Date.now(),
+  /**
+   * Whether to pull the FULL risk report rather than the summary.
+   *
+   * Off by default because the difference is three orders of magnitude — ~300
+   * bytes against 80KB to 1.6MB — and a twelve-row list must never pay it. A
+   * token detail page may.
+   */
+  detailedRisk = false,
 ): Promise<LiveFeatureResult | null> {
   const provenance: string[] = [];
 
@@ -235,9 +259,17 @@ export async function liveFeatures(
       // "top-10 holders 0.0%" is the zeros problem wearing prose. A provider
       // that did not read concentration must not have its placeholder printed
       // as a measurement — the line says unmeasured, exactly like the vector.
-      const concentration =
-        sec.top10Known === false
-          ? "top-10 holders UNMEASURED"
+      //
+      // But it must describe the COMPOSED state, not this provider's private
+      // one. With Jupiter supplying concentration and the free RPC unable to,
+      // the flat version of this line printed "top-10 holders UNMEASURED" while
+      // the vector scored a real 74.5% from the token provider — two answers to
+      // one question in the same report, which is worse than either alone.
+      const stillUnknown = unmeasured.has("top10Pct");
+      const concentration = stillUnknown
+        ? "top-10 holders UNMEASURED"
+        : sec.top10Known === false
+          ? `top-10 holders ${(top10Pct * 100).toFixed(1)}% (from ${sources.token.name}; this source could not read it)`
           : `top-10 holders ${(top10Pct * 100).toFixed(1)}%`;
       provenance.push(
         `${sources.security.name}: ${concentration}, ` +
@@ -266,13 +298,80 @@ export async function liveFeatures(
   // Declaring beats refusing. The two candle-derived factors step aside, the
   // confidence falls by exactly their weight, and everything else still counts.
   const c = fromCandles(candles, price);
+  // Candles win where they exist: they are bars this app can plot and audit,
+  // over windows it chose. Where there are none, a source that publishes its
+  // OWN rate-of-change stats can still answer the question — Jupiter ships
+  // priceChange and volumeChange per interval in the same payload as the price.
+  //
+  // That is not a substitute for candles, it is a second measurement of the
+  // same quantity by someone with better data than a free OHLCV endpoint hands
+  // out. Which one served is stated, because "1h +23%" computed from bars and
+  // the same figure taken on trust are different claims.
+  const snapMomentum = snapshot.momentum1h !== undefined || snapshot.momentum24h !== undefined;
+  const snapAccel = snapshot.volumeAccel !== undefined;
   if (!c) {
-    unmeasured.add("momentum");
-    unmeasured.add("volumeAccel");
-    provenance.push(
-      "fewer than 3 hourly bars — momentum and volume acceleration unmeasured, " +
-        "scored on what remains",
-    );
+    if (snapMomentum) {
+      unmeasured.delete("momentum");
+      provenance.push(
+        `${sources.token.name}: no candles, but the source publishes interval price change — ` +
+          `momentum from its 1h/24h stats rather than from bars`,
+      );
+    } else {
+      unmeasured.add("momentum");
+    }
+    if (snapAccel) {
+      unmeasured.delete("volumeAccel");
+      provenance.push(`${sources.token.name}: volume acceleration from its published volume change`);
+    } else {
+      unmeasured.add("volumeAccel");
+    }
+    if (!snapMomentum || !snapAccel) {
+      provenance.push(
+        "fewer than 3 hourly bars and no published interval stats — " +
+          (!snapMomentum && !snapAccel
+            ? "momentum and volume acceleration"
+            : !snapMomentum
+              ? "momentum"
+              : "volume acceleration") +
+          " unmeasured, scored on what remains",
+      );
+    }
+  }
+
+  // ------------------------------------------------------------ risk overlay
+  //
+  // A third-party opinion, kept separate from the chain facts above. It never
+  // moves the score — the scorer weighs evidence this app can inspect, and
+  // importing a vendor's number into it would launder their judgement as ours.
+  // It reaches the reader as prose and flags, which is where an opinion belongs.
+  let risk: TokenRisk | undefined;
+  if (sources.risk) {
+    const r = await sources.risk.getTokenRisk(mint, detailedRisk).catch(() => null);
+    if (r) {
+      risk = r;
+      provenance.push(`${r.source}: ${riskHeadline(r)}`);
+      for (const item of r.risks.filter((x) => x.level === "danger")) {
+        provenance.push(`WARNING (${r.source}): ${item.name}${item.value ? ` — ${item.value}` : ""}`);
+      }
+      // LP lock is the one that earns its own line whatever its value. An
+      // unlocked pool is the mechanic behind most memecoin losses and it is
+      // invisible to every other source in this stack.
+      if (r.lpLockedPct !== undefined && r.lpLockedPct < 0.5) {
+        provenance.push(
+          `WARNING: only ${(r.lpLockedPct * 100).toFixed(1)}% of liquidity is locked — ` +
+            `the pool can be withdrawn`,
+        );
+      }
+      // `insiderPct` is set by the provider ONLY when the insider-graph
+      // analysis is present in the payload, so a defined value means somebody
+      // looked — and a defined ZERO is a finding, not a silence. Gating this on
+      // `> 0` (as it first did) would have kept "no insiders found" in the
+      // unmeasured set, which is the mirror of the bug this machinery exists to
+      // stop: refusing to record a real negative result.
+      if (r.insiderPct !== undefined) unmeasured.delete("insiderPct");
+    } else {
+      provenance.push(`${sources.risk.name}: no report for this mint — risk ungraded`);
+    }
   }
 
   const totalTrades1h = snapshot.buys1h + snapshot.sells1h;
@@ -348,23 +447,29 @@ export async function liveFeatures(
     whaleNetFlowUsd,
     whaleBuys,
     whaleSells,
-    // Zeros here are inert: both factors that read them are declared
-    // unmeasured above, so the scorer drops them rather than reading a flat
-    // tape.
-    momentum1h: c?.momentum1h ?? 0,
-    momentum5m: c?.momentum5m ?? 0,
-    momentum24h: c?.momentum24h ?? 0,
-    volumeAccel: c?.volumeAccel ?? 0,
+    // Candles first, the source's own published stats second, zero last — and
+    // a zero that survives to here is inert, because the factor reading it has
+    // been declared unmeasured above and the scorer drops it rather than
+    // reading a flat tape.
+    momentum1h: c?.momentum1h ?? snapshot.momentum1h ?? 0,
+    momentum5m: c?.momentum5m ?? snapshot.momentum5m ?? 0,
+    momentum24h: c?.momentum24h ?? snapshot.momentum24h ?? 0,
+    volumeAccel: c?.volumeAccel ?? snapshot.volumeAccel ?? 0,
     liquidityUsd,
-    liquidityChangePct: 0,
-    holderGrowthPct: 0,
+    // A single snapshot cannot say whether a pool grew or is being drained, so
+    // this was hardcoded flat. A source that publishes its own 24h change can
+    // say, and a draining pool is the loudest pre-rug signal there is.
+    liquidityChangePct: snapshot.liquidityChangePct ?? 0,
+    holderGrowthPct: snapshot.holderGrowthPct ?? 0,
     top10Pct,
     organicScore: snapshot.organicScore,
     socialScore: snapshot.socialScore,
     socialAccel: 0,
     ageHours,
     buySellImbalance: totalTrades1h > 0 ? (snapshot.buys1h - snapshot.sells1h) / totalTrades1h : 0,
-    insiderPct: snapshot.insiderPct,
+    // The risk provider is the only source here that flags insider-linked
+    // holders, and only from the full report where the graph analysis ran.
+    insiderPct: risk?.insiderPct ?? snapshot.insiderPct,
     bundlerPct: snapshot.bundlerPct,
     sniperPct: snapshot.sniperPct,
     devHoldsPct: snapshot.devHoldsPct,
@@ -405,7 +510,7 @@ export async function liveFeatures(
     ? { ...(info as TokenInfo), mintAuthorityRevoked: mintRevoked, freezeAuthorityRevoked: freezeRevoked }
     : (info as TokenInfo);
 
-  return { features, info: verified, snapshot, candles, provenance, flow: flowDetail };
+  return { features, info: verified, snapshot, candles, provenance, flow: flowDetail, risk };
 }
 
 /** Convenience: assemble and score in one call. */
@@ -414,8 +519,9 @@ export async function liveSignal(
   sources: LiveSources,
   profile: StrategyProfileId = "balanced",
   now = Date.now(),
+  detailedRisk = false,
 ): Promise<{ signal: Signal; result: LiveFeatureResult } | null> {
-  const result = await liveFeatures(mint, sources, now);
+  const result = await liveFeatures(mint, sources, now, detailedRisk);
   if (!result) return null;
   return { signal: scoreFeatures(result.features, mint, now, profile), result };
 }

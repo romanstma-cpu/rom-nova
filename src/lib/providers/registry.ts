@@ -12,6 +12,7 @@ import { DexScreenerMarketProvider, DexScreenerTokenProvider } from "./dexscreen
 import { GeckoTerminalMarketProvider, GeckoTerminalTokenProvider } from "./geckoterminal";
 import { SolanaRpcSecurityProvider } from "./solana-rpc";
 import { SqdFlowProvider } from "./sqd";
+import { RugCheckRiskProvider } from "./rugcheck";
 import type {
   MarketDataProvider,
   ProviderSet,
@@ -27,7 +28,12 @@ const flag = (name: string, dflt = true) => {
 };
 
 export const FLAGS = {
-  jupiter: () => flag("ENABLE_JUPITER") && Boolean(process.env.JUPITER_API_KEY || process.env.JUPITER_LITE),
+  // Keyless and ON. This used to require JUPITER_API_KEY, which meant the best
+  // source in the stack never ran: lite-api.jup.ag serves the identical paths
+  // free, in under 300ms, and reflects the caller's Origin — including the
+  // `app://rom-nova` the Electron shell loads from. A key upgrades the rate
+  // limit and changes nothing else.
+  jupiter: () => flag("ENABLE_JUPITER"),
   birdeye: () => flag("ENABLE_BIRDEYE") && Boolean(process.env.BIRDEYE_API_KEY),
   helius: () => flag("ENABLE_HELIUS") && Boolean(process.env.HELIUS_API_KEY),
   nansen: () => flag("ENABLE_NANSEN") && Boolean(process.env.NANSEN_API_KEY),
@@ -41,6 +47,10 @@ export const FLAGS = {
   // this stack with WALLET-LEVEL FLOW — the gap every live feature vector has
   // carried as a declared zero since the day it was written.
   sqd: () => flag("ENABLE_SQD"),
+  // RugCheck. Keyless, CORS `*`, and the only source here that can see whether
+  // the liquidity pool is locked — the mechanic behind most memecoin losses,
+  // which no amount of supply analysis catches.
+  rugcheck: () => flag("ENABLE_RUGCHECK"),
   // keyless public reference sources — live by default, even in demo mode
   coingecko: () => flag("ENABLE_COINGECKO"),
   cryptocom: () => flag("ENABLE_CRYPTOCOM"),
@@ -141,12 +151,16 @@ let cached: ProviderSet | undefined;
  * questions the keyless ones cannot — Birdeye and Helius see holder
  * distribution and wallet-level flow, which is most of what this app is about.
  *
- * The change that matters is the tail. GeckoTerminal and DEX Screener need no
- * key at all, so an unconfigured install no longer falls all the way back to
- * the simulator for market and token data: it shows Solana. GeckoTerminal
- * takes the market slot ahead of DEX Screener for one specific reason — it is
- * the only keyless source with HISTORY (a thousand hourly bars, some six
- * weeks), and DEX Screener has no OHLCV endpoint at all.
+ * The change that matters is the tail. Jupiter, GeckoTerminal and DEX Screener
+ * need no key at all, so an unconfigured install no longer falls all the way
+ * back to the simulator for market and token data: it shows Solana.
+ *
+ * Jupiter takes the token slot outright. The ordering above says keyed vendors
+ * win "because they answer questions the keyless ones cannot", and Jupiter is
+ * the case that broke the rule — it answers holder count, top-holder share, dev
+ * balance, organic activity and creator mint history for free, which is most of
+ * what Birdeye was wanted for. GeckoTerminal keeps the MARKET slot for the one
+ * thing Jupiter has no equivalent of: real OHLCV, a thousand hourly bars.
  *
  * Wallet activity has no keyless source, so it stays on the simulator until
  * Helius is configured. That is a real seam and /status names it rather than
@@ -200,6 +214,9 @@ export function getProviders(): ProviderSet {
     // synthetic answer to "who bought this", and a caller that finds nothing
     // here should say the flow is unmeasured, not read a simulated one.
     flow: FLAGS.sqd() ? new SqdFlowProvider() : undefined,
+    // Same contract as flow: absent means nobody graded this token, which the
+    // UI must render as silence and never as a clean bill of health.
+    risk: FLAGS.rugcheck() ? new RugCheckRiskProvider() : undefined,
     health: providerHealth,
   };
   return cached;
@@ -236,10 +253,13 @@ export function dataMode(): DataMode {
   (p.security.name === "demo" ? simulated : live).push("mint & freeze authority");
   (p.flow ? live : simulated).push("whale flow");
   (p.wallet.name === "demo" ? simulated : live).push("wallet activity");
-  // No keyless source publishes holder distribution, and the free RPC blocks
-  // the two methods that would give it. Named separately because it is the
-  // gap a reader is most likely to assume is covered.
-  (FLAGS.birdeye() ? live : simulated).push("holder distribution");
+  // This line used to read `FLAGS.birdeye()` and put holder distribution in the
+  // simulated column on every keyless install, with the note that "no keyless
+  // source publishes holder distribution". Jupiter does — holderCount, its 24h
+  // change, and the top-holder share — so the claim was true when written and
+  // is now false.
+  (FLAGS.birdeye() || FLAGS.jupiter() ? live : simulated).push("holder distribution");
+  (p.risk ? live : simulated).push("rug & LP-lock risk");
   // Smart money needs wallet reputation, which nothing here carries at all.
   simulated.push("smart-money scoring");
 
@@ -261,7 +281,24 @@ export function providerHealth(): ProviderHealth[] {
   });
 
   const rows: ProviderHealth[] = [];
-  rows.push(FLAGS.jupiter() ? healthOf("jupiter", "live") : { ...demoHealth("jupiter"), mode: "disabled", status: "down", note: "needs server mode + JUPITER_API_KEY — simulated data serves token info" });
+  rows.push(
+    FLAGS.jupiter()
+      ? {
+          ...healthOf("jupiter", "live"),
+          note:
+            "keyless (lite-api.jup.ag), and now SERVING THE TOKEN LIST in ONE request — the " +
+            "previous path made a trending call plus twelve token lookups. Supplies what no " +
+            "other keyless source here does: holder count and its 24h change, top-holder " +
+            "share, dev balance, a real organic-activity score, the launchpad, and the " +
+            "creator's mint history — a wallet on its first token and one on its 873rd are " +
+            "both in today's trending list. Its per-interval priceChange and volumeChange " +
+            "also give momentum and volume acceleration WITHOUT candles, which is what un-" +
+            "dashed four scanner columns. CAVEAT: topHoldersPercentage counts AMM pools as " +
+            "holders, so a high figure can mean deep liquidity rather than a whale" +
+            (process.env.JUPITER_API_KEY ? " · API key present, higher rate limit" : ""),
+        }
+      : { ...demoHealth("jupiter"), mode: "disabled", status: "down", note: "disabled via ENABLE_JUPITER" },
+  );
   rows.push(FLAGS.birdeye() ? healthOf("birdeye", "live") : { ...demoHealth("birdeye"), mode: "disabled", status: "down", note: "needs server mode + BIRDEYE_API_KEY — simulated data serves market data" });
   rows.push(FLAGS.helius() ? healthOf("helius", "live") : { ...demoHealth("helius"), mode: "disabled", status: "down", note: "needs server mode + HELIUS_API_KEY — simulated data serves wallet activity" });
   rows.push(FLAGS.nansen() ? healthOf("nansen", "live") : { ...demoHealth("nansen"), mode: "disabled", status: "down", note: "optional enrichment — not configured" });
@@ -274,11 +311,11 @@ export function providerHealth(): ProviderHealth[] {
       ? {
           ...healthOf("dexscreener", "live"),
           note:
-            "keyless, and now SERVING THE TOKEN LIST — twelve trending Solana tokens per " +
-            "request, scored. Supplies price, pooled liquidity, 24h volume and trade counts " +
-            "summed across all Solana pools. Chosen over GeckoTerminal for the list because it " +
-            "batches internally: twelve getToken calls at GeckoTerminal took 27s and returned " +
-            "two usable rows. No holder data, no OHLCV; and 'trending' is PAID BOOSTS, so it " +
+            "keyless. FALLBACK for the token list now that Jupiter serves it — it held that " +
+            "slot because it batches where GeckoTerminal rate-limits, and it lost it because " +
+            "Jupiter returns the same twelve rows in ONE call WITH holder and audit data. " +
+            "Supplies price, pooled liquidity, 24h volume and trade counts summed across all " +
+            "Solana pools. No holder data, no OHLCV; and its 'trending' is PAID BOOSTS, so it " +
             "is a list of who is advertising rather than a volume ranking",
         }
       : { ...demoHealth("dexscreener"), mode: "disabled", status: "down", note: "disabled via ENABLE_DEXSCREENER" },
@@ -323,6 +360,23 @@ export function providerHealth(): ProviderHealth[] {
             "browser origins, and most of this app runs in a tab",
         }
       : { ...demoHealth("solana-rpc"), mode: "disabled", status: "down", note: "disabled via ENABLE_SOLANA_RPC" },
+  );
+  rows.push(
+    FLAGS.rugcheck()
+      ? {
+          ...healthOf("rugcheck", "live"),
+          note:
+            "keyless, CORS open to any origin. Supplies the one risk nothing else here can " +
+            "see: whether the LIQUIDITY POOL IS LOCKED. Every other risk signal in this app " +
+            "is about supply, and a deployer who can withdraw the pool does not need a mint " +
+            "authority to take the money. Also a normalised 0-100 risk score and named, " +
+            "readable risks. The cheap summary (~300B) serves list rows; the full report " +
+            "(80KB-1.6MB) is fetched only when a token is opened. NOT used to compute a " +
+            "pool-excluded concentration figure — measured across five trending tokens, its " +
+            "account labels covered 12 of 20 top holders on one and ZERO of 20 on two others, " +
+            "so that number would have been most wrong on the largest tokens",
+        }
+      : { ...demoHealth("rugcheck"), mode: "disabled", status: "down", note: "disabled via ENABLE_RUGCHECK — LP lock state and third-party risk scoring unavailable" },
   );
   rows.push(
     FLAGS.cryptocom()

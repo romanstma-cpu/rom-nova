@@ -21,6 +21,10 @@ const SECTIONS: { title: string; items: { href: string; label: string; glyph: st
       { href: "/tokens", label: "Token Radar", glyph: "◉" },
       { href: "/whales", label: "Whales", glyph: "◍" },
       { href: "/screener", label: "Screener", glyph: "☰" },
+      // The page that grades the rest of this section. It sits here rather than
+      // under System because "is the score any good" is an intelligence
+      // question, not a diagnostic one.
+      { href: "/track", label: "Track Record", glyph: "⌗" },
     ],
   },
   {

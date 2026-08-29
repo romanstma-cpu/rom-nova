@@ -17,7 +17,10 @@
     "probe:live": "npx --yes esbuild scripts/live-signal.ts --bundle --platform=node --outfile=node_modules/.cache/live.cjs --log-level=error && node node_modules/.cache/live.cjs",
     "probe:birdeye": "npx --yes esbuild scripts/birdeye-probe.ts --bundle --platform=node --outfile=node_modules/.cache/birdeye.cjs --log-level=error && node node_modules/.cache/birdeye.cjs",
     "probe:rpc": "npx --yes esbuild scripts/rpc-probe.ts --bundle --platform=node --outfile=node_modules/.cache/rpc.cjs --log-level=error && node node_modules/.cache/rpc.cjs",
-    "probe:flow": "npx --yes esbuild scripts/flow-probe.ts --bundle --platform=node --outfile=node_modules/.cache/flow.cjs --log-level=error && node --max-old-space-size=4096 node_modules/.cache/flow.cjs"
+    "probe:flow": "npx --yes esbuild scripts/flow-probe.ts --bundle --platform=node --outfile=node_modules/.cache/flow.cjs --log-level=error && node --max-old-space-size=4096 node_modules/.cache/flow.cjs",
+    "probe:jupiter": "npx --yes esbuild scripts/jupiter-probe.ts --bundle --platform=node --outfile=node_modules/.cache/jup.cjs --log-level=error && node --max-old-space-size=4096 node_modules/.cache/jup.cjs",
+    "probe:whale": "npx --yes esbuild scripts/whale-probe.ts --bundle --platform=node --outfile=node_modules/.cache/whale.cjs --log-level=error && node --max-old-space-size=4096 node_modules/.cache/whale.cjs",
+    "probe:label": "npx --yes esbuild scripts/label-probe.ts --bundle --platform=node --outfile=node_modules/.cache/label.cjs --log-level=error && node --max-old-space-size=4096 node_modules/.cache/label.cjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",

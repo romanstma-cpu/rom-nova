@@ -20,10 +20,26 @@ npm install
 npm run dev        # http://localhost:3000  (server mode)
 ```
 
-With no API keys the app runs on a deterministic synthetic universe: 110 tokens, 30 tracked wallets, ~1,700 historical
-trades, live-simulated activity — plus one honest live number, the real SOL price, pulled keylessly from CoinGecko and
-Crypto.com Exchange public APIs and cross-checked (median of sources, deviation reported). Simulated data is labeled as
-simulated everywhere it appears.
+**With no API keys, most of this terminal is real Solana.** Five keyless sources carry it, and the data-mode chip in the
+nav names which halves are which rather than making a blanket claim in either direction:
+
+| capability | keyless source | what it gives |
+|---|---|---|
+| tokens, holders, concentration | **Jupiter Tokens V2** | the scored list in ONE request — holder count and 24h change, top-holder share, dev balance, organic score, launchpad, the creator's mint history, and per-interval price/volume change |
+| price history | **GeckoTerminal** | ~1,000 hourly bars, the only keyless OHLCV |
+| mint & freeze authority | **Solana JSON-RPC** | read from the chain |
+| wallet flow | **SQD Solana Portal** | who actually moved the token, per wallet |
+| rug & LP-lock risk | **RugCheck** | a 0-100 risk grade, named risks, and whether the liquidity pool is locked |
+
+What is still simulated: wallet activity (needs Helius) and smart-money scoring (needs wallet reputation, which nothing
+in this stack publishes at any price). Those run on a deterministic synthetic universe — 110 tokens, 30 tracked wallets,
+~1,700 historical trades — and are labeled as simulated everywhere they appear. The SOL reference price is cross-checked
+across CoinGecko and Crypto.com (median of sources, deviation reported).
+
+**Track Record** (`/track`) keeps score of the scoring: every scan pass is recorded, later passes resolve it, and the
+page reports whether any score band beat the average of everything the scanner listed — with intervals that resample
+whole passes rather than individual rows. It is allowed to conclude, and usually does conclude, that there is no edge.
+The ledger never leaves the browser.
 
 Other commands:
 
@@ -32,7 +48,7 @@ npm run build         # server-mode production build
 npm run start         # serve the server-mode build
 npm run build:static  # browser-only export → ./out (the public artifact)
 node scripts/serve-static.mjs   # serve ./out at localhost:8788/nova/
-npm run test          # vitest — 34 engine/universe tests
+npm run test          # vitest — 192 engine/provider/universe tests
 npm run typecheck     # tsc --noEmit
 npm run lint          # eslint (React compiler rules)
 npm run calibrate     # prints score distributions + wallet cohort separation

@@ -102,6 +102,78 @@ export interface TokenFlowProvider {
   ): Promise<TokenFlow | null>;
 }
 
+/**
+ * A published risk assessment for one mint.
+ *
+ * Deliberately NOT merged into SecurityDataProvider. Security answers factual
+ * chain questions — is the mint authority revoked, what share do the top ten
+ * hold — and the answers are checkable. This is somebody else's OPINION, with
+ * their own scoring, and the two should never be indistinguishable in the UI.
+ */
+export interface TokenRisk {
+  mint: string;
+  source: string;
+  /** Vendor's normalised score. HIGHER IS RISKIER — 1 is clean, 44 is not. */
+  score: number;
+  risks: {
+    name: string;
+    level: "danger" | "warn" | "info";
+    detail: string;
+    /** The vendor's own figure for this risk, e.g. "52.85%". */
+    value?: string;
+  }[];
+  /**
+   * Share of LP tokens locked or burned, 0..1.
+   *
+   * The actual rug mechanic, and nothing else in this stack can see it: a
+   * deployer who can withdraw the pool does not need a mint authority to take
+   * the money. Undefined when the vendor did not report it.
+   */
+  lpLockedPct?: number;
+  /** Total holders per the vendor's own count, when the full report was read. */
+  totalHolders?: number;
+  /** Whether the vendor has flagged this mint as already rugged. */
+  rugged?: boolean;
+  /**
+   * The top holders, as published, with a label WHERE ONE EXISTS.
+   *
+   * No derived "concentration excluding pools" figure accompanies this, and
+   * that omission is deliberate and measured. RugCheck's knownAccounts labelled
+   * 12 of 20 top holders for one trending token, 1 of 20 for another and ZERO
+   * of 20 for two more — including the two largest, whose biggest holders are
+   * self-evidently pools and staking contracts. A pool-excluded percentage
+   * computed from that coverage would have reported RAY as 83% wallet-held.
+   * The labels are worth showing; a summary statistic built on them is not.
+   */
+  topHolders?: {
+    owner: string;
+    pct: number;
+    /** "Meteora DLMM Pool", "Streamflow Vault", "Creator" — undefined if unknown. */
+    label?: string;
+    insider?: boolean;
+  }[];
+  /** How many of `topHolders` carried a label, so a reader can judge the rest. */
+  labelledHolders?: number;
+  /**
+   * Insider-linked share of supply, 0..1.
+   *
+   * Only ever set from the full report, where the graph analysis is present and
+   * its absence of findings is a result rather than a silence.
+   */
+  insiderPct?: number;
+  /** False when only the cheap summary was read. */
+  detailed: boolean;
+}
+
+export interface TokenRiskProvider {
+  readonly name: string;
+  /**
+   * @param detailed Fetch the full report. Costs 80KB-1.6MB against a summary's
+   * ~300B, so lists must leave this false and detail pages may set it.
+   */
+  getTokenRisk(mint: string, detailed?: boolean): Promise<TokenRisk | null>;
+}
+
 export interface ProviderSet {
   mode: "demo" | "live";
   token: TokenDataProvider;
@@ -114,5 +186,10 @@ export interface ProviderSet {
    * absence IS the honest state when it is not configured.
    */
   flow?: TokenFlowProvider;
+  /**
+   * Optional third-party risk opinion. Absent means no one graded this token,
+   * which a caller must render as silence rather than as a clean bill.
+   */
+  risk?: TokenRiskProvider;
   health(): ProviderHealth[];
 }

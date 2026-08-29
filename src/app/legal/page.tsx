@@ -16,19 +16,58 @@ export default function LegalPage() {
         </p>
       </section>
 
+      {/* This section used to be headed "The data is simulated" and said the SOL
+          reference price was "the single live number". That was true when it was
+          written and has been progressively falser ever since — and a page that
+          tells a reader real chain data is fake is not a cautious error, it is
+          the same drift as the opposite one, teaching people to ignore the
+          labels that still matter. Which halves are which is computed, not
+          asserted: the chip in the nav reads the same provider resolution the
+          terminal does. */}
       <section className="panel p-4 text-[12.5px] leading-relaxed dim flex flex-col gap-2">
-        <h2 className="panel-title">The data is simulated</h2>
+        <h2 className="panel-title">Some of this is real, and some is simulated</h2>
         <p>
-          Every token, wallet, trade, cluster, signal, and portfolio in this terminal belongs to a{" "}
-          <b className="text-[var(--warn)]">deterministic synthetic universe</b> generated from a fixed seed. None of the
-          tokens exist. None of the wallets are real people. Names that resemble entities (&ldquo;Meridian Desk&rdquo;,
-          &ldquo;Tidewater Capital&rdquo;) are invented. Backtest results, accuracy statistics, and wallet PnL measure the engine against its own
-          simulation — they demonstrate the <i>method</i>, not real-market performance.
+          This terminal is <b className="text-[var(--text)]">mixed</b>, and the data-mode chip in the navigation names
+          which halves are which on every screen. It is computed from the same provider resolution the app uses, so it
+          cannot drift away from what you are actually looking at.
         </p>
         <p>
-          The single live number is the <b className="text-[var(--text)]">SOL reference price</b> in the top bar, fetched in
-          your browser from public keyless APIs (CoinGecko and Crypto.com Exchange) and cross-checked between them. It is
-          always labeled LIVE and is never mixed into the simulated analytics.
+          <b className="text-[var(--text)]">Real, from keyless public sources, fetched in your browser:</b> the token list
+          and its holder counts, top-holder share, dev balance, organic-activity score, launchpad and creator mint history
+          (Jupiter); hourly price history (GeckoTerminal); mint and freeze authority read from the chain (Solana JSON-RPC);
+          wallet-level flow (SQD); rug risk and liquidity-pool lock state (RugCheck); and the SOL reference price
+          (CoinGecko and Crypto.com, cross-checked).
+        </p>
+        <p>
+          <b className="text-[var(--warn)]">Still simulated:</b> wallet activity, wallet PnL, smart-money scoring, the
+          cluster graph, and the backtester — all generated from a{" "}
+          <b className="text-[var(--warn)]">deterministic synthetic universe</b> with a fixed seed. None of those wallets
+          are real people. Names that resemble entities (&ldquo;Meridian Desk&rdquo;, &ldquo;Tidewater Capital&rdquo;) are
+          invented. Backtest results and accuracy statistics measure the engine against its own simulation — they
+          demonstrate the <i>method</i>, not real-market performance.
+        </p>
+        <p>
+          Where a number was never measured at all, this terminal shows a dash and says why, rather than a zero. A zero
+          in a holder-concentration column would read as a perfectly distributed token; the truth is usually that nobody
+          looked.
+        </p>
+      </section>
+
+      <section className="panel p-4 text-[12.5px] leading-relaxed dim flex flex-col gap-2">
+        <h2 className="panel-title">The score keeps its own record</h2>
+        <p>
+          <Link href="/track" className="text-[var(--accent)] hover:underline">
+            Track Record
+          </Link>{" "}
+          logs every scan pass and resolves it against later prices, then reports whether any score band beat the average
+          of <i>everything the scanner listed</i>. It compares against that baseline rather than against zero, because in
+          a rising market every band goes up and calling that skill would be crediting the market to the model. Its
+          intervals resample whole scan passes, not individual rows — tokens seen in the same pass share a market and are
+          not independent trials.
+        </p>
+        <p>
+          It is designed to be able to report no edge, and that is the usual answer. The ledger is stored only in your own
+          browser and is never uploaded.
         </p>
       </section>
 

@@ -31,6 +31,23 @@ export interface TokenInfo {
   devWallet: string;
   /** deterministic hue 0-360 used instead of a hosted logo in demo mode */
   hue: number;
+  /**
+   * Where the token was launched, when the source names it — "pump.fun",
+   * "bonk.fun", and so on. Absent means unknown, NOT self-deployed.
+   */
+  launchpad?: string;
+  /** ms epoch the launchpad bonding curve completed, when it did. */
+  graduatedAt?: number;
+  /**
+   * How many mints this creator has issued, and how many reached a real pool.
+   *
+   * The single most useful fact about a memecoin deployer and the one no price
+   * feed carries: a wallet on its first mint and a wallet on its 873rd are not
+   * the same counterparty. Measured live — the trending list routinely carries
+   * both. Absent means the source did not say, which is not the same as one.
+   */
+  devMints?: number;
+  devMigrations?: number;
 }
 
 /**
@@ -110,6 +127,34 @@ export interface TokenSnapshot {
   bundlerPct: number;
   sniperPct: number;
   insiderPct: number;
+  /**
+   * Rate-of-change stats the SOURCE computed, when it publishes them.
+   *
+   * These exist because of a constraint that shaped this whole app: momentum
+   * and volume acceleration were derived only from candles, candles cost ~4.4s
+   * each at GeckoTerminal, and twelve of them never arrived — so every row in
+   * the scanner rendered a dash in four columns and the two matching factors
+   * stood down on every live token the terminal has ever shown.
+   *
+   * Jupiter publishes priceChange and volumeChange per interval in the SAME
+   * response as the token list. That is not a workaround for missing candles;
+   * it is a different measurement of the same quantity, taken by someone with
+   * better data than a public OHLCV endpoint will hand out for free.
+   *
+   * Candles still win where both exist — they are bars this app can plot and
+   * audit, and `fromCandles` computes over windows it controls. These fill in
+   * only when there are none. Absent means the source published nothing, and
+   * the field stays in the unmeasured set.
+   */
+  momentum1h?: number;
+  momentum24h?: number;
+  momentum5m?: number;
+  /** 6h volume over its trailing baseline; 1.0 is "running at its usual rate". */
+  volumeAccel?: number;
+  /** 24h change in holder count, percent. */
+  holderGrowthPct?: number;
+  /** 24h change in pooled liquidity, percent. A draining pool is the rug tell. */
+  liquidityChangePct?: number;
 }
 
 export interface Candle {

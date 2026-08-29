@@ -36,6 +36,11 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...and the template is opted in. It holds no secrets — only the variable
+# names and what each provider is for — and it is the only place that documents
+# which sources are keyless. Caught by the glob above, it was never tracked, so
+# a clone got no template at all.
+!.env.example
 
 # vercel
 .vercel

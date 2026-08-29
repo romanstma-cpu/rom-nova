@@ -13,7 +13,7 @@
 // drive a fake adapter, so these assertions would be testing the mock.
 
 import { describe, it, expect } from "vitest";
-import { dataMode } from "@/lib/providers/registry";
+import { dataMode, FLAGS } from "@/lib/providers/registry";
 
 /** Every capability the chip is responsible for describing. */
 const CAPABILITIES = [
@@ -23,6 +23,7 @@ const CAPABILITIES = [
   "whale flow",
   "wallet activity",
   "holder distribution",
+  "rug & LP-lock risk",
   "smart-money scoring",
 ] as const;
 
@@ -51,13 +52,24 @@ describe("dataMode — the chip cannot outlive the truth", () => {
     expect(dataMode().simulated).toContain("smart-money scoring");
   });
 
-  // Holder distribution needs getTokenLargestAccounts, which the free RPC
-  // answers with "Request blocked". Only a keyed provider closes it.
-  it("does not claim holder distribution without a keyed provider", () => {
+  // This assertion used to read "does not claim holder distribution without a
+  // KEYED provider", on the reasoning that it needs getTokenLargestAccounts and
+  // the free RPC answers that with "Request blocked". That was true of the RPC
+  // and false of the whole stack: Jupiter publishes holderCount, its 24h change
+  // and the top-holder share, keylessly, in the same payload as the price.
+  //
+  // So the invariant is not "keyed or nothing" — it is that the claim tracks
+  // whoever can actually answer, and collapses the moment nobody can.
+  it("claims holder distribution only when a provider supplies it", () => {
     const m = dataMode();
-    if (!process.env.BIRDEYE_API_KEY) {
-      expect(m.simulated).toContain("holder distribution");
-    }
+    const supplied = FLAGS.birdeye() || FLAGS.jupiter();
+    expect(supplied ? m.live : m.simulated).toContain("holder distribution");
+  });
+
+  // Same contract for the risk overlay: present only while a grader is wired.
+  it("claims rug & LP-lock risk only when a risk provider is configured", () => {
+    const m = dataMode();
+    expect(FLAGS.rugcheck() ? m.live : m.simulated).toContain("rug & LP-lock risk");
   });
 
   it("reserves 'demo' for nothing being live, and 'live' for nothing simulated", () => {

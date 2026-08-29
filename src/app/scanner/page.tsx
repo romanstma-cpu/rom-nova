@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { apiGet, useEventStream, fmtUsd, fmtPct, fmtAge, type StreamEvent } from "@/lib/client";
 import { Score, TokenMark, Empty } from "@/components/ui/bits";
+import { appendPass } from "@/lib/track-store";
 import type { TokenRow } from "@/lib/api/rows";
 
 // Full-screen live discovery scanner: rank-ordered rows that re-sort as new
@@ -44,6 +45,86 @@ function Cell({
   return <td className={`text-right px-2 ${cls}`}>{children}</td>;
 }
 
+/**
+ * The third-party risk grade, phrased as somebody else's opinion.
+ *
+ * Rendered in its own column rather than folded into the signal score on
+ * purpose. The signal is Nova weighing evidence it can inspect; this is a
+ * vendor's judgement, and a reader who cannot tell them apart has been given
+ * one number where there are two claims.
+ */
+function RiskCell({ row }: { row: TokenRow }) {
+  if (row.riskScore === undefined) {
+    return (
+      <td className="text-right px-2 faint" title="no risk provider graded this mint">
+        —
+      </td>
+    );
+  }
+  // Higher is riskier. Colour is the inverse of every other column here, which
+  // is exactly why it carries a label rather than standing on hue alone.
+  const cls = row.riskScore >= 40 ? "neg" : row.riskScore >= 15 ? "warn" : "pos";
+  const flags = row.riskFlags ?? [];
+  const lp =
+    row.lpLockedPct === undefined
+      ? "LP lock not reported"
+      : `LP ${(row.lpLockedPct * 100).toFixed(1)}% locked`;
+  return (
+    <td
+      className={`text-right px-2 ${cls}`}
+      title={
+        `${row.riskSource ?? "risk"} rates this ${row.riskScore}/100 — higher is riskier.\n${lp}` +
+        (flags.length ? `\n\nCritical: ${flags.join("; ")}` : "\nNo critical findings.")
+      }
+    >
+      {row.riskScore}
+      {flags.length > 0 ? <span className="neg"> ⚑</span> : ""}
+    </td>
+  );
+}
+
+/**
+ * Where it launched and who launched it.
+ *
+ * A deployer's mint count is the most useful single fact about a memecoin and
+ * nothing else on this row carries it. Today's trending list routinely holds a
+ * wallet on its first token beside one on its 873rd, and no price column
+ * distinguishes them.
+ */
+function OriginCell({ row }: { row: TokenRow }) {
+  const bits: string[] = [];
+  if (row.launchpad) bits.push(row.launchpad);
+  if (row.devMints !== undefined) {
+    bits.push(row.devMints === 1 ? "1st mint" : `${row.devMints} mints`);
+  }
+  if (bits.length === 0) {
+    return (
+      <td className="px-2 faint text-[10px]" title="source did not name a launchpad or creator history">
+        —
+      </td>
+    );
+  }
+  // A serial deployer is worth flagging; a first-timer is not automatically
+  // safe, and the tooltip says so rather than letting the absence of a warning
+  // read as reassurance.
+  const serial = (row.devMints ?? 0) >= 10;
+  return (
+    <td
+      className={`px-2 text-[10px] ${serial ? "warn" : "faint"}`}
+      title={
+        (row.launchpad ? `Launched on ${row.launchpad}. ` : "") +
+        (row.devMints === undefined
+          ? "Creator history unknown."
+          : `This creator has issued ${row.devMints} mint${row.devMints === 1 ? "" : "s"}` +
+            (row.devMigrations !== undefined ? `, ${row.devMigrations} of which reached a pool` : "") +
+            ". A serial deployer is a warning; a first-time one is not a guarantee.")
+      }
+    >
+      {bits.join(" · ")}
+    </td>
+  );
+}
+
 export default function ScannerPage() {
   const [paused, setPaused] = useState(false);
   const [frozen, setFrozen] = useState(false);
@@ -81,6 +162,38 @@ export default function ScannerPage() {
         prevRank.current = new Map(next.map((r, i) => [r.mint, i]));
         setRows(next);
         setFlash(flashes);
+
+        // Keep score of the scoring. Every pass that reaches here is a set of
+        // real tokens with real prices, and until now that record was thrown
+        // away the instant the next poll replaced it — which is why nothing in
+        // this app could say whether a 70 had ever outperformed a 40.
+        //
+        // Three filters, each guarding a way the ledger could be quietly
+        // poisoned: simulator rows would contribute synthetic outcomes,
+        // unscored rows have no score to grade, and a zero price makes the
+        // forward return meaningless.
+        //
+        // ONE timestamp for the whole pass, not one per row. The interval
+        // machinery groups by it, and a per-row clock reading would scatter a
+        // single pass across twelve singleton clusters and hand back a
+        // confidence nobody earned.
+        const recordable = next.filter((r) => r.source !== "demo" && r.scored && r.priceUsd > 0);
+        if (recordable.length > 0) {
+          appendPass(
+            recordable.map((r) => ({
+              mint: r.mint,
+              symbol: r.symbol,
+              score: r.signalScore,
+              confidence: r.confidence,
+              priceUsd: r.priceUsd,
+              profile: "balanced",
+              unmeasuredCount: (r.unmeasured ?? []).length,
+            })),
+            // The time the PRICE was observed, not the time this render ran.
+            // A forward return is measured from when the number was true.
+            recordable[0].dataTs || Date.now(),
+          );
+        }
         if (flashTimer) clearTimeout(flashTimer);
         flashTimer = setTimeout(() => {
           if (!dead) setFlash(new Map());
@@ -129,12 +242,18 @@ export default function ScannerPage() {
           screen invites the reading "these are the good ones", and nothing here
           predicts a return. */}
       <div className="hint px-1 pb-1">
-        Ranked by the signal score, which weighs liquidity, buy/sell imbalance, token age,
-        chain-read mint &amp; freeze authority and observed wallet flow.{" "}
-        <b>A high score is not a prediction of profit</b> — it means more of the evidence this
-        terminal can see points the same way. Dashes are inputs nobody measured, not zeros:
-        hover one to see why. Confidence falls with every input that is missing, so a 60 at low
-        confidence is a thinner claim than a 45 at high.
+        Ranked by the signal score, which weighs liquidity, buy/sell imbalance, momentum, holder
+        concentration and growth, organic activity, token age, chain-read mint &amp; freeze authority
+        and observed wallet flow. <b>A high score is not a prediction of profit</b> — it means more of
+        the evidence this terminal can see points the same way, and{" "}
+        <Link href="/track" className="text-[var(--accent)] hover:underline">
+          Track Record
+        </Link>{" "}
+        keeps the running tally of whether that has meant anything. Dashes are inputs nobody measured,
+        not zeros: hover one to see why. Confidence falls with every input that is missing, so a 60 at
+        low confidence is a thinner claim than a 45 at high. <b>Risk</b> is a third-party grade where
+        higher is worse — the inverse of Signal, and somebody else&rsquo;s opinion rather than
+        Nova&rsquo;s.
       </div>
 
       <div className="panel overflow-auto flex-1 min-h-0">
@@ -150,7 +269,11 @@ export default function ScannerPage() {
               <th className="text-right px-2 font-medium">Vol accel</th>
               <th className="text-right px-2 font-medium">Whale 6h</th>
               <th className="text-left px-2 font-medium">Buyers</th>
+              <th className="text-left px-2 font-medium">Origin</th>
               <th className="text-right px-2 font-medium">Liq</th>
+              <th className="text-right px-2 font-medium" title="Third-party risk grade. Higher is riskier — the inverse of the Signal column.">
+                Risk
+              </th>
               <th className="text-right px-3 font-medium">Signal</th>
             </tr>
           </thead>
@@ -193,13 +316,13 @@ export default function ScannerPage() {
                   {/* An unmeasured column must not render its placeholder zero.
                       "+0.0%" reads as a flat tape; the truth is that nobody
                       fetched the candles, and a dash says that. */}
-                  <Cell show={!absent(r, "momentum")} cls={r.h1 >= 0 ? "pos" : "neg"} why="needs candle history, not fetched for the list">
+                  <Cell show={!absent(r, "momentum")} cls={r.h1 >= 0 ? "pos" : "neg"} why="this row's source published no interval price change, and candles are not fetched for the list">
                     {fmtPct(r.h1)}
                   </Cell>
-                  <Cell show={!absent(r, "momentum")} cls={r.h24 >= 0 ? "pos" : "neg"} why="needs candle history, not fetched for the list">
+                  <Cell show={!absent(r, "momentum")} cls={r.h24 >= 0 ? "pos" : "neg"} why="this row's source published no interval price change, and candles are not fetched for the list">
                     {fmtPct(r.h24)}
                   </Cell>
-                  <Cell show={!absent(r, "volumeAccel")} cls={r.volumeAccel > 1.6 ? "warn" : "dim"} why="needs candle history, not fetched for the list">
+                  <Cell show={!absent(r, "volumeAccel")} cls={r.volumeAccel > 1.6 ? "warn" : "dim"} why="this row's source published no interval price change, and candles are not fetched for the list">
                     {r.volumeAccel.toFixed(1)}×
                   </Cell>
                   <Cell
@@ -228,7 +351,9 @@ export default function ScannerPage() {
                       </span>
                     )}
                   </td>
+                  <OriginCell row={r} />
                   <td className="text-right px-2 dim">{fmtUsd(r.liquidityUsd)}</td>
+                  <RiskCell row={r} />
                   <td className="text-right px-3"><Score value={r.signalScore} width={46} scored={r.scored !== false} reason={r.unscoredReason} /></td>
                 </tr>
               );

@@ -30,6 +30,7 @@ import type { MarketDataProvider } from "../providers/types";
 import type { DemoStore } from "../demo/store";
 import { FLAGS, getProviders } from "../providers/registry";
 import { DexScreenerTokenProvider } from "../providers/dexscreener";
+import { JupiterTokenProvider } from "../providers/jupiter";
 import { liveSignal } from "../engine/live-features";
 import { buildLiveTokenRows, riskLevelOf, type TokenRow } from "./rows";
 
@@ -187,33 +188,45 @@ export async function trendingRows(
 async function fetchTrendingRows(
   limit = LIVE_LIST_LIMIT,
 ): Promise<Sourced<TokenRow[]> | null> {
-  // DEX Screener for the LIST specifically, even though GeckoTerminal wins the
-  // general token slot. The two are good at different things and the list needs
-  // the one GeckoTerminal is worst at.
+  // Jupiter for the LIST. This slot has now been held by three adapters and the
+  // reason keeps being the same one: how many requests a list of twelve costs.
   //
-  // Measured: fanning twelve getToken calls at GeckoTerminal took 27 seconds and
-  // returned two usable rows — it rate-limits hard, which is the same wall that
-  // made a scored list impossible. DEX Screener answered the identical shape of
-  // request in a fifth of the time and batches internally.
+  // GeckoTerminal lost it because twelve getToken calls took 27 seconds and
+  // returned two usable rows. DEX Screener won it by batching internally, at
+  // one trending call plus twelve lookups. Jupiter returns all twelve tokens
+  // FULLY POPULATED in a single ~30KB response — and populated with the fields
+  // the other two do not have at all: holder count, top-holder share, dev
+  // balance, organic score, creator mint history, and per-interval price and
+  // volume change.
   //
-  // GeckoTerminal keeps the depth work (candles, history) where its thousand
-  // hourly bars have no keyless rival.
-  const token = FLAGS.dexscreener() ? new DexScreenerTokenProvider() : getProviders().token;
+  // That last one is why the rows look different now. Momentum and volume
+  // acceleration were derived only from candles, and candles are what a list
+  // cannot afford, so those columns were dashed on every row this app ever
+  // showed. Jupiter publishes them in the same payload as the price.
+  const jup = FLAGS.jupiter() ? new JupiterTokenProvider() : null;
+  const token = jup ?? (FLAGS.dexscreener() ? new DexScreenerTokenProvider() : getProviders().token);
   if (token.name === "demo") return null;
 
   try {
-    const trending = await token.getTrendingTokens(Math.min(limit, LIVE_LIST_LIMIT));
-    if (trending.length === 0) return null;
+    const wanted = Math.min(limit, LIVE_LIST_LIMIT);
+    let entries: (TokenInfo & { snapshot: TokenSnapshot })[];
 
-    const detailed = await pooled(trending, LIVE_LIST_CONCURRENCY, async (snap) => {
-      try {
-        return await token.getToken(snap.mint);
-      } catch {
-        // One unreachable token must not cost the other eleven.
-        return null;
-      }
-    });
-    const entries = detailed.filter((d): d is NonNullable<typeof d> => d !== null);
+    if (jup) {
+      // One request, no fan-out.
+      entries = await jup.getTrendingDetailed(wanted);
+    } else {
+      const trending = await token.getTrendingTokens(wanted);
+      if (trending.length === 0) return null;
+      const detailed = await pooled(trending, LIVE_LIST_CONCURRENCY, async (snap) => {
+        try {
+          return await token.getToken(snap.mint);
+        } catch {
+          // One unreachable token must not cost the other eleven.
+          return null;
+        }
+      });
+      entries = detailed.filter((d): d is NonNullable<typeof d> => d !== null);
+    }
     if (entries.length === 0) return null;
 
     const scored = await scoreRows(entries, token.name);
@@ -267,6 +280,10 @@ async function scoreRows(
         market: NO_CANDLES,
         security: providers.security,
         flow: providers.flow,
+        // Summary only — `liveSignal`'s detailedRisk stays false here. The full
+        // report is 80KB to 1.6MB per token, and twelve of those in one pass
+        // would undo everything the single-call list just bought.
+        risk: providers.risk,
       });
     } catch {
       return null;
@@ -288,11 +305,31 @@ async function scoreRows(
       .filter((w) => Number.isFinite(w.usd) && Math.abs(w.usd) >= 1)
       .sort((a, b) => Math.abs(b.usd) - Math.abs(a.usd))
       .slice(0, 6);
+    const risk = s.result.risk;
     return {
       ...row,
       topWallets,
+      // The measured flow, carried onto the row.
+      //
+      // Without these three lines the row kept `buildLiveTokenRows`'s
+      // placeholder zeros while `topWallets` beside them listed real movers, so
+      // the scanner rendered "whale 6h $0" on a token whose biggest wallet had
+      // just moved a quarter of a million dollars. The vector had the number the
+      // whole time; nothing copied it across. A zero presented as a measurement
+      // is the failure this codebase is built to prevent, and it was sitting in
+      // the most prominent flow column in the app.
+      whaleFlow6hUsd: s.result.features.whaleNetFlowUsd,
+      smFlow6hUsd: s.result.features.smartMoneyNetFlowUsd,
+      smWallets: s.result.features.smartMoneyWallets,
       flowMinutes: flow ? Math.round(flow.blocksCovered / 150) : undefined,
       flowComplete: flow?.complete,
+      // The vendor's grade travels beside the score, never inside it. A reader
+      // must be able to tell "Nova rates this 62" from "RugCheck rates this 44
+      // risk" — they are different claims by different parties.
+      riskScore: risk?.score,
+      lpLockedPct: risk?.lpLockedPct,
+      riskFlags: risk?.risks.filter((r) => r.level === "danger").map((r) => r.name),
+      riskSource: risk?.source,
       scored: true,
       signalScore: s.signal.score,
       signalLabel: s.signal.label,

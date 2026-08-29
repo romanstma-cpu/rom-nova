@@ -83,6 +83,32 @@ export interface TokenRow {
   flowMinutes?: number;
   /** False when the flow read hit its byte budget and stopped early. */
   flowComplete?: boolean;
+
+  // ---- context a reader needs to judge the row, rather than more numbers ----
+
+  /**
+   * Where the token launched, when the source names it. "pump.fun" beside a
+   * six-hour-old token says more about what a reader is looking at than any
+   * factor weight does.
+   */
+  launchpad?: string;
+  /**
+   * The creator's mint history: total mints, and how many reached a real pool.
+   *
+   * The single most useful fact about a memecoin deployer, and today's trending
+   * list carries wallets on their 1st mint and wallets on their 873rd side by
+   * side. Undefined means the source did not say — never assume one.
+   */
+  devMints?: number;
+  devMigrations?: number;
+  /** Third-party risk score, 0-100, HIGHER IS RISKIER. Undefined = ungraded. */
+  riskScore?: number;
+  /** Share of LP locked or burned, 0..1. Undefined = the vendor did not report. */
+  lpLockedPct?: number;
+  /** Names of the vendor's critical findings, for the row's tooltip. */
+  riskFlags?: string[];
+  /** Who graded it, so the score is never mistaken for Nova's own. */
+  riskSource?: string;
 }
 
 /** Numeric columns a keyless snapshot cannot fill without candle history. */
@@ -156,17 +182,16 @@ export function buildTokenRows(
 /**
  * Rows for REAL Solana tokens, from a live token provider.
  *
- * Deliberately unscored. `liveFeatures` needs candle history to build a vector
- * and refuses without it — and a scored live list turned out to be impossible
- * rather than merely slow: measured over twelve trending tokens, GeckoTerminal
- * rate-limits under any concurrency and returned zero usable candle sets in
- * thirty-seven seconds (`npm run probe:list`). Raising concurrency made
- * per-token latency worse, which is a rate limit rather than a slow endpoint.
+ * The doc comment here used to explain why these rows were "deliberately
+ * unscored", and then why they were scored but dashed in four columns: momentum
+ * and volume acceleration came only from candles, candles cost ~4.4s each at
+ * GeckoTerminal, and twelve never arrived under any concurrency.
  *
- * So this returns what a single cheap call per token really knows — price,
- * market cap, liquidity, 24h volume, and the 1h trade counts — and names
- * everything else absent. Opening one token still scores it properly, because
- * one candle fetch is affordable where twelve are not.
+ * That constraint is gone rather than worked around. A source that publishes
+ * its own per-interval price and volume change answers the same question in the
+ * same payload as the price, so those columns now carry numbers on every row
+ * whose source supplies them — and still dash, honestly, on every row whose
+ * source does not.
  */
 export function buildLiveTokenRows(
   entries: (TokenInfo & { snapshot: TokenSnapshot })[],
@@ -188,17 +213,20 @@ export function buildLiveTokenRows(
       marketCapUsd: snap.marketCapUsd,
       liquidityUsd: snap.liquidityUsd,
       volume24hUsd: snap.volume24hUsd,
-      // Momentum needs candles, and candles are what this path cannot afford.
-      // Zero here means "not fetched"; NO_CANDLE_COLUMNS is what says so.
-      m5: 0,
-      h1: 0,
-      h6: 0,
-      h24: 0,
-      volumeAccel: 0,
+      // Whatever the source published. A zero that survives here is still
+      // covered by `unmeasured`, which the UI consults before rendering a cell —
+      // "+0.0%" must never stand in for "nobody looked".
+      m5: snap.momentum5m ?? 0,
+      h1: snap.momentum1h ?? 0,
+      // 6h has no dedicated field on the snapshot; 24h is the nearest published
+      // window and is labelled as such rather than interpolated into a 6h claim.
+      h6: snap.momentum24h ?? 0,
+      h24: snap.momentum24h ?? 0,
+      volumeAccel: snap.volumeAccel ?? 0,
       buys1h: snap.buys1h,
       sells1h: snap.sells1h,
       holders: snap.holders,
-      holderGrowthPct: 0,
+      holderGrowthPct: snap.holderGrowthPct ?? 0,
       top10Pct: snap.top10Pct,
       organicScore: snap.organicScore,
       socialScore: snap.socialScore,
@@ -220,6 +248,9 @@ export function buildLiveTokenRows(
         `read those absences as zeros. Open the token to score it.`,
       unmeasured,
       source,
+      launchpad: e.launchpad,
+      devMints: e.devMints,
+      devMigrations: e.devMigrations,
     };
   });
 }

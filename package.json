@@ -13,6 +13,7 @@
     "build:static": "node scripts/build-static.mjs",
     "smoke:providers": "npx --yes esbuild scripts/provider-smoke.ts --bundle --platform=node --outfile=node_modules/.cache/smoke.cjs --log-level=error && node node_modules/.cache/smoke.cjs",
     "probe:seam": "npx --yes esbuild scripts/seam-probe.ts --bundle --platform=node --outfile=node_modules/.cache/seam.cjs --log-level=error && node node_modules/.cache/seam.cjs",
+    "probe:list": "npx --yes esbuild scripts/list-probe.ts --bundle --platform=node --outfile=node_modules/.cache/listprobe.cjs --log-level=error && node node_modules/.cache/listprobe.cjs",
     "probe:live": "npx --yes esbuild scripts/live-signal.ts --bundle --platform=node --outfile=node_modules/.cache/live.cjs --log-level=error && node node_modules/.cache/live.cjs",
     "probe:birdeye": "npx --yes esbuild scripts/birdeye-probe.ts --bundle --platform=node --outfile=node_modules/.cache/birdeye.cjs --log-level=error && node node_modules/.cache/birdeye.cjs"
   },

@@ -18,7 +18,7 @@ const MAX_EDGES = 420;
  *  and static positions must not be able to crowd them out. */
 const MAX_TRADE_EDGES = 160;
 import { buildFlowSeries, buildTokenRows, buildWalletRows } from "./rows";
-import { candlesFor } from "./source";
+import { DEMO, candlesFor, trendingRows } from "./source";
 import { providerHealth } from "../providers/registry";
 import type { AlertCondition, BacktestConfig, StrategyProfileId } from "../types";
 
@@ -45,8 +45,33 @@ export interface TokensQuery {
   limit?: number;
 }
 
-export function handleTokens(store: DemoStore, q: TokensQuery) {
+/**
+ * The token list, real where it can be.
+ *
+ * Serves live trending Solana tokens when a live token provider is resolved,
+ * and the simulator otherwise. `asOf` forces the simulator regardless: it is a
+ * request to replay a past moment, and no live source can answer that — silently
+ * returning "now" for a scrub back in time would be worse than refusing.
+ *
+ * Live rows arrive unscored and say why. They are not sorted by score for the
+ * obvious reason that they do not have one; newest-first is the honest default
+ * for a trending list.
+ */
+export async function handleTokens(store: DemoStore, q: TokensQuery) {
   const { profile = "balanced", asOf, sort = "signalScore", dir = "desc", limit = 200 } = q;
+
+  if (asOf === undefined) {
+    const live = await trendingRows();
+    if (live) {
+      return {
+        rows: live.data.slice(0, Math.min(limit, 500)),
+        asOf: Date.now(),
+        provenance: live.provenance,
+        demo: false,
+      };
+    }
+  }
+
   let rows = buildTokenRows(store, asOf, profile);
   const key = sort as keyof (typeof rows)[0];
   if (rows[0] && key in rows[0] && typeof rows[0][key] === "number") {
@@ -54,7 +79,12 @@ export function handleTokens(store: DemoStore, q: TokensQuery) {
       dir === "asc" ? (a[key] as number) - (b[key] as number) : (b[key] as number) - (a[key] as number),
     );
   }
-  return { rows: rows.slice(0, Math.min(limit, 500)), asOf: asOf ?? store.simulatedUntil, demo: true };
+  return {
+    rows: rows.slice(0, Math.min(limit, 500)),
+    asOf: asOf ?? store.simulatedUntil,
+    provenance: DEMO,
+    demo: true,
+  };
 }
 
 export function handleTokenDetail(store: DemoStore, mint: string, asOf?: number, profile: StrategyProfileId = "balanced") {

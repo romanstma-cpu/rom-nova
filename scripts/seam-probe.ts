@@ -6,7 +6,7 @@
 // test proves the adapter fetches. This proves the composition, which is where
 // the two would otherwise be assumed to meet.
 
-import { handleCandles } from "../src/lib/api/handlers";
+import { handleCandles, handleTokens } from "../src/lib/api/handlers";
 import { getStore } from "../src/lib/demo/store";
 import { getProviders } from "../src/lib/providers/registry";
 
@@ -31,8 +31,23 @@ async function show(label: string, mint: string): Promise<void> {
 }
 
 void (async () => {
-  console.log(`market provider resolved to: ${getProviders().market.name}`);
+  const p = getProviders();
+  console.log(`token=${p.token.name}  market=${p.market.name}`);
   await show("REAL MINT (BONK)", BONK);
   const demoMint = getStore().tokenList()[0].info.mint;
   await show(`DEMO MINT (${demoMint.slice(0, 10)}…)`, demoMint);
+
+  const t0 = Date.now();
+  const list = await handleTokens(getStore(), { limit: 12 });
+  console.log(`\nTOKEN LIST  (${Date.now() - t0}ms)`);
+  console.log(`  source ${list.provenance.source}  real=${list.provenance.real}  rows=${list.rows.length}`);
+  for (const r of list.rows.slice(0, 6)) {
+    console.log(
+      `  ${(r.symbol || "?").padEnd(10)} ${r.mint.slice(0, 8)}…  ` +
+        `$${r.priceUsd.toPrecision(4).padStart(12)}  liq $${Math.round(r.liquidityUsd).toLocaleString().padStart(12)}  ` +
+        `vol24 $${Math.round(r.volume24hUsd).toLocaleString().padStart(13)}  scored=${r.scored}`,
+    );
+  }
+  const unscored = list.rows.filter((r) => !r.scored).length;
+  console.log(`  unscored: ${unscored}/${list.rows.length}`);
 })();

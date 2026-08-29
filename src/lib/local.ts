@@ -71,7 +71,7 @@ export async function localGet(url: string): Promise<LocalResponse> {
     if (p === "/api/tokens")
       return {
         status: 200,
-        body: handleTokens(store, {
+        body: await handleTokens(store, {
           profile: (q.get("profile") ?? undefined) as StrategyProfileId | undefined,
           asOf: num(q.get("asOf")),
           sort: q.get("sort") ?? undefined,

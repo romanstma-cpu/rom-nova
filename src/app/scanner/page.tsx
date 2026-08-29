@@ -148,7 +148,7 @@ export default function ScannerPage() {
                   <td className={`text-right px-2 ${r.volumeAccel > 1.6 ? "warn" : "dim"}`}>{r.volumeAccel.toFixed(1)}×</td>
                   <td className={`text-right px-2 ${r.whaleFlow6hUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(r.whaleFlow6hUsd)}</td>
                   <td className="text-right px-2 dim">{fmtUsd(r.liquidityUsd)}</td>
-                  <td className="text-right px-3"><Score value={r.signalScore} width={46} /></td>
+                  <td className="text-right px-3"><Score value={r.signalScore} width={46} scored={r.scored !== false} reason={r.unscoredReason} /></td>
                 </tr>
               );
             })}

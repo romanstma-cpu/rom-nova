@@ -4,7 +4,35 @@
 
 import { fmtAgo, scoreColor } from "@/lib/client";
 
-export function Score({ value, width = 64 }: { value: number; width?: number }) {
+/**
+ * A score, or an honest dash where one could not be computed.
+ *
+ * `scored: false` is not the same as a low score and must never render as one.
+ * A live token from a keyless source has no wallet-flow or holder data behind
+ * it, so the engine refuses to build a vector at all rather than emit zeros
+ * that would read as flat momentum and a clean cap table — and a bar drawn at
+ * 0% would undo that refusal at the last step, telling the reader the model
+ * looked and found nothing.
+ */
+export function Score({
+  value,
+  width = 64,
+  scored = true,
+  reason,
+}: {
+  value: number;
+  width?: number;
+  scored?: boolean;
+  reason?: string;
+}) {
+  if (!scored) {
+    return (
+      <span className="inline-flex items-center gap-2 faint" title={reason ?? "not scored"}>
+        <span className="num text-[12.5px]">—</span>
+        <span className="scorebar" style={{ width }} />
+      </span>
+    );
+  }
   return (
     <span className="inline-flex items-center gap-2">
       <span className="num text-[12.5px]" style={{ color: scoreColor(value) }}>

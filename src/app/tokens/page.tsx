@@ -114,7 +114,7 @@ export default function TokenRadar() {
                 <td className={`text-right px-2 ${r.top10Pct > 0.35 ? "neg" : "dim"}`}>{(r.top10Pct * 100).toFixed(0)}%</td>
                 <td className={`text-right px-2 ${r.organicScore < 0.4 ? "warn" : "dim"}`}>{(r.organicScore * 100).toFixed(0)}</td>
                 <td className="text-right px-2">
-                  <Score value={r.signalScore} width={40} />
+                  <Score value={r.signalScore} width={40} scored={r.scored !== false} reason={r.unscoredReason} />
                 </td>
                 <td className="text-right px-2">
                   <RiskBadge level={r.riskLevel} />

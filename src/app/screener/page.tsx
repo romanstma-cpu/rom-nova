@@ -164,7 +164,7 @@ export default function ScreenerPage() {
                 <td className="text-right px-2 dim">{fmtNum(r.holders)}</td>
                 <td className={`text-right px-2 ${r.whaleFlow6hUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(r.whaleFlow6hUsd)}</td>
                 <td className={`text-right px-2 ${r.smFlow6hUsd > 0 ? "pos" : "faint"}`}>{r.smFlow6hUsd ? fmtUsd(r.smFlow6hUsd) : "—"}</td>
-                <td className="text-right px-2"><Score value={r.signalScore} width={40} /></td>
+                <td className="text-right px-2"><Score value={r.signalScore} width={40} scored={r.scored !== false} reason={r.unscoredReason} /></td>
                 <td className="text-right px-2 dim">{(r.confidence * 100).toFixed(0)}%</td>
                 <td className="text-right px-3"><RiskBadge level={r.riskLevel} /></td>
               </tr>

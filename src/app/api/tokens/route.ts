@@ -19,5 +19,5 @@ export async function GET(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues.map((i) => i.message).join("; ") }, { status: 400 });
   }
-  return NextResponse.json(handleTokens(store, parsed.data));
+  return NextResponse.json(await handleTokens(store, parsed.data));
 }

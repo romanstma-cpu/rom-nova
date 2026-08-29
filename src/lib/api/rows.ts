@@ -6,7 +6,14 @@
 import type { DemoStore } from "../demo/store";
 import { HOUR } from "../demo/universe";
 import { signalsAt } from "../engine/signals";
-import type { RiskLevel, Signal, StrategyProfileId } from "../types";
+import type {
+  RiskLevel,
+  Signal,
+  StrategyProfileId,
+  TokenInfo,
+  TokenSnapshot,
+  UnmeasuredField,
+} from "../types";
 
 export interface TokenRow {
   mint: string;
@@ -38,12 +45,35 @@ export interface TokenRow {
   smWallets: number;
   signalScore: number;
   signalLabel: string;
-  signalId: string;
   signalKind: string;
+  signalId: string;
   confidence: number;
   riskLevel: RiskLevel;
   dataTs: number;
+  /**
+   * Whether a signal was actually computed for this row.
+   *
+   * False is NOT a low score and must never render as one. A live token from a
+   * keyless source has no wallet-flow or holder data behind it, so the engine
+   * refuses to build a vector at all rather than emit zeros that would read as
+   * flat momentum over a clean cap table. `signalScore` is 0 on those rows
+   * because the field is not optional, and every reader of it must consult this
+   * flag first.
+   */
+  scored: boolean;
+  /** Why there is no score, for the cell's tooltip. */
+  unscoredReason?: string;
+  /**
+   * Columns this row's source could not supply. Same contract as
+   * TokenSnapshot.unmeasured: a listed field is absent, not zero.
+   */
+  unmeasured?: readonly UnmeasuredField[];
+  /** Which adapter produced the market numbers. "demo" is the simulator. */
+  source: string;
 }
+
+/** Numeric columns a keyless snapshot cannot fill without candle history. */
+export const NO_CANDLE_COLUMNS = ["m5", "h1", "h6", "h24", "volumeAccel"] as const;
 
 function riskLevelOf(s: Signal): RiskLevel {
   const high = s.risks.filter((r) => r.severity === "high").length;
@@ -103,9 +133,82 @@ export function buildTokenRows(
       confidence: s.confidence,
       riskLevel: riskLevelOf(s),
       dataTs: snap.ts,
+      scored: true,
+      source: "demo",
     });
   }
   return rows;
+}
+
+/**
+ * Rows for REAL Solana tokens, from a live token provider.
+ *
+ * Deliberately unscored. `liveFeatures` needs candle history to build a vector
+ * and refuses without it — and a scored live list turned out to be impossible
+ * rather than merely slow: measured over twelve trending tokens, GeckoTerminal
+ * rate-limits under any concurrency and returned zero usable candle sets in
+ * thirty-seven seconds (`npm run probe:list`). Raising concurrency made
+ * per-token latency worse, which is a rate limit rather than a slow endpoint.
+ *
+ * So this returns what a single cheap call per token really knows — price,
+ * market cap, liquidity, 24h volume, and the 1h trade counts — and names
+ * everything else absent. Opening one token still scores it properly, because
+ * one candle fetch is affordable where twelve are not.
+ */
+export function buildLiveTokenRows(
+  entries: (TokenInfo & { snapshot: TokenSnapshot })[],
+  source: string,
+  now = Date.now(),
+): TokenRow[] {
+  return entries.map((e) => {
+    const snap = e.snapshot;
+    const unmeasured = snap.unmeasured ?? [];
+    return {
+      mint: e.mint,
+      symbol: e.symbol,
+      name: e.name,
+      narrative: e.narrative,
+      hue: e.hue,
+      verified: e.verified,
+      ageHours: e.createdAt > 0 ? (now - e.createdAt) / 3_600_000 : 0,
+      priceUsd: snap.priceUsd,
+      marketCapUsd: snap.marketCapUsd,
+      liquidityUsd: snap.liquidityUsd,
+      volume24hUsd: snap.volume24hUsd,
+      // Momentum needs candles, and candles are what this path cannot afford.
+      // Zero here means "not fetched"; NO_CANDLE_COLUMNS is what says so.
+      m5: 0,
+      h1: 0,
+      h6: 0,
+      h24: 0,
+      volumeAccel: 0,
+      buys1h: snap.buys1h,
+      sells1h: snap.sells1h,
+      holders: snap.holders,
+      holderGrowthPct: 0,
+      top10Pct: snap.top10Pct,
+      organicScore: snap.organicScore,
+      socialScore: snap.socialScore,
+      // No keyless source sees wallet-level flow. Declared, not faked.
+      whaleFlow6hUsd: 0,
+      smFlow6hUsd: 0,
+      smWallets: 0,
+      signalScore: 0,
+      signalLabel: "not scored",
+      signalKind: "none",
+      signalId: "",
+      confidence: 0,
+      riskLevel: "medium" as RiskLevel,
+      dataTs: snap.ts,
+      scored: false,
+      unscoredReason:
+        `${source} supplies price and liquidity but no candle history, holder ` +
+        `distribution or wallet flow — the scorer refuses a vector rather than ` +
+        `read those absences as zeros. Open the token to score it.`,
+      unmeasured,
+      source,
+    };
+  });
 }
 
 export interface WalletRow {

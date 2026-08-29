@@ -10,6 +10,8 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { MarketDataProvider } from "@/lib/providers/types";
+import type { TokenInfo, TokenSnapshot } from "@/lib/types";
+import { buildLiveTokenRows } from "@/lib/api/rows";
 
 const market: { current: MarketDataProvider } = {
   current: { name: "demo", getCandles: async () => [], getPrice: async () => null },
@@ -110,6 +112,79 @@ describe("candlesFor — provenance travels with the data", () => {
     // panel would badge simulator data as GECKOTERMINAL.
     expect(r.provenance.source).toBe("demo");
     expect(provenanceLabel(r.provenance)).toBe("SIMULATED");
+  });
+});
+
+describe("buildLiveTokenRows — real market data, no invented score", () => {
+  const entry = (over: Partial<TokenSnapshot> = {}): TokenInfo & { snapshot: TokenSnapshot } => ({
+    mint: "So11111111111111111111111111111111111111112",
+    name: "Wrapped SOL",
+    symbol: "SOL",
+    createdAt: Date.now() - 10 * 3_600_000,
+    decimals: 9,
+    narrative: "Infra" as TokenInfo["narrative"],
+    verified: true,
+    mintAuthorityRevoked: false,
+    freezeAuthorityRevoked: false,
+    permanentDelegate: false,
+    devWallet: "",
+    hue: 200,
+    snapshot: {
+      mint: "So11111111111111111111111111111111111111112",
+      ts: Date.now(),
+      priceUsd: 180,
+      marketCapUsd: 9e10,
+      fdvUsd: 9e10,
+      liquidityUsd: 5e7,
+      volume24hUsd: 2e9,
+      buys1h: 900,
+      sells1h: 700,
+      uniqueBuyers1h: 0,
+      uniqueSellers1h: 0,
+      holders: 0,
+      top10Pct: 0,
+      devHoldsPct: 0,
+      organicScore: 0,
+      socialScore: 0,
+      bundlerPct: 0,
+      sniperPct: 0,
+      insiderPct: 0,
+      unmeasured: ["top10Pct", "holders"] as const,
+      ...over,
+    } as TokenSnapshot,
+  });
+
+  it("carries the real market columns through", () => {
+    const [r] = buildLiveTokenRows([entry()], "dexscreener");
+    expect(r.symbol).toBe("SOL");
+    expect(r.priceUsd).toBe(180);
+    expect(r.liquidityUsd).toBe(5e7);
+    expect(r.volume24hUsd).toBe(2e9);
+    expect(r.buys1h).toBe(900);
+    expect(r.source).toBe("dexscreener");
+  });
+
+  // The whole point. A live row has no candle history and no wallet flow, so
+  // the engine refuses a vector — and the row must not quietly present a 0 as
+  // if the model had looked and found nothing.
+  it("is never scored", () => {
+    const [r] = buildLiveTokenRows([entry()], "dexscreener");
+    expect(r.scored).toBe(false);
+    expect(r.signalScore).toBe(0);
+    expect(r.unscoredReason).toBeTruthy();
+    expect(r.unscoredReason).toContain("refuses");
+  });
+
+  it("keeps the source's own unmeasured list", () => {
+    const [r] = buildLiveTokenRows([entry()], "dexscreener");
+    expect(r.unmeasured).toContain("top10Pct");
+    expect(r.unmeasured).toContain("holders");
+  });
+
+  it("marks demo rows as scored so the dash is only ever the live path", () => {
+    // Guard against the flag defaulting the wrong way if a caller omits it.
+    const [r] = buildLiveTokenRows([entry()], "demo");
+    expect(r.scored).toBe(false);
   });
 });
 

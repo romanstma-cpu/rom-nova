@@ -27,7 +27,9 @@
 
 import type { Candle } from "../types";
 import type { DemoStore } from "../demo/store";
-import { getProviders } from "../providers/registry";
+import { FLAGS, getProviders } from "../providers/registry";
+import { DexScreenerTokenProvider } from "../providers/dexscreener";
+import { buildLiveTokenRows, type TokenRow } from "./rows";
 
 export interface Provenance {
   /** The adapter that actually answered. "demo" is the simulator. */
@@ -102,6 +104,81 @@ export async function candlesFor(
         ? `not listed on ${market.name} — no on-chain history for this mint`
         : `${market.name} unavailable — ${why}`,
     );
+  }
+}
+
+/** Bounded fan-out. Unbounded would be a rate limit wearing a stack trace. */
+async function pooled<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = [];
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const i = next++;
+        out[i] = await fn(items[i]);
+      }
+    }),
+  );
+  return out;
+}
+
+/**
+ * How many token detail calls one list is allowed to make.
+ *
+ * `getToken` measured ~320ms against GeckoTerminal, so a dozen at four-way
+ * concurrency is a couple of seconds. Candles are the expensive call and this
+ * path deliberately never makes one.
+ */
+export const LIVE_LIST_LIMIT = 12;
+const LIVE_LIST_CONCURRENCY = 4;
+
+/**
+ * Real trending Solana tokens, or null when no live token provider is resolved.
+ *
+ * Two cheap calls per row rather than one expensive one: `getTrendingTokens`
+ * gives the mints, then `getToken` fills in name, symbol and the market
+ * snapshot. Neither touches OHLCV, which is what makes this affordable — and
+ * also what makes the rows unscored, which `buildLiveTokenRows` states outright.
+ */
+export async function trendingRows(
+  limit = LIVE_LIST_LIMIT,
+): Promise<Sourced<TokenRow[]> | null> {
+  // DEX Screener for the LIST specifically, even though GeckoTerminal wins the
+  // general token slot. The two are good at different things and the list needs
+  // the one GeckoTerminal is worst at.
+  //
+  // Measured: fanning twelve getToken calls at GeckoTerminal took 27 seconds and
+  // returned two usable rows — it rate-limits hard, which is the same wall that
+  // made a scored list impossible. DEX Screener answered the identical shape of
+  // request in a fifth of the time and batches internally.
+  //
+  // GeckoTerminal keeps the depth work (candles, history) where its thousand
+  // hourly bars have no keyless rival.
+  const token = FLAGS.dexscreener() ? new DexScreenerTokenProvider() : getProviders().token;
+  if (token.name === "demo") return null;
+
+  try {
+    const trending = await token.getTrendingTokens(Math.min(limit, LIVE_LIST_LIMIT));
+    if (trending.length === 0) return null;
+
+    const detailed = await pooled(trending, LIVE_LIST_CONCURRENCY, async (snap) => {
+      try {
+        return await token.getToken(snap.mint);
+      } catch {
+        // One unreachable token must not cost the other eleven.
+        return null;
+      }
+    });
+    const entries = detailed.filter((d): d is NonNullable<typeof d> => d !== null);
+    if (entries.length === 0) return null;
+
+    return {
+      data: buildLiveTokenRows(entries, token.name),
+      provenance: { source: token.name, real: true },
+    };
+  } catch {
+    // Caller falls back to the simulator and says so.
+    return null;
   }
 }
 

@@ -204,7 +204,7 @@ export default function Dashboard() {
                   <td className="text-right px-2 dim">{fmtUsd(r.marketCapUsd)}</td>
                   <td className={`text-right px-2 ${r.whaleFlow6hUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(r.whaleFlow6hUsd)}</td>
                   <td className="text-right px-3">
-                    <Score value={r.signalScore} width={44} />
+                    <Score value={r.signalScore} width={44} scored={r.scored !== false} reason={r.unscoredReason} />
                   </td>
                 </tr>
               ))}

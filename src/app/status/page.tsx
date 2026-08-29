@@ -17,6 +17,7 @@ interface Status {
     genesis: number;
     seed: number;
   };
+  dataMode?: { overall: "live" | "mixed" | "demo"; live: string[]; simulated: string[] };
 }
 
 export default function StatusPage() {
@@ -26,6 +27,35 @@ export default function StatusPage() {
   return (
     <div className="p-3 flex flex-col gap-3">
       <h1 className="text-[15px] font-semibold tracking-wide">SYSTEM STATUS</h1>
+
+      {/* Leads with the answer. The provider table below is the evidence, but a
+          reader arriving from the data-source chip wants the one-line version
+          of which half of this terminal is real. */}
+      {data.dataMode && (
+        <div className="panel px-3 py-2.5">
+          <div className="panel-title pb-1">What is real right now</div>
+          <div className="flex flex-wrap gap-1.5 items-center text-[12px]">
+            {data.dataMode.live.map((c) => (
+              <span key={c} className="chip chip-accent">
+                {c}
+              </span>
+            ))}
+            {data.dataMode.simulated.map((c) => (
+              <span key={c} className="chip chip-warn">
+                {c} · simulated
+              </span>
+            ))}
+          </div>
+          <div className="hint mt-2">
+            {data.dataMode.overall === "mixed"
+              ? "Mixed. Live panels carry the vendor's name; anything unlabelled is the deterministic simulator, " +
+                "and a factor nobody could measure is dropped from a score rather than counted as zero."
+              : data.dataMode.overall === "live"
+                ? "Every capability is served by a live source."
+                : "Nothing is live — the whole terminal is the deterministic simulator."}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2">
         <Stat label="Engine">v{data.engine.version}</Stat>

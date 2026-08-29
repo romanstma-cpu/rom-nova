@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useApi, fmtUsd, fmtPct, fmtNum } from "@/lib/client";
+import { DataModeChip } from "./DataModeChip";
 import type { MarketState } from "@/lib/types";
 
 const REGIME_LABEL: Record<string, { text: string; cls: string }> = {
@@ -73,13 +74,7 @@ export function TopBar({ onOpenPalette, onOpenNav }: { onOpenPalette: () => void
       </div>
 
       <div className="ml-auto flex items-center gap-3">
-        <Link
-          href="/legal"
-          className="chip chip-warn hidden sm:inline-flex"
-          title="Every token, wallet and trade in this terminal is a deterministic simulation. The SOL reference price is the one live number. Click for details."
-        >
-          SIMULATED DATA
-        </Link>
+        <DataModeChip className="hidden sm:inline-flex" />
         {/* On a 390px screen the full label and its shortcut ran off the right
             edge — the header read "search / c" with the rest clipped, and a
             keyboard hint is meaningless on a phone anyway. Below sm it is the

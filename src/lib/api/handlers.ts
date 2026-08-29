@@ -19,7 +19,7 @@ const MAX_EDGES = 420;
 const MAX_TRADE_EDGES = 160;
 import { buildFlowSeries, buildTokenRows, buildWalletRows } from "./rows";
 import { DEMO, candlesFor, trendingRows } from "./source";
-import { providerHealth } from "../providers/registry";
+import { dataMode, providerHealth } from "../providers/registry";
 import type { AlertCondition, BacktestConfig, StrategyProfileId } from "../types";
 
 export class ApiError extends Error {
@@ -324,8 +324,12 @@ export function handleEvents(store: DemoStore, limit = 60) {
 }
 
 export function handleStatus(store: DemoStore) {
+  const mode = dataMode();
   return {
     providers: providerHealth(),
+    // What is actually real, per capability, so the chrome can stop making a
+    // blanket claim in either direction.
+    dataMode: mode,
     engine: {
       version: "1.0.0",
       tokens: store.tokenList().length,
@@ -337,7 +341,10 @@ export function handleStatus(store: DemoStore) {
       genesis: store.universe.genesis,
       seed: store.universe.seed,
     },
-    demo: true,
+    // Computed, not asserted. This endpoint describing itself as fully demo
+    // while its own provider rows say otherwise is the contradiction the
+    // dataMode summary exists to remove.
+    demo: mode.overall === "demo",
   };
 }
 

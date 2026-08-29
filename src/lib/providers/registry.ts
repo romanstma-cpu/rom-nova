@@ -205,6 +205,48 @@ export function getProviders(): ProviderSet {
   return cached;
 }
 
+/**
+ * What is actually real right now, per capability.
+ *
+ * The nav and the top bar shipped a flat SIMULATED DATA chip whose tooltip
+ * said "every token, wallet and trade in this terminal is a deterministic
+ * simulation; the SOL reference price is the one live number". That was true
+ * when it was written and is now false three times over: the token list is DEX
+ * Screener, mint and freeze authorities are read from the chain, and whale flow
+ * comes from SQD.
+ *
+ * A blanket claim in either direction is the problem. Told everything is
+ * simulated, a reader discounts a real number; shown one real panel, they trust
+ * a synthetic one beside it. So the chip is computed from the same resolution
+ * the providers use, and it names which halves are which.
+ */
+export interface DataMode {
+  overall: "live" | "mixed" | "demo";
+  live: string[];
+  simulated: string[];
+}
+
+export function dataMode(): DataMode {
+  const p = getProviders();
+  const live: string[] = [];
+  const simulated: string[] = [];
+
+  (p.token.name === "demo" ? simulated : live).push("tokens");
+  (p.market.name === "demo" ? simulated : live).push("prices & candles");
+  (p.security.name === "demo" ? simulated : live).push("mint & freeze authority");
+  (p.flow ? live : simulated).push("whale flow");
+  (p.wallet.name === "demo" ? simulated : live).push("wallet activity");
+  // No keyless source publishes holder distribution, and the free RPC blocks
+  // the two methods that would give it. Named separately because it is the
+  // gap a reader is most likely to assume is covered.
+  (FLAGS.birdeye() ? live : simulated).push("holder distribution");
+  // Smart money needs wallet reputation, which nothing here carries at all.
+  simulated.push("smart-money scoring");
+
+  const overall = live.length === 0 ? "demo" : simulated.length === 0 ? "live" : "mixed";
+  return { overall, live, simulated };
+}
+
 export function providerHealth(): ProviderHealth[] {
   const store = getStore();
   const demoHealth = (name: string): ProviderHealth => ({
@@ -223,19 +265,21 @@ export function providerHealth(): ProviderHealth[] {
   rows.push(FLAGS.birdeye() ? healthOf("birdeye", "live") : { ...demoHealth("birdeye"), mode: "disabled", status: "down", note: "needs server mode + BIRDEYE_API_KEY — simulated data serves market data" });
   rows.push(FLAGS.helius() ? healthOf("helius", "live") : { ...demoHealth("helius"), mode: "disabled", status: "down", note: "needs server mode + HELIUS_API_KEY — simulated data serves wallet activity" });
   rows.push(FLAGS.nansen() ? healthOf("nansen", "live") : { ...demoHealth("nansen"), mode: "disabled", status: "down", note: "optional enrichment — not configured" });
-  // These two say "adapter ready", not "serving the app", and the difference
-  // is the whole point. getProviders() resolves to them, but nothing calls
-  // getProviders() — every page and handler still reads the demo store, so a
-  // row claiming "live" here would tell a reader the terminal is showing
-  // Solana when it is showing the simulator.
+  // These two used to say "adapter ready", not "serving the app", because
+  // getProviders() resolved to them and nothing called it. That gap is closed —
+  // handlers go through the provider seam now — so the notes below say what
+  // each one actually serves, and keep naming what it still cannot.
   rows.push(
     FLAGS.dexscreener()
       ? {
           ...healthOf("dexscreener", "live"),
           note:
-            "keyless adapter, tested and NOT YET CONSUMED — the signal engine still reads the " +
-            "demo store. Supplies price, pooled liquidity, 24h volume and trade counts summed " +
-            "across all Solana pools. No holder data, no OHLCV; 'trending' is paid boosts",
+            "keyless, and now SERVING THE TOKEN LIST — twelve trending Solana tokens per " +
+            "request, scored. Supplies price, pooled liquidity, 24h volume and trade counts " +
+            "summed across all Solana pools. Chosen over GeckoTerminal for the list because it " +
+            "batches internally: twelve getToken calls at GeckoTerminal took 27s and returned " +
+            "two usable rows. No holder data, no OHLCV; and 'trending' is PAID BOOSTS, so it " +
+            "is a list of who is advertising rather than a volume ranking",
         }
       : { ...demoHealth("dexscreener"), mode: "disabled", status: "down", note: "disabled via ENABLE_DEXSCREENER" },
   );
@@ -244,9 +288,11 @@ export function providerHealth(): ProviderHealth[] {
       ? {
           ...healthOf("coingecko", "live"),
           note:
-            "keyless. LIVE NOW: the SOL reference price in the header. Tested but NOT YET " +
-            "CONSUMED: GeckoTerminal on-chain OHLCV (~1,000 hourly bars per pool) and trending " +
-            "Solana pools, which the backtester cannot use until it stops taking a DemoStore",
+            "keyless. LIVE NOW: the SOL reference price in the header, and the price chart on " +
+            "any token page — ~1,000 hourly on-chain bars, the only keyless source with real " +
+            "history. NOT used for the token LIST: it rate-limits hard under concurrency, so " +
+            "list rows are scored without candles and declare momentum unmeasured. The " +
+            "backtester still takes a DemoStore and cannot use any of it",
         }
       : { ...demoHealth("coingecko"), mode: "disabled", status: "down", note: "disabled via ENABLE_COINGECKO" },
   );

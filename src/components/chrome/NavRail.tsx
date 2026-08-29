@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { DataModeChip } from "./DataModeChip";
 
 const SECTIONS: { title: string; items: { href: string; label: string; glyph: string }[] }[] = [
   {
@@ -71,10 +72,11 @@ export function NavRail({ onNavigate }: { onNavigate?: () => void }) {
           })}
         </div>
       ))}
-      <div className="mt-auto px-5 pb-3 pt-4 text-[10px] leading-relaxed faint">
-        SIMULATED DATA
-        <br />
-        deterministic universe
+      {/* Was a flat "SIMULATED DATA / deterministic universe". Half of this
+          terminal is real now, and a rail that keeps insisting otherwise
+          teaches a reader to ignore the labels that still matter. */}
+      <div className="mt-auto px-5 pb-3 pt-4">
+        <DataModeChip />
       </div>
     </nav>
   );

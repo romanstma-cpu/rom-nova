@@ -75,7 +75,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
       <footer className="shrink-0 border-t border-[var(--border)] bg-[rgba(6,9,14,0.9)] px-4 py-1.5 flex items-center gap-3 text-[10px] faint">
         <span className="truncate">
-          Analytics &amp; decision support on clearly-labeled simulated data — not investment advice, not a prediction engine.
+          Analytics &amp; decision support on a mix of live Solana data and clearly-labeled simulation — see the data-source
+        chip for which is which — not investment advice, not a prediction engine.
         </span>
         <Link href="/legal" className="link shrink-0 ml-auto">
           Disclaimer &amp; privacy

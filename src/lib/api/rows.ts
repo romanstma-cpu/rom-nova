@@ -70,6 +70,19 @@ export interface TokenRow {
   unmeasured?: readonly UnmeasuredField[];
   /** Which adapter produced the market numbers. "demo" is the simulator. */
   source: string;
+  /**
+   * The wallets that actually moved this token in the flow window, biggest
+   * first, with their net change in USD.
+   *
+   * A netflow figure is a summary; these are the addresses behind it, and a
+   * reader can paste one into a block explorer and check. Empty when no flow
+   * provider is configured — which is not the same as nobody trading.
+   */
+  topWallets?: { owner: string; usd: number }[];
+  /** Minutes of chain actually covered by the flow read, when one happened. */
+  flowMinutes?: number;
+  /** False when the flow read hit its byte budget and stopped early. */
+  flowComplete?: boolean;
 }
 
 /** Numeric columns a keyless snapshot cannot fill without candle history. */

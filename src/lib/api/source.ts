@@ -142,7 +142,49 @@ const LIVE_LIST_CONCURRENCY = 4;
  * snapshot. Neither touches OHLCV, which is what makes this affordable — and
  * also what makes the rows unscored, which `buildLiveTokenRows` states outright.
  */
+/**
+ * How long a scanned list stays fresh enough to reuse.
+ *
+ * The scanner polls every eight seconds, and one uncached list is now about
+ * twenty-five network calls — a trending fetch, twelve token lookups and twelve
+ * flow streams. Served straight through, a single open scanner tab would issue
+ * around ten thousand requests an hour and rate-limit itself into the demo
+ * fallback within minutes, which is the worst outcome: the page would look like
+ * it was scanning while quietly showing a simulation.
+ *
+ * Thirty seconds decouples the poll rate from the fetch rate. The UI keeps its
+ * responsiveness and the providers see one pass every half minute.
+ */
+export const LIST_CACHE_MS = 30_000;
+
+let listCache: { at: number; value: Sourced<TokenRow[]> } | null = null;
+/** In-flight de-duplication, so a burst of polls shares one fetch. */
+let listInFlight: Promise<Sourced<TokenRow[]> | null> | null = null;
+
+/** Age of the cached scan in ms, or null when nothing is cached. */
+export function listCacheAge(): number | null {
+  return listCache ? Date.now() - listCache.at : null;
+}
+
 export async function trendingRows(
+  limit = LIVE_LIST_LIMIT,
+): Promise<Sourced<TokenRow[]> | null> {
+  if (listCache && Date.now() - listCache.at < LIST_CACHE_MS) return listCache.value;
+  // Two polls landing together must not both fetch. Without this the scanner's
+  // own interval races itself the moment a pass takes longer than the gap.
+  if (listInFlight) return listInFlight;
+  listInFlight = fetchTrendingRows(limit).finally(() => {
+    listInFlight = null;
+  });
+  const fresh = await listInFlight;
+  if (fresh) listCache = { at: Date.now(), value: fresh };
+  // A failed refresh serves the last good scan rather than dropping to the
+  // simulator — stale real data beats fresh fake data, as long as the age is
+  // reported, which `listCacheAge` exists for.
+  return fresh ?? listCache?.value ?? null;
+}
+
+async function fetchTrendingRows(
   limit = LIVE_LIST_LIMIT,
 ): Promise<Sourced<TokenRow[]> | null> {
   // DEX Screener for the LIST specifically, even though GeckoTerminal wins the
@@ -235,8 +277,22 @@ async function scoreRows(
     const s = signals[i];
     if (!s) return row;
     const missing = s.result.features.unmeasured ?? [];
+    const flow = s.result.flow;
+    const decimals = entries[i].decimals ?? 9;
+    const price = entries[i].snapshot.priceUsd;
+    // The addresses behind the netflow number, biggest absolute move first.
+    // A reader can check any of these on a block explorer, which a summary
+    // figure does not allow.
+    const topWallets = (flow?.largest ?? [])
+      .map((m) => ({ owner: m.owner, usd: (Number(m.deltaUnits) / 10 ** decimals) * price }))
+      .filter((w) => Number.isFinite(w.usd) && Math.abs(w.usd) >= 1)
+      .sort((a, b) => Math.abs(b.usd) - Math.abs(a.usd))
+      .slice(0, 6);
     return {
       ...row,
+      topWallets,
+      flowMinutes: flow ? Math.round(flow.blocksCovered / 150) : undefined,
+      flowComplete: flow?.complete,
       scored: true,
       signalScore: s.signal.score,
       signalLabel: s.signal.label,

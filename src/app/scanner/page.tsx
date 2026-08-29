@@ -9,6 +9,40 @@ import type { TokenRow } from "@/lib/api/rows";
 // Full-screen live discovery scanner: rank-ordered rows that re-sort as new
 // data lands, with per-row flash on movement and a pinned set that ignores
 // re-ranking.
+//
+// The rows are real Solana tokens now, and that changed what the columns mean.
+// A live row is scored on liquidity, trade imbalance, age, chain-read
+// authorities and wallet flow — but NOT on price history, because candles cost
+// four seconds each and a list cannot afford twelve of them. Those columns are
+// unmeasured rather than zero, and rendering a placeholder 0 as "+0.0%" would
+// tell a reader the tape was flat when nobody looked.
+
+/** Whether a field was declared unmeasured for this row. */
+function absent(r: TokenRow, field: string): boolean {
+  return (r.unmeasured ?? []).includes(field as never);
+}
+
+/** A numeric cell that shows a dash, and why, when its input was not measured. */
+function Cell({
+  show,
+  cls,
+  why,
+  children,
+}: {
+  show: boolean;
+  cls: string;
+  why: string;
+  children: React.ReactNode;
+}) {
+  if (!show) {
+    return (
+      <td className="text-right px-2 faint" title={why}>
+        —
+      </td>
+    );
+  }
+  return <td className={`text-right px-2 ${cls}`}>{children}</td>;
+}
 
 export default function ScannerPage() {
   const [paused, setPaused] = useState(false);
@@ -91,8 +125,20 @@ export default function ScannerPage() {
         </div>
       </div>
 
+      {/* What this list is, and — more importantly — what it is not. A ranked
+          screen invites the reading "these are the good ones", and nothing here
+          predicts a return. */}
+      <div className="hint px-1 pb-1">
+        Ranked by the signal score, which weighs liquidity, buy/sell imbalance, token age,
+        chain-read mint &amp; freeze authority and observed wallet flow.{" "}
+        <b>A high score is not a prediction of profit</b> — it means more of the evidence this
+        terminal can see points the same way. Dashes are inputs nobody measured, not zeros:
+        hover one to see why. Confidence falls with every input that is missing, so a 60 at low
+        confidence is a thinner claim than a 45 at high.
+      </div>
+
       <div className="panel overflow-auto flex-1 min-h-0">
-        <table className="w-full text-[12px] min-w-[900px]">
+        <table className="w-full text-[12px] min-w-[1000px]">
           <thead className="thead sticky top-0 bg-[var(--panel-solid)] z-10">
             <tr>
               <th className="text-left px-3 py-2 font-medium w-8">Pin</th>
@@ -103,6 +149,7 @@ export default function ScannerPage() {
               <th className="text-right px-2 font-medium">24h</th>
               <th className="text-right px-2 font-medium">Vol accel</th>
               <th className="text-right px-2 font-medium">Whale 6h</th>
+              <th className="text-left px-2 font-medium">Buyers</th>
               <th className="text-right px-2 font-medium">Liq</th>
               <th className="text-right px-3 font-medium">Signal</th>
             </tr>
@@ -143,10 +190,44 @@ export default function ScannerPage() {
                     </Link>
                   </td>
                   <td className="text-right px-2">{fmtUsd(r.priceUsd)}</td>
-                  <td className={`text-right px-2 ${r.h1 >= 0 ? "pos" : "neg"}`}>{fmtPct(r.h1)}</td>
-                  <td className={`text-right px-2 ${r.h24 >= 0 ? "pos" : "neg"}`}>{fmtPct(r.h24)}</td>
-                  <td className={`text-right px-2 ${r.volumeAccel > 1.6 ? "warn" : "dim"}`}>{r.volumeAccel.toFixed(1)}×</td>
-                  <td className={`text-right px-2 ${r.whaleFlow6hUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(r.whaleFlow6hUsd)}</td>
+                  {/* An unmeasured column must not render its placeholder zero.
+                      "+0.0%" reads as a flat tape; the truth is that nobody
+                      fetched the candles, and a dash says that. */}
+                  <Cell show={!absent(r, "momentum")} cls={r.h1 >= 0 ? "pos" : "neg"} why="needs candle history, not fetched for the list">
+                    {fmtPct(r.h1)}
+                  </Cell>
+                  <Cell show={!absent(r, "momentum")} cls={r.h24 >= 0 ? "pos" : "neg"} why="needs candle history, not fetched for the list">
+                    {fmtPct(r.h24)}
+                  </Cell>
+                  <Cell show={!absent(r, "volumeAccel")} cls={r.volumeAccel > 1.6 ? "warn" : "dim"} why="needs candle history, not fetched for the list">
+                    {r.volumeAccel.toFixed(1)}×
+                  </Cell>
+                  <Cell
+                    show={!absent(r, "whaleFlow")}
+                    cls={r.whaleFlow6hUsd >= 0 ? "pos" : "neg"}
+                    why="no wallet-flow source configured"
+                  >
+                    {fmtUsd(r.whaleFlow6hUsd)}
+                  </Cell>
+                  <td className="px-2 text-[10px]">
+                    {r.topWallets && r.topWallets.length > 0 ? (
+                      <span
+                        className="faint"
+                        title={r.topWallets
+                          .map((w) => `${w.owner}  ${w.usd >= 0 ? "+" : ""}${fmtUsd(w.usd)}`)
+                          .join("\n")}
+                      >
+                        <span className={r.topWallets[0].usd >= 0 ? "pos" : "neg"}>
+                          {r.topWallets[0].owner.slice(0, 4)}…{r.topWallets[0].owner.slice(-3)}
+                        </span>{" "}
+                        {r.topWallets.length > 1 && `+${r.topWallets.length - 1}`}
+                      </span>
+                    ) : (
+                      <span className="faint" title="no wallet movement observed in the window">
+                        —
+                      </span>
+                    )}
+                  </td>
                   <td className="text-right px-2 dim">{fmtUsd(r.liquidityUsd)}</td>
                   <td className="text-right px-3"><Score value={r.signalScore} width={46} scored={r.scored !== false} reason={r.unscoredReason} /></td>
                 </tr>

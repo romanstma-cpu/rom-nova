@@ -39,6 +39,7 @@ import type {
   MarketDataProvider,
   SecurityDataProvider,
   TokenDataProvider,
+  TokenFlow,
   TokenFlowProvider,
 } from "../providers/types";
 
@@ -78,6 +79,14 @@ export interface LiveFeatureResult {
   info: TokenInfo;
   snapshot: TokenSnapshot;
   candles: Candle[];
+  /**
+   * The raw flow behind the whale numbers, when a provider supplied it.
+   *
+   * Carried rather than discarded because "whale netflow +$40k" and "these
+   * three wallets bought it" are different claims, and the second is the one a
+   * reader can actually check on a block explorer.
+   */
+  flow?: TokenFlow;
   /** Human-readable account of where each part came from, for the caller to print. */
   provenance: string[];
 }
@@ -287,6 +296,7 @@ export async function liveFeatures(
   let whaleNetFlowUsd = 0;
   let whaleBuys = 0;
   let whaleSells = 0;
+  let flowDetail: TokenFlow | undefined;
   if (sources.flow) {
     // topMovers is asked for generously because whale detection happens HERE,
     // not in the provider: only this layer knows the mint's decimals and price,
@@ -297,6 +307,7 @@ export async function liveFeatures(
       .getTokenFlow(mint, { minutes: FLOW_MINUTES, topMovers: FLOW_MOVERS })
       .catch(() => null);
     if (f && f.movements > 0) {
+      flowDetail = f;
       const decimals = info.decimals ?? 9;
       for (const mover of f.largest) {
         const usd = (Number(mover.deltaUnits) / 10 ** decimals) * price;
@@ -394,7 +405,7 @@ export async function liveFeatures(
     ? { ...(info as TokenInfo), mintAuthorityRevoked: mintRevoked, freezeAuthorityRevoked: freezeRevoked }
     : (info as TokenInfo);
 
-  return { features, info: verified, snapshot, candles, provenance };
+  return { features, info: verified, snapshot, candles, provenance, flow: flowDetail };
 }
 
 /** Convenience: assemble and score in one call. */

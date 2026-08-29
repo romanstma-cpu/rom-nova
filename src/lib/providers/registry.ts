@@ -10,6 +10,7 @@ import { BirdeyeMarketProvider, BirdeyeSecurityProvider } from "./birdeye";
 import { HeliusWalletProvider } from "./helius";
 import { DexScreenerMarketProvider, DexScreenerTokenProvider } from "./dexscreener";
 import { GeckoTerminalMarketProvider, GeckoTerminalTokenProvider } from "./geckoterminal";
+import { SolanaRpcSecurityProvider } from "./solana-rpc";
 import type {
   MarketDataProvider,
   ProviderSet,
@@ -32,6 +33,9 @@ export const FLAGS = {
   // Keyless, so on by default. This is what lets a fresh install show real
   // Solana tokens instead of the simulator.
   dexscreener: () => flag("ENABLE_DEXSCREENER"),
+  // Solana's own JSON-RPC. Keyless, browser-reachable, and the only free way
+  // to know whether a mint's authorities are actually revoked.
+  solanaRpc: () => flag("ENABLE_SOLANA_RPC"),
   // keyless public reference sources — live by default, even in demo mode
   coingecko: () => flag("ENABLE_COINGECKO"),
   cryptocom: () => flag("ENABLE_CRYPTOCOM"),
@@ -171,11 +175,22 @@ export function getProviders(): ProviderSet {
     token,
     market,
     wallet: liveWallet ? new HeliusWalletProvider() : new DemoWalletProvider(),
-    // Security grading needs holder distribution, which only Birdeye supplies.
-    // The keyless sources deliberately do NOT fill this slot: a security
-    // provider that returns zeros would report every token as having no
-    // concentration and revoked authorities.
-    security: FLAGS.birdeye() ? new BirdeyeSecurityProvider() : new DemoSecurityProvider(),
+    // Birdeye first: it is the only source here with holder distribution, and
+    // concentration is the larger half of a security grade.
+    //
+    // Below it, the chain itself. That slot used to be demo-only, on the
+    // reasoning that "a security provider that returns zeros would report every
+    // token as having no concentration and revoked authorities" — correct about
+    // the danger, and it gave up something real. Solana's public RPC answers
+    // mint and freeze authority for free, and until now the app graded BONK as
+    // if its deployer could still mint. The zeros problem is handled by
+    // `top10Known: false` instead, which keeps concentration unmeasured while
+    // letting the authorities be known.
+    security: FLAGS.birdeye()
+      ? new BirdeyeSecurityProvider()
+      : FLAGS.solanaRpc()
+        ? new SolanaRpcSecurityProvider()
+        : new DemoSecurityProvider(),
     health: providerHealth,
   };
   return cached;
@@ -225,6 +240,20 @@ export function providerHealth(): ProviderHealth[] {
             "Solana pools, which the backtester cannot use until it stops taking a DemoStore",
         }
       : { ...demoHealth("coingecko"), mode: "disabled", status: "down", note: "disabled via ENABLE_COINGECKO" },
+  );
+  rows.push(
+    FLAGS.solanaRpc()
+      ? {
+          ...healthOf("solana-rpc", "live"),
+          note:
+            "keyless, reads the chain directly. LIVE NOW when Birdeye is not configured: " +
+            "mint and freeze authority, which no other keyless source publishes — before this " +
+            "every token was graded as if its deployer could still mint. Holder distribution " +
+            "stays UNMEASURED: getTokenSupply and getTokenLargestAccounts return 'Request " +
+            "blocked' on the free endpoints. publicnode leads because api.mainnet-beta 403s " +
+            "browser origins, and most of this app runs in a tab",
+        }
+      : { ...demoHealth("solana-rpc"), mode: "disabled", status: "down", note: "disabled via ENABLE_SOLANA_RPC" },
   );
   rows.push(
     FLAGS.cryptocom()

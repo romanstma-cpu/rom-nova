@@ -179,17 +179,32 @@ export async function liveFeatures(
       return null;
     });
     if (sec) {
-      // Birdeye reports the share as a percentage in some responses and a
-      // fraction in others; normalise, because 45 read as a fraction would be
-      // a 4,500% concentration and read as 0.45 would be a serious understatement.
-      const raw = sec.top10Pct;
-      top10Pct = raw > 1 ? raw / 100 : raw;
-      unmeasured.delete("top10Pct");
+      // A provider may close SOME gaps. The chain gives authorities away free
+      // but puts holder distribution behind endpoints the public RPCs block, so
+      // top10Pct is only accepted when the provider says it actually read it —
+      // otherwise its zero would leave the unmeasured set and be scored as a
+      // flawlessly distributed cap table, which is the exact failure the
+      // unmeasured machinery exists to prevent.
+      if (sec.top10Known !== false) {
+        // Birdeye reports the share as a percentage in some responses and a
+        // fraction in others; normalise, because 45 read as a fraction would be
+        // a 4,500% concentration and read as 0.45 would be a serious understatement.
+        const raw = sec.top10Pct;
+        top10Pct = raw > 1 ? raw / 100 : raw;
+        unmeasured.delete("top10Pct");
+      }
       mintRevoked = sec.mintAuthorityRevoked;
       freezeRevoked = sec.freezeAuthorityRevoked;
       authorityChecked = true;
+      // "top-10 holders 0.0%" is the zeros problem wearing prose. A provider
+      // that did not read concentration must not have its placeholder printed
+      // as a measurement — the line says unmeasured, exactly like the vector.
+      const concentration =
+        sec.top10Known === false
+          ? "top-10 holders UNMEASURED"
+          : `top-10 holders ${(top10Pct * 100).toFixed(1)}%`;
       provenance.push(
-        `${sources.security.name}: top-10 holders ${(top10Pct * 100).toFixed(1)}%, ` +
+        `${sources.security.name}: ${concentration}, ` +
           `mint ${mintRevoked ? "revoked" : "LIVE"}, freeze ${freezeRevoked ? "revoked" : "LIVE"}` +
           (sec.warnings.length ? ` — ${sec.warnings.join("; ")}` : ""),
       );
@@ -267,7 +282,16 @@ export async function liveFeatures(
     );
   }
 
-  return { features, info: info as TokenInfo, snapshot, candles, provenance };
+  // The verified authorities are written back into the info the caller gets.
+  // Without this the token provider's placeholder survives — coingecko hardcodes
+  // both to false — so anything reading `result.info` saw "mint authority live"
+  // on a token the chain had just confirmed renounced, while the provenance
+  // beside it said revoked. Two answers to one question is worse than either.
+  const verified: TokenInfo = authorityChecked
+    ? { ...(info as TokenInfo), mintAuthorityRevoked: mintRevoked, freezeAuthorityRevoked: freezeRevoked }
+    : (info as TokenInfo);
+
+  return { features, info: verified, snapshot, candles, provenance };
 }
 
 /** Convenience: assemble and score in one call. */

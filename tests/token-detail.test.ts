@@ -18,11 +18,13 @@ import {
   findDisagreements,
   flowPanel,
   holderTable,
+  supplyPanel,
   CONCENTRATION_DISAGREEMENT_PP,
   HOLDER_DISAGREEMENT_RATIO,
 } from "@/lib/api/detail";
 import { DemoStore } from "@/lib/demo/store";
-import { handleCandles, handleTokenDetail } from "@/lib/api/handlers";
+import { handleCandles, handleTokenDetail, MINT_SHAPE } from "@/lib/api/handlers";
+import { safePath } from "@/lib/local";
 import { computeSignal, auditFactors, scoreFeatures, PROFILES, RISK_FACTORS } from "@/lib/engine/signals";
 import { extractFeatures } from "@/lib/engine/features";
 import { authorityState } from "@/lib/providers/jupiter";
@@ -146,6 +148,106 @@ describe("a vendor's zero that means 'not indexed yet'", () => {
     expect(findDisagreements("jupiter", info(), snap(), zeroed, true, "solana-rpc").some((d) =>
       d.question.includes("How many wallets"),
     )).toBe(false);
+  });
+
+  // THE SWEEP. The same bug shipped twice on sibling fields in one panel —
+  // `totalHolders: 0` in round one, `totalLPProviders: 0` in round two,
+  // measured on 30 of 30 freshly-listed mints — because each was fixed
+  // individually. Every count-shaped field in the payload is asserted here at
+  // once, so a third one cannot arrive quietly.
+  it("sweeps every count whose zero is arithmetically impossible", async () => {
+    mockByPath({
+      report: {
+        ...REPORT,
+        totalHolders: 0,
+        totalLPProviders: 0,
+        totalMarketLiquidity: 0,
+        markets: [],
+        token: { ...REPORT.token, supply: 0 },
+      },
+      summary: SUMMARY,
+    });
+    const r = await new RugCheckRiskProvider().getTokenRisk(MINT, true);
+    expect(r?.totalHolders).toBeUndefined();
+    expect(r?.totalLpProviders).toBeUndefined();
+    expect(r?.totalMarketLiquidityUsd).toBeUndefined();
+    expect(r?.markets).toBeUndefined();
+    expect(r?.supply).toBeUndefined();
+  });
+
+  it("keeps the zeros that are real answers", async () => {
+    // The other side of the rule, or the sweep becomes its own bug: 0% of LP
+    // locked is the WORST case rather than a missing one, a deployer who sold
+    // out really does hold nothing, and a clean vendor grade really is low.
+    mockByPath({
+      // The grade comes off the REPORT on the detailed path, so a vendor's
+      // cleanest possible score has to be zeroed there to be exercised at all.
+      report: { ...REPORT, score_normalised: 0, creatorBalance: 0, graphInsidersDetected: 0, insiderNetworks: [] },
+      summary: { ...SUMMARY, lpLockedPct: 0 },
+    });
+    const r = await new RugCheckRiskProvider().getTokenRisk(MINT, true);
+    expect(r?.lpLockedPct).toBe(0);
+    expect(r?.creatorHoldsPct).toBe(0);
+    expect(r?.score).toBe(0);
+    expect(r?.graphInsiders).toBe(0);
+    expect(r?.insiderNetworks).toBe(0);
+  });
+
+  it("reads supply out of base units rather than assuming decimals", async () => {
+    mockByPath({ report: REPORT, summary: SUMMARY });
+    const r = await new RugCheckRiskProvider().getTokenRisk(MINT, true);
+    // 1e9 base units at 6 decimals is a thousand whole tokens, not a billion.
+    expect(r?.supply).toBe(1_000);
+  });
+
+  it("refuses a supply whose decimals are missing", async () => {
+    // Off by a factor of a billion is worse than a dash.
+    mockByPath({
+      report: { ...REPORT, token: { mintAuthority: null, freezeAuthority: null, supply: 1e9 } },
+      summary: SUMMARY,
+    });
+    const r = await new RugCheckRiskProvider().getTokenRisk(MINT, true);
+    expect(r?.supply).toBeUndefined();
+  });
+});
+
+describe("a mint address that is not one", () => {
+  it("refuses the shape before it costs five provider calls", async () => {
+    // `/token?m=<script>alert(1)</script>` reached the dispatcher, matched no
+    // route, and came back as "no local route for /api/tokens/<script>…" — which
+    // the page prints verbatim. React escapes it, so never XSS, but a terminal
+    // that echoes its own query string is a phishing surface.
+    await expect(handleTokenDetail(new DemoStore(3), "<script>alert(1)</script>")).rejects.toThrow(
+      /not a Solana mint address/,
+    );
+    await expect(handleTokenDetail(new DemoStore(3), "")).rejects.toThrow(/not a Solana mint/);
+    // Base58 has no 0, O, I or l, so a lookalike is rejected too.
+    await expect(
+      handleTokenDetail(new DemoStore(3), "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB26O"),
+    ).rejects.toThrow(/not a Solana mint/);
+  });
+
+  it("lets a real mint through, simulator addresses included", async () => {
+    const store = new DemoStore(3);
+    const real = store.tokenList()[0].info.mint;
+    expect(MINT_SHAPE.test(real)).toBe(true);
+    expect(MINT_SHAPE.test(MINT)).toBe(true);
+    await expect(handleTokenDetail(store, real)).resolves.toBeTruthy();
+  });
+
+  it("does not repeat an unrouteable path back at the reader", () => {
+    // The payload's own text must not survive in ANY form. Sanitising alone
+    // left "/api/tokens/3Cscript3Ealert13C/script3E" on screen — no markup, and
+    // still the attacker's string. The route-identifying prefix is the whole
+    // diagnostic value; everything after it is the caller's content.
+    expect(safePath("/api/tokens/<script>alert(1)</script>")).toBe("/api/tokens");
+    expect(safePath("/api/tokens/%3Cscript%3Ealert(1)%3C/script%3E")).toBe("/api/tokens");
+    expect(safePath("/api/tokens/javascript:alert`1`")).toBe("/api/tokens");
+    // Bounded, so a kilobyte of query string cannot become a kilobyte of page.
+    expect(safePath(`/api/${"a".repeat(500)}`).length).toBeLessThanOrEqual(52);
+    // A route name survives, or the error stops being diagnostic.
+    expect(safePath("/api/wallets/movers")).toBe("/api/wallets/movers");
+    expect(safePath("/api/nope")).toBe("/api/nope");
   });
 });
 
@@ -458,6 +560,268 @@ describe("a token that can still be minted must never read POSITIVE", () => {
   });
 });
 
+// ------------------------------------- LP lock, scaled by who holds the pool
+
+/**
+ * PUMP as measured: RugCheck 1/100, $42M pooled, 435 pools, 43 independent LP
+ * providers, no findings — and `LP Lock` was the largest single penalty on the
+ * page, under a red line reading "the pool can be withdrawn".
+ *
+ * With forty-three independent parties holding the LP, no one of them can
+ * withdraw it, so that sentence was false AND it cost the token a whole verdict
+ * band. This is the third appearance in this project of one trap — a metric
+ * that is most wrong on the largest, most legitimate tokens — after the
+ * pool-excluded concentration figure and the bonding-curve lock inversion.
+ */
+function pumpish(over: Partial<FeatureVector> = {}): FeatureVector {
+  return strongVector({ lpLockedPct: 0.0004, lpProviders: 43, ...over });
+}
+
+const lpRow = (s: ReturnType<typeof scoreFeatures>) =>
+  auditFactors(s).rows.find((r) => r.key === "lp_lock")!;
+
+describe("the LP penalty scales with how many parties hold the pool", () => {
+  it("does not charge a deep multi-provider token the maximum", () => {
+    const many = scoreFeatures(pumpish(), demoMint, now, "balanced");
+    const one = scoreFeatures(pumpish({ lpProviders: 1 }), demoMint, now, "balanced");
+    const worst = Math.abs(lpRow(one).contribution);
+    const actual = Math.abs(lpRow(many).contribution);
+    expect(actual).toBeLessThan(worst);
+    // Not merely "less" — 1/sqrt(43) is 0.152, so it must be a small fraction
+    // of the maximum rather than a token discount.
+    expect(actual).toBeLessThan(worst * 0.25);
+  });
+
+  it("still charges something, because the split between providers is unknown", () => {
+    // The correction must not become an exemption. Nothing publishes how much
+    // of the LP each of the forty-three holds; one of them could hold most.
+    expect(lpRow(scoreFeatures(pumpish(), demoMint, now, "balanced")).contribution).toBeLessThan(0);
+  });
+
+  it("charges the maximum when ONE party holds the pool", () => {
+    const one = scoreFeatures(pumpish({ lpProviders: 1 }), demoMint, now, "balanced");
+    const locked = scoreFeatures(pumpish({ lpLockedPct: 1, lpProviders: 1 }), demoMint, now, "balanced");
+    expect(lpRow(one).contribution).toBeLessThan(lpRow(locked).contribution);
+    expect(lpRow(one).explanation).toMatch(/single provider holds the pool/);
+  });
+
+  it("charges the maximum when the provider count is UNKNOWN", () => {
+    // Fail-safe direction. The discount is bought with evidence or not at all,
+    // so an unmeasured count reads exactly like a single provider.
+    const unknown = scoreFeatures(
+      pumpish({ unmeasured: ["lpProviders"] }),
+      demoMint,
+      now,
+      "balanced",
+    );
+    const one = scoreFeatures(pumpish({ lpProviders: 1 }), demoMint, now, "balanced");
+    expect(lpRow(unknown).contribution).toBeCloseTo(lpRow(one).contribution, 5);
+    expect(lpRow(unknown).explanation).toMatch(/no source here says by how many/);
+  });
+
+  it("treats a vendor zero as unknown rather than as one provider", () => {
+    // `totalLPProviders: 0` means "not indexed" on 30 of 30 freshly-listed
+    // mints sampled. Reaching the factor as a count would take max(1, 0) and
+    // print "a single provider holds the pool — that party can withdraw it",
+    // which invents the WORST reading from an absence.
+    const zero = scoreFeatures(pumpish({ lpProviders: 0 }), demoMint, now, "balanced");
+    expect(lpRow(zero).explanation).toMatch(/no source here says by how many/);
+    expect(lpRow(zero).explanation).not.toMatch(/single provider/);
+  });
+
+  it("recovers the band the over-correction was costing", () => {
+    const many = scoreFeatures(pumpish(), demoMint, now, "balanced");
+    const one = scoreFeatures(pumpish({ lpProviders: 1 }), demoMint, now, "balanced");
+    expect(many.score).toBeGreaterThan(one.score);
+  });
+
+  it("does not let the falsehood survive in the bear case", () => {
+    // The penalty, the panel and the provenance were all corrected and this
+    // one was not: the risk FLAG's detail still read "whoever holds the rest
+    // can withdraw it, and no source here says who that is", which reached the
+    // reader through WHAT COULD MAKE THIS FAIL on a token where the app knew
+    // there were forty-three of them.
+    const s = scoreFeatures(pumpish(), demoMint, now, "balanced");
+    const flag = s.risks.find((r) => r.key === "lp_lock")!;
+    expect(flag.detail).toContain("43 independent providers");
+    expect(flag.detail).not.toContain("no source here says who that is");
+    expect(s.bearCase.some((b) => /43 independent providers/.test(b))).toBe(true);
+  });
+
+  it("keeps the alarm at medium however low the figure goes", () => {
+    // The FLAG and the PENALTY are separate decisions and both are now right.
+    // Grading this high-severity fired EXTREME RISK on exactly the tokens where
+    // an unlocked aggregate means least.
+    const s = scoreFeatures(pumpish({ lpLockedPct: 0 }), demoMint, now, "balanced");
+    expect(s.risks.find((r) => r.key === "lp_lock")?.severity).toBe("medium");
+  });
+});
+
+// --------------------------- points paid for the absence of what is measured
+
+describe("an unmeasured or midpoint input cannot produce a positive contribution", () => {
+  it("stands the whale factor down rather than scoring its midpoint", () => {
+    // SKHY showed "Whale Accumulation +4.8 — no whale-sized trades in the
+    // window" as its THIRD-LARGEST positive: a null flow result landing on the
+    // normalise midpoint and rendering as credit.
+    const s = scoreFeatures(strongVector({ unmeasured: ["whaleFlow"] }), demoMint, now, "balanced");
+    const row = auditFactors(s).rows.find((r) => r.key === "whale_flow")!;
+    expect(row.measured).toBe(false);
+    expect(row.contribution).toBe(0);
+    expect(row.explanation).toMatch(/not measured/);
+  });
+
+  it("pays exactly zero for a MEASURED factor sitting at its midpoint", () => {
+    // The other half. A flow provider that answered, with no whale-sized move
+    // in the window, is a real reading of 0.5 — and 0.5 is "no information",
+    // which must be worth nothing rather than half the factor's weight.
+    const s = scoreFeatures(
+      strongVector({ whaleNetFlowUsd: 0, whaleBuys: 0, whaleSells: 0 }),
+      demoMint,
+      now,
+      "balanced",
+    );
+    const row = auditFactors(s).rows.find((r) => r.key === "whale_flow")!;
+    expect(row.measured).toBe(true);
+    expect(row.normalized).toBeCloseTo(0.5, 6);
+    expect(row.contribution).toBe(0);
+  });
+
+  it("holds that guarantee in every regime", () => {
+    // The regime multiplier used to scale the whole 0-100 mean, which made it a
+    // constant added to every row — so a midpoint factor drew credit in a
+    // friendly market and a penalty in a hostile one. It scales the DEVIATION
+    // from neutral now, and 50 maps to 50 under all of them.
+    for (const regime of ["meme_mania", "risk_on", "neutral", "risk_off", "low_liquidity"] as const) {
+      const s = scoreFeatures(
+        strongVector({ regime, whaleNetFlowUsd: 0, whaleBuys: 0, whaleSells: 0 }),
+        demoMint,
+        now,
+        "balanced",
+      );
+      const row = auditFactors(s).rows.find((r) => r.key === "whale_flow")!;
+      expect(row.contribution, `whale_flow paid points in ${regime}`).toBe(0);
+    }
+  });
+
+  it("still reconciles: 50 plus every contribution equals the score", () => {
+    // The property that makes the table auditable, re-asserted because the
+    // regime change touched both halves of the arithmetic.
+    for (const regime of ["meme_mania", "risk_on", "neutral", "risk_off"] as const) {
+      const s = scoreFeatures(strongVector({ regime }), demoMint, now, "balanced");
+      expect(auditFactors(s).reconciled, `reconciliation broke in ${regime}`).toBe(s.score);
+    }
+  });
+});
+
+// -------------------------------------------- the serial deployer, calibrated
+
+describe("a mint factory caps the verdict without vetoing it", () => {
+  /** CATE as measured: 19,083 mints, 340 of them reaching a real pool. */
+  const factory = { devMints: 19_083, devMigrations: 340 };
+  /**
+   * Strictly the labels the cap is supposed to prevent.
+   *
+   * NOT the file's `POSITIVE_LABELS`, which includes WATCH — asserting against
+   * that list would pass whether the cap fired or not, since WATCH is exactly
+   * what the cap produces.
+   */
+  const ABOVE_WATCH = ["EXTREME POSITIVE", "STRONG POSITIVE", "POSITIVE"];
+
+  it("holds a strong tape at WATCH instead of calling it POSITIVE", () => {
+    // The review's finding: `deployer_history -5.9` with a high-severity flag,
+    // and the label still POSITIVE / 73. A nine-point penalty cannot outvote a
+    // strong tape, so the score band had the last word.
+    const capped = scoreFeatures(strongVector(factory), demoMint, now, "balanced");
+    expect(capped.label).toBe("WATCH");
+    expect(capped.labelCap).toMatch(/19,083 mints/);
+    // The SCORE is not fudged to agree — it stays the honest weighted mean.
+    expect(capped.score).toBeGreaterThan(60);
+  });
+
+  it("puts the deployer in the bear case, where a reader looks for it", () => {
+    const capped = scoreFeatures(strongVector(factory), demoMint, now, "balanced");
+    expect(capped.bearCase.some((b) => /Caps the verdict:.*19,083/.test(b))).toBe(true);
+  });
+
+  it("does NOT cap a prolific deployer whose mints actually graduate", () => {
+    // The half that keeps this from being a tax on success. A launchpad or a
+    // builder at 30% graduation clears it, and should.
+    const busy = scoreFeatures(strongVector({ devMints: 19_083, devMigrations: 6_000 }), demoMint, now, "balanced");
+    expect(busy.labelCap).toBeUndefined();
+    expect(ABOVE_WATCH).toContain(busy.label);
+  });
+
+  it("does NOT cap the median deployer, or it would fire on half the feed", () => {
+    // W2 measured the population: the median new pump.fun deployer is on their
+    // 75th mint. Any threshold low enough to be principled about "serial" would
+    // abstain on half the list, which is a verdict carrying no information —
+    // the exact failure the abstention gate has already had twice.
+    const median = scoreFeatures(strongVector({ devMints: 75, devMigrations: 1 }), demoMint, now, "balanced");
+    expect(median.labelCap).toBeUndefined();
+    expect(ABOVE_WATCH).toContain(median.label);
+  });
+
+  it("refuses to judge a rate it has no sample for", () => {
+    // Three mints, none graduated, is a 0% graduation rate — and it is noise.
+    // The count threshold exists to stop that from reading as a factory.
+    const tiny = scoreFeatures(strongVector({ devMints: 3, devMigrations: 0 }), demoMint, now, "balanced");
+    expect(tiny.labelCap).toBeUndefined();
+  });
+
+  it("caps on today's real trending list exactly where the rate is bad", () => {
+    // The population that matters, taken live. The row that must NOT be capped
+    // is the one with hundreds of mints and a rate that works — if the cap
+    // catches that, it has become a tax on being prolific.
+    const observed: [string, number, number, boolean][] = [
+      ["CATE", 19_098, 341, true],
+      ["PBJ", 13_843, 199, true],
+      ["STONK", 6_161, 11, true],
+      ["MAGA", 4_681, 202, true],
+      ["STACY", 731, 33, true],
+      ["Orangutan", 405, 34, false],
+      ["PINK", 55, 1, false],
+      ["nub", 2, 0, false],
+    ];
+    for (const [sym, devMints, devMigrations, shouldCap] of observed) {
+      const s = scoreFeatures(strongVector({ devMints, devMigrations }), demoMint, now, "balanced");
+      expect(Boolean(s.labelCap), `${sym} (${devMints}/${devMigrations})`).toBe(shouldCap);
+    }
+  });
+
+  it("never caps on a history nobody published", () => {
+    const blind = scoreFeatures(strongVector({ devMints: 0, devMigrations: 0, unmeasured: ["devHistory"] }), demoMint, now, "balanced");
+    expect(blind.labelCap).toBeUndefined();
+  });
+
+  it("only ever moves a label DOWN, never up", () => {
+    // A capped token that already reads NEUTRAL must not be lifted to WATCH —
+    // that would make a warning render as an upgrade. Asserted as monotonicity
+    // against the same vector uncapped, rather than against a hand-picked
+    // expected label that would have to be retuned every time a weight moves.
+    const order = ["NO TRADE", "EXTREME RISK", "NEGATIVE", "WEAK", "NEUTRAL", "WATCH", "POSITIVE", "STRONG POSITIVE", "EXTREME POSITIVE"];
+    const tape: Partial<FeatureVector>[] = [
+      {},
+      { momentum1h: -5, momentum24h: -30, volumeAccel: 0.3, organicScore: 0.2 },
+      { liquidityUsd: 60_000, exitDepthUsd: 11_000, momentum24h: -40, volumeAccel: 0.2, organicScore: 0.1, top10Pct: 0.45, socialScore: 0.05, buySellImbalance: -0.5, whaleNetFlowUsd: -200_000, whaleBuys: 0, whaleSells: 4, smartMoneyNetFlowUsd: -100_000 },
+    ];
+    for (const over of tape) {
+      const plain = scoreFeatures(strongVector(over), demoMint, now, "balanced");
+      const capped = scoreFeatures(strongVector({ ...over, ...factory }), demoMint, now, "balanced");
+      expect(
+        order.indexOf(capped.label),
+        `cap raised ${plain.label} to ${capped.label}`,
+      ).toBeLessThanOrEqual(order.indexOf(plain.label));
+    }
+  });
+
+  it("is outranked by the security veto, which is a different kind of fact", () => {
+    // A capability beats a base rate. EXTREME RISK, not WATCH.
+    const both = scoreFeatures(strongVector({ ...factory, mintAuthorityRevoked: false }), demoMint, now, "balanced");
+    expect(both.label).toBe("EXTREME RISK");
+  });
+});
+
 describe("the abstention gate says something a reader can act on", () => {
   it("names the authorities rather than counting anonymous risk factors", () => {
     const s = scoreFeatures(strongVector({ unmeasured: ["authorities"] }), demoMint, now, "balanced");
@@ -614,6 +978,58 @@ describe("creatorPanel — a dev balance nobody published is not zero", () => {
   it("carries the creator's mint history, and leaves it undefined when absent", () => {
     expect(creatorPanel(info(), snap(), undefined).mints).toBe(873);
     expect(creatorPanel(info({ devMints: undefined }), snap(), undefined).mints).toBeUndefined();
+  });
+
+  // ---- the panel that contradicted itself in adjacent lines
+  //
+  // Live on PUMP, SKHY, TRX and CATE: "Dev still holds —", tooltipped "no
+  // source published the deployer's balance — this is not zero", printed ONE
+  // LINE above "rugcheck independently puts the deployer balance at 0.000%".
+  // The cell read `holdsPct` alone and the footnote read `vendorHoldsPct`
+  // alone, so a token where only the vendor answered rendered both sentences.
+
+  it("prints the vendor's figure rather than a dash when only the vendor answered", () => {
+    const c = creatorPanel(info(), snap({ unmeasured: ["devHoldsPct"] }), { ...RISK, creatorHoldsPct: 0 }, "jupiter");
+    expect(c.holdsShown).toEqual({ pct: 0, source: "rugcheck" });
+    // And the dash-with-tooltip path is now unreachable for this token, which
+    // is the whole point: one question, one answer, one source named.
+    expect(c.holdsUnmeasured).toBe(false);
+  });
+
+  it("prefers the token provider, because that is the figure the score reads", () => {
+    const c = creatorPanel(info(), snap({ devHoldsPct: 0.031 }), { ...RISK, creatorHoldsPct: 0.02 }, "jupiter");
+    expect(c.holdsShown).toEqual({ pct: 0.031, source: "jupiter" });
+    // The vendor's number survives beside it — it is a genuine second opinion
+    // here, and the panel prints it as one.
+    expect(c.vendorHoldsPct).toBeCloseTo(0.02, 6);
+  });
+
+  it("shows nothing at all when nobody published a balance", () => {
+    const c = creatorPanel(info(), snap({ unmeasured: ["devHoldsPct"] }), undefined, "jupiter");
+    expect(c.holdsShown).toBeUndefined();
+    expect(c.holdsUnmeasured).toBe(true);
+  });
+});
+
+describe("supplyPanel — ratios from published figures, never derived supply", () => {
+  it("takes supply only from a vendor that read the mint", () => {
+    expect(supplyPanel(snap(), { ...RISK, supply: 998_739_012 }).supply).toBe(998_739_012);
+    // NOT marketCap / price, which would be arithmetic across two vendors'
+    // roundings presented as somebody's measurement.
+    expect(supplyPanel(snap(), RISK).supply).toBeUndefined();
+    expect(supplyPanel(snap(), undefined).supply).toBeUndefined();
+  });
+
+  it("computes liquidity over market cap, which is the reachability of the header", () => {
+    const p = supplyPanel(snap({ liquidityUsd: 90_000, marketCapUsd: 40_000_000 }), undefined);
+    expect(p.liqToMcap).toBeCloseTo(0.00225, 5);
+  });
+
+  it("divides by nothing rather than returning Infinity", () => {
+    const p = supplyPanel(snap({ marketCapUsd: 0, fdvUsd: 0 }), undefined);
+    expect(p.liqToMcap).toBeUndefined();
+    expect(p.mcapToFdv).toBeUndefined();
+    expect(p.fdvUsd).toBeUndefined();
   });
 });
 

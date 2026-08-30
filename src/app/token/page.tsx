@@ -24,7 +24,16 @@ import { Score, RiskBadge, TokenMark, Freshness, Empty } from "@/components/ui/b
 import { PriceChart, type ChartMarker } from "@/components/charts/PriceChart";
 import { FlowChart } from "@/components/charts/FlowChart";
 import { LineChart } from "@/components/charts/LineChart";
-import type { Candle, RiskRadar, Signal, TokenInfo, TokenSnapshot, UnmeasuredField, WalletTrade } from "@/lib/types";
+import type {
+  Candle,
+  RiskRadar,
+  Signal,
+  TokenInfo,
+  TokenSnapshot,
+  TradeWindowKey,
+  UnmeasuredField,
+  WalletTrade,
+} from "@/lib/types";
 import type { FlowPoint } from "@/lib/api/rows";
 import type { LiveTokenDetail } from "@/lib/api/detail";
 import { WHALE_USD } from "@/lib/engine/live-features";
@@ -215,7 +224,44 @@ function LiveToken({ detail }: { detail: LiveTokenDetail }) {
               the single most-glanced-at number on a token screen. */}
           <ChangeStrip snap={snap} source={d.source} />
           <HeaderStat label="Mcap">{fmtUsd(snap.marketCapUsd)}</HeaderStat>
-          <HeaderStat label="Liquidity">{fmtUsd(snap.liquidityUsd)}</HeaderStat>
+          {/* FDV was in the payload from the first live provider and shown
+              nowhere. Beside Mcap, because the two only differ when supply is
+              still unlocked and that gap is the whole point of printing it. */}
+          <HeaderStat label="FDV">
+            {d.supply.fdvUsd === undefined ? (
+              <Dash why={`${d.source} published no fully-diluted valuation`} />
+            ) : (
+              <span
+                title={
+                  d.supply.mcapToFdv === undefined
+                    ? undefined
+                    : `market cap is ${(d.supply.mcapToFdv * 100).toFixed(0)}% of FDV — the rest of the supply is not circulating yet`
+                }
+              >
+                {fmtUsd(d.supply.fdvUsd)}
+              </span>
+            )}
+          </HeaderStat>
+          <HeaderStat label="Liquidity">
+            {/* Liquidity over market cap, on the number it qualifies. A $40M cap
+                over a $90k pool is not a price anyone gets out at, and that is
+                invisible when the two figures merely sit side by side. */}
+            <span
+              title={
+                d.supply.liqToMcap === undefined
+                  ? undefined
+                  : `${(d.supply.liqToMcap * 100).toFixed(2)}% of market cap is actually pooled`
+              }
+            >
+              {fmtUsd(snap.liquidityUsd)}
+              {d.supply.liqToMcap !== undefined && (
+                <span className={d.supply.liqToMcap < 0.01 ? "warn" : "faint"}>
+                  {" "}
+                  ({(d.supply.liqToMcap * 100).toFixed(1)}%)
+                </span>
+              )}
+            </span>
+          </HeaderStat>
           <HeaderStat label="24h vol">{fmtUsd(snap.volume24hUsd)}</HeaderStat>
           <HeaderStat label="Holders">
             {absent("holders") ? (
@@ -266,6 +312,21 @@ function LiveToken({ detail }: { detail: LiveTokenDetail }) {
           <div className="text-[11px] faint mt-1 leading-snug">
             The engine is allowed to abstain, and this is an abstention rather than a verdict: it
             says the evidence was not there, not that the token is bad.
+          </div>
+        </div>
+      )}
+      {/* The middle rung: not a veto, not a penalty. The score below stands as
+          the honest weighted mean; the LABEL is held at WATCH. */}
+      {signal.labelCap && !signal.securityVeto && !signal.noTradeReason && (
+        <div className="panel p-3 border-l-2" style={{ borderLeftColor: "var(--warn)" }}>
+          <div className="text-[12.5px] warn font-semibold">
+            HELD AT WATCH — {signal.labelCap}
+          </div>
+          <div className="text-[11px] faint mt-1 leading-snug">
+            This is a cap on the verdict rather than a disqualification. A live mint authority is a
+            capability and vetoes outright; a deployer&rsquo;s launch count is a base rate, so it
+            caps instead. The score beside the label is unchanged — it is what the measured factors
+            add up to, and it is not fudged to agree with the cap.
           </div>
         </div>
       )}
@@ -338,6 +399,7 @@ function LiveToken({ detail }: { detail: LiveTokenDetail }) {
             </div>
           </div>
 
+          <ActivityPanel detail={d} />
           <ScoreAuditPanel detail={d} />
           <HolderPanel detail={d} />
           <FlowPanelView detail={d} />
@@ -383,6 +445,102 @@ function LiveToken({ detail }: { detail: LiveTokenDetail }) {
 
 // ---------------------------------------------------------------- live panels
 
+/**
+ * TXNS / BUYS / SELLS / MAKERS per window.
+ *
+ * The block DEX Screener and Photon lead their token pages with, and the one
+ * this page did not have — `buys1h` and `sells1h` were already in the feature
+ * vector, surfaced only as a derived "buy/sell imbalance %" buried in an audit
+ * row. A reader who wants to know whether anyone is actually trading a token
+ * should not have to reverse a percentage to find out.
+ *
+ * Every cell renders a dash when the source did not break that window out, on
+ * the same rule as the price strip: a quiet window and an unfetched one look
+ * identical unless the panel refuses to print a zero it was not given.
+ */
+function ActivityPanel({ detail }: { detail: LiveTokenDetail }) {
+  const w = detail.snapshot.windows;
+  if (!w) {
+    return (
+      <div className="panel p-3">
+        <div className="panel-title mb-1">Activity</div>
+        <div className="text-[11.5px] faint leading-snug">
+          {detail.source} publishes no per-window trade breakdown for this mint. That is an absence,
+          not a quiet tape.
+        </div>
+      </div>
+    );
+  }
+  const keys: TradeWindowKey[] = ["5m", "1h", "6h", "24h"];
+  const shown = keys.filter((k) => w[k]);
+  return (
+    <div className="panel">
+      <div className="flex items-center justify-between px-3 pt-2.5 gap-2 flex-wrap">
+        <span className="panel-title">Activity · buys, sells and who made them</span>
+        <span className="num text-[10.5px] faint">{detail.source}</span>
+      </div>
+      <table className="w-full text-[11.5px]">
+        <thead className="thead">
+          <tr>
+            <th className="text-left px-3 py-1.5 font-medium">Window</th>
+            <th className="text-right px-2 font-medium">Txns</th>
+            <th className="text-right px-2 font-medium">Buys</th>
+            <th className="text-right px-2 font-medium">Sells</th>
+            <th className="text-right px-2 font-medium">Makers</th>
+            <th className="text-right px-3 font-medium">Buy / sell volume</th>
+          </tr>
+        </thead>
+        <tbody className="num">
+          {shown.map((k) => {
+            const row = w[k]!;
+            const txns =
+              row.buys === undefined && row.sells === undefined
+                ? undefined
+                : (row.buys ?? 0) + (row.sells ?? 0);
+            return (
+              <tr key={k} className="trow">
+                <td className="px-3 py-1 dim">{k}</td>
+                <td className="text-right px-2 dim">
+                  {txns === undefined ? <Dash why="neither side was published" /> : fmtNum(txns)}
+                </td>
+                <td className="text-right px-2 pos">
+                  {row.buys === undefined ? <Dash why="not published" /> : fmtNum(row.buys)}
+                </td>
+                <td className="text-right px-2 neg">
+                  {row.sells === undefined ? <Dash why="not published" /> : fmtNum(row.sells)}
+                </td>
+                <td className="text-right px-2 dim">
+                  {row.traders === undefined ? (
+                    <Dash why={`${detail.source} counts transactions, not distinct wallets, for this window`} />
+                  ) : (
+                    fmtNum(row.traders)
+                  )}
+                </td>
+                <td className="text-right px-3">
+                  {row.buyVolumeUsd === undefined || row.sellVolumeUsd === undefined ? (
+                    <Dash why={`${detail.source} publishes volume for this window but not the buy/sell split`} />
+                  ) : (
+                    <>
+                      <span className="pos">{fmtUsd(row.buyVolumeUsd)}</span>
+                      <span className="faint"> / </span>
+                      <span className="neg">{fmtUsd(row.sellVolumeUsd)}</span>
+                    </>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div className="px-3 py-1.5 text-[10.5px] faint leading-snug">
+        Counts are transactions, not wallets, except under <b>Makers</b> — which is distinct traders
+        where the source counts them and a dash where it does not. Buys plus sells is not a maker
+        count: one wallet that did both would be counted twice.
+      </div>
+    </div>
+  );
+}
+
 function ScoreAuditPanel({ detail }: { detail: LiveTokenDetail }) {
   const { signal, audit } = detail;
   const stood = audit.rows.filter((r) => !r.measured);
@@ -390,17 +548,27 @@ function ScoreAuditPanel({ detail }: { detail: LiveTokenDetail }) {
     <div className="panel">
       <div className="flex items-center justify-between px-3 pt-2.5 gap-2 flex-wrap">
         <span className="panel-title">The score, every factor</span>
-        <span className="num text-[10.5px] faint">
-          {(audit.coverage * 100).toFixed(0)}% of the model&rsquo;s weight available · confidence{" "}
-          {(signal.confidence * 100).toFixed(0)}%
+        {/* Confidence is a PRODUCT, and reporting only the product made it look
+            like a constant — 77% on eight of twelve mints reviewed. Both terms
+            are printed so a reader can see which one is binding: on live tokens
+            it is almost always coverage. */}
+        <span
+          className="num text-[10.5px] faint"
+          title="confidence = evidence quality x coverage. Evidence quality is the tape behind the vector — sample size, staleness, age, depth. Coverage is how much of the model had anything to read."
+        >
+          confidence {(signal.confidence * 100).toFixed(0)}% ={" "}
+          {(audit.evidenceQuality * 100).toFixed(0)}% evidence ×{" "}
+          {(audit.coverage * 100).toFixed(0)}% coverage
         </span>
       </div>
       <div className="px-3 pt-1 pb-1.5 text-[10.5px] faint leading-snug">
-        Contribution is signed points on the 0-100 scale. A factor that <b>stood down</b> left the
-        weighted mean entirely rather than scoring its missing input as a zero, and the confidence
-        above fell by its weight — {audit.missingWeight.toFixed(1)} of weight went unused and{" "}
-        {audit.unmeasuredRisks} risk factor{audit.unmeasuredRisks === 1 ? "" : "s"} could not be
-        assessed at all.
+        Contribution is signed points on the 0-100 scale, measured from the neutral 50 — so a factor
+        sitting exactly at its midpoint contributes <b>nothing</b> rather than paying credit for the
+        absence of what it measures. A factor that <b>stood down</b> left the weighted mean entirely
+        rather than scoring its missing input as a zero, and the confidence above fell by its
+        weight — {audit.missingWeight.toFixed(1)} of weight went unused and {audit.unmeasuredRisks}{" "}
+        risk factor{audit.unmeasuredRisks === 1 ? "" : "s"} could not be assessed at all. These rows
+        sum to {audit.reconciled} against a score of {signal.score}.
       </div>
       <table className="w-full text-[11.5px]">
         <thead className="thead">
@@ -450,9 +618,16 @@ function ScoreAuditPanel({ detail }: { detail: LiveTokenDetail }) {
           ))}
         </tbody>
       </table>
+      {/* When a veto is present this is NOT the verdict, and must not be printed
+          as one — the header chip says EXTREME RISK and a bold "NO TRADE" here
+          would put a second answer to one question on the same screen. The
+          abstention is still worth showing; it is demoted to what it is. */}
       {signal.noTradeReason && (
         <div className="px-3 py-2 border-t border-[var(--border)] text-[11.5px] warn leading-snug">
-          <b>NO TRADE</b> — {signal.noTradeReason}. The engine is allowed to abstain, and{" "}
+          <b>{signal.securityVeto ? "Also abstained" : "NO TRADE"}</b> — {signal.noTradeReason}.{" "}
+          {signal.securityVeto
+            ? "The verdict above is the security veto, which outranks this: it is a finding, and an abstention is the absence of one."
+            : "The engine is allowed to abstain, and"}{" "}
           {stood.length > 0
             ? `${stood.length} factor${stood.length === 1 ? "" : "s"} (${stood.map((s) => s.name).join(", ")}) had nothing to read.`
             : "this one is a gate rather than a data gap."}
@@ -686,14 +861,7 @@ function SecurityPanel({ detail }: { detail: LiveTokenDetail }) {
           — LP lock not reported by {risk.source}
         </div>
       ) : (
-        <Attributed
-          ok={risk.lpLockedPct >= 0.5}
-          verified
-          by={risk.source}
-          okText={`${(risk.lpLockedPct * 100).toFixed(1)}% of LP locked or burned`}
-          badText={`only ${(risk.lpLockedPct * 100).toFixed(1)}% of LP locked — the pool can be withdrawn`}
-          unverifiedText=""
-        />
+        <LpLockLine lockedPct={risk.lpLockedPct} providers={risk.totalLpProviders} by={risk.source} />
       )}
 
       {risk?.transferFeePct !== undefined && risk.transferFeePct > 0 && (
@@ -703,15 +871,18 @@ function SecurityPanel({ detail }: { detail: LiveTokenDetail }) {
         </div>
       )}
 
-      {risk && (
+      {risk && (marketLine(risk).length > 0 || risk.insiderNetworks !== undefined) && (
         <div className="text-[10.5px] faint mt-2 num leading-snug">
-          {risk.markets !== undefined && `${risk.markets} pools`}
-          {risk.totalLpProviders !== undefined && ` · ${risk.totalLpProviders} LP providers`}
-          {risk.totalMarketLiquidityUsd !== undefined &&
-            ` · ${fmtUsd(risk.totalMarketLiquidityUsd)} across them (${risk.source})`}
+          {/* Built from parts and joined, rather than concatenated with leading
+              separators. The old form printed "22 pools · 0 LP providers ·
+              $2.43M across them" — impossible on its face — and, once the
+              provider normalised those zeros away, would have printed a
+              dangling " · $2.43M across them" with nothing before it. It also
+              said "1 pools". */}
+          {marketLine(risk).join(" · ")}
           {risk.insiderNetworks !== undefined && (
             <>
-              {" · "}
+              {marketLine(risk).length > 0 ? " · " : ""}
               {/* Scoped explicitly. This line and the Insider Risk factor sat on
                   one screen saying "3 insider networks, 12 wallets" and
                   "insider-linked wallets hold ~0% of supply" — both true of
@@ -763,6 +934,78 @@ function SecurityPanel({ detail }: { detail: LiveTokenDetail }) {
   );
 }
 
+/**
+ * The pools / providers / pooled-liquidity strip, as a list of parts.
+ *
+ * Every entry is present only when somebody published it, and each one carries
+ * its own unit, so an absent field removes a part rather than leaving a
+ * dangling separator. Pluralised, because "1 pools" in a panel of exact figures
+ * reads as a bug in the panel.
+ */
+function marketLine(risk: NonNullable<LiveTokenDetail["risk"]>): string[] {
+  const parts: string[] = [];
+  if (risk.markets !== undefined) parts.push(`${risk.markets} pool${risk.markets === 1 ? "" : "s"}`);
+  if (risk.totalLpProviders !== undefined) {
+    parts.push(`${risk.totalLpProviders} LP provider${risk.totalLpProviders === 1 ? "" : "s"}`);
+  }
+  if (risk.totalMarketLiquidityUsd !== undefined) {
+    parts.push(`${fmtUsd(risk.totalMarketLiquidityUsd)} across them (${risk.source})`);
+  }
+  return parts;
+}
+
+/**
+ * The LP lock line, which has to carry the PROVIDER COUNT or it states a
+ * falsehood.
+ *
+ * "only 0.0% of LP locked — the pool can be withdrawn" was printed for PUMP
+ * directly above "435 pools · 43 LP providers". With forty-three independent
+ * parties holding the LP, no one of them can withdraw the pool, so that
+ * sentence is not true — and it was the largest single penalty on the page.
+ * The three states below are the three genuinely different situations that one
+ * sentence was collapsing.
+ */
+function LpLockLine({
+  lockedPct,
+  providers,
+  by,
+}: {
+  lockedPct: number;
+  providers: number | undefined;
+  by: string;
+}) {
+  const locked = `${(lockedPct * 100).toFixed(1)}% of LP locked or burned`;
+  if (lockedPct >= 0.5) {
+    return <Attributed ok verified by={by} okText={locked} badText="" unverifiedText="" />;
+  }
+  if (providers === undefined) {
+    return (
+      <div className="text-[11.5px] neg leading-relaxed">
+        ✕ only {locked} — the rest can be withdrawn, and no source here says by how many separate
+        parties it is held <span className="faint">({by})</span>
+      </div>
+    );
+  }
+  if (providers <= 1) {
+    return (
+      <div className="text-[11.5px] neg leading-relaxed">
+        ✕ only {locked}, and one provider holds the pool — that party can withdraw it{" "}
+        <span className="faint">({by})</span>
+      </div>
+    );
+  }
+  return (
+    <div
+      className="text-[11.5px] warn leading-relaxed"
+      title="The LP Lock penalty in the audit is scaled by 1/sqrt(providers): full weight at one provider or an unknown count, and falling from there. The split between them is not published, so the penalty is reduced rather than removed."
+    >
+      ⚠ only {locked}, but it is spread over {providers} independent providers — no single one of
+      them can withdraw the pool, so the penalty is scaled down rather than charged in full{" "}
+      <span className="faint">({by})</span>
+    </div>
+  );
+}
+
 function CreatorCard({ detail }: { detail: LiveTokenDetail }) {
   const c = detail.creator;
   const serial = (c.mints ?? 0) >= 10;
@@ -793,21 +1036,33 @@ function CreatorCard({ detail }: { detail: LiveTokenDetail }) {
           {c.mints === undefined ? (
             <Dash why="the source published no creator history" />
           ) : (
-            <span className={serial ? "warn" : "dim"}>{c.mints}</span>
+            <span className={serial ? "warn" : "dim"}>{c.mints.toLocaleString()}</span>
           )}
         </Field>
         <Field label="Reached a pool">
           {c.migrations === undefined ? (
             <Dash why="the source published no migration count" />
           ) : (
-            <span className="dim">{c.migrations}</span>
+            <span className="dim">{c.migrations.toLocaleString()}</span>
           )}
         </Field>
+        {/* ONE answer, from `holdsShown`, which resolves the two sources in a
+            stated order. This cell used to read the token provider's figure
+            alone and print a dash saying "no source published the deployer's
+            balance — this is not zero" one line above a footnote reading
+            "rugcheck independently puts the deployer balance at 0.000%". Both
+            sentences were on screen for PUMP, SKHY, TRX and CATE, and one of
+            them had to be wrong. */}
         <Field label="Dev still holds">
-          {c.holdsPct === undefined ? (
+          {c.holdsShown === undefined ? (
             <Dash why="no source published the deployer's balance — this is not zero" />
           ) : (
-            <span className={c.holdsPct > 0.05 ? "warn" : "dim"}>{(c.holdsPct * 100).toFixed(3)}%</span>
+            <span
+              className={c.holdsShown.pct > 0.05 ? "warn" : "dim"}
+              title={`per ${c.holdsShown.source}`}
+            >
+              {(c.holdsShown.pct * 100).toFixed(3)}%
+            </span>
           )}
         </Field>
         <Field label="Graduated">
@@ -820,18 +1075,28 @@ function CreatorCard({ detail }: { detail: LiveTokenDetail }) {
           )}
         </Field>
       </div>
-      {c.vendorHoldsPct !== undefined && (
-        <div className="text-[10.5px] faint mt-1.5 num">
-          {detail.risk?.source} independently puts the deployer balance at{" "}
-          {(c.vendorHoldsPct * 100).toFixed(3)}%.
-        </div>
-      )}
+      {/* The second opinion, shown ONLY when it is genuinely a second one. If
+          the vendor is the source of the figure above, repeating it here as
+          "independently puts" would manufacture corroboration out of one
+          reading. */}
+      {c.vendorHoldsPct !== undefined &&
+        detail.risk &&
+        c.holdsShown !== undefined &&
+        c.holdsShown.source !== detail.risk.source && (
+          <div className="text-[10.5px] faint mt-1.5 num">
+            {detail.risk.source} independently puts the deployer balance at{" "}
+            {(c.vendorHoldsPct * 100).toFixed(3)}%
+            {Math.abs(c.vendorHoldsPct - c.holdsShown.pct) > 0.005
+              ? " — the two sources disagree; both are shown rather than averaged."
+              : "."}
+          </div>
+        )}
       <div className="text-[10.5px] faint mt-2 leading-snug">
         {c.mints === undefined
           ? "Nothing here says how many tokens this wallet has launched, which is the single most useful fact about a memecoin deployer."
           : c.mints === 1
             ? "First mint by this wallet. That is not a guarantee of anything — it is simply the absence of a track record."
-            : `This wallet has issued ${c.mints} mints${c.migrations !== undefined ? `, ${c.migrations} of which reached a real pool` : ""}. A serial deployer is a warning; the ratio is the interesting part.`}
+            : `This wallet has issued ${c.mints.toLocaleString()} mints${c.migrations !== undefined ? `, ${c.migrations.toLocaleString()} of which reached a real pool — ${((c.migrations / c.mints) * 100).toFixed(1)}%` : ""}. A serial deployer is a warning; the ratio is the interesting part.`}
       </div>
     </div>
   );

@@ -118,12 +118,34 @@ export async function handleLaunches(): Promise<{ feed: LaunchFeed | null; demo:
  * `asOf` forces the simulator for the same reason `handleTokens` does — it is a
  * request to replay a past moment, and no live source can answer that.
  */
+/**
+ * Whether a string could be a Solana mint at all.
+ *
+ * Base58 excludes 0, O, I and l, and an address is 32-44 characters. The
+ * simulator's own mints are generated from the same alphabet at 44 characters,
+ * so this gates nothing legitimate.
+ *
+ * Checked before the mint reaches five providers, and before it can reach a
+ * message the page prints verbatim: `/token?m=<script>alert(1)</script>` used
+ * to render its own query string back at the reader through the 404 body. React
+ * escapes it, so it was never XSS, but a page that will print whatever a link
+ * puts in the URL is a phishing surface — and "that is not an address" is a
+ * better answer than five network round-trips ending in "unknown mint".
+ */
+export const MINT_SHAPE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
 export async function handleTokenDetail(
   store: DemoStore,
   mint: string,
   asOf?: number,
   profile: StrategyProfileId = "balanced",
 ) {
+  if (!MINT_SHAPE.test(mint)) {
+    throw new ApiError(
+      400,
+      "that is not a Solana mint address — an address is 32 to 44 base58 characters.",
+    );
+  }
   // A live FAILURE and an unlisted mint are different answers and used to
   // produce the same one. With the token provider rate-limited, every real mint
   // fell through to a simulator that has never heard of it and the page said

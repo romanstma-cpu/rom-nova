@@ -166,6 +166,30 @@ export type UnmeasuredField =
    */
   | "devHistory";
 
+/** The four windows every reference terminal breaks activity down by. */
+export type TradeWindowKey = "5m" | "1h" | "6h" | "24h";
+
+/**
+ * Trade activity in one window, exactly as the source published it.
+ *
+ * Every field optional and NOTHING defaulted, because this is the panel a
+ * reader scans fastest and a zero here is the cheapest possible lie: "0 buys /
+ * 0 sells" and "the source does not break this window out" render identically
+ * unless the type can tell them apart.
+ *
+ * `traders` is what DEX Screener and Photon label MAKERS. Jupiter counts it
+ * directly (`numTraders`); DEX Screener does not publish it at all, so it stays
+ * undefined there rather than being approximated from buys + sells, which would
+ * count one wallet that did both twice.
+ */
+export interface TradeWindow {
+  buys?: number;
+  sells?: number;
+  traders?: number;
+  buyVolumeUsd?: number;
+  sellVolumeUsd?: number;
+}
+
 /** Point-in-time market state for a token. `ts` is when it was observed. */
 export interface TokenSnapshot {
   /** Fields this source could not supply. Absent or empty means all present. */
@@ -227,6 +251,18 @@ export interface TokenSnapshot {
   holderGrowthPct?: number;
   /** 24h change in pooled liquidity, percent. A draining pool is the rug tell. */
   liquidityChangePct?: number;
+  /**
+   * Buys, sells and distinct traders per window.
+   *
+   * The single most-glanced-at block on every reference terminal, and the one
+   * thing this app had in its payload and never showed: `buys1h` and `sells1h`
+   * were already in the vector, surfaced only as a derived "imbalance %" buried
+   * in one audit row. Jupiter ships all four windows in the same response as the
+   * price, so this costs nothing extra to carry.
+   *
+   * Absent when the source publishes no per-window breakdown at all.
+   */
+  windows?: Partial<Record<TradeWindowKey, TradeWindow>>;
 }
 
 export interface Candle {
@@ -1017,6 +1053,22 @@ export interface Signal {
    * state and it routes to abstention, not to a verdict.
    */
   securityVeto?: string;
+  /**
+   * A measured fact that CAPS the label without disqualifying the token.
+   *
+   * The middle rung the engine was missing. A live mint authority is a
+   * capability — the key exists and can be used unilaterally right now — so it
+   * vetoes outright. A deployer who has issued nineteen thousand mints is a
+   * base rate, not a capability: it cannot take anyone's money, it only makes
+   * this particular mint one attempt among thousands. Those two facts had one
+   * mechanism between them (a nine-point penalty) and a token could absorb the
+   * penalty and still render POSITIVE under the sentence describing the
+   * factory.
+   *
+   * So this holds the label at WATCH: the tape may be strong and the score says
+   * so, but the engine will not call it positive on tape alone.
+   */
+  labelCap?: string;
   profile: StrategyProfileId;
   factors: SignalFactor[];
   risks: RiskFlag[];

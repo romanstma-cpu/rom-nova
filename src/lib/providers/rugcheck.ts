@@ -140,12 +140,28 @@ export function lpFraction(raw: number | undefined): number | undefined {
  * alongside a priced, pooled, actively-traded token is a silence, and silence
  * must not render as a measurement.
  *
+ * THE SWEEP. Every count-shaped field in the payload was walked once rather
+ * than waiting for a third reviewer to find the third one:
+ *
+ *   totalHolders          swept — a priced token has holders
+ *   totalLPProviders      swept — a pooled token has providers
+ *   markets (length)      swept — a token that trades has a market
+ *   totalMarketLiquidity  swept — zero across live pools is not a measurement
+ *   token.supply          swept — a mint with a price has supply
+ *
  * DELIBERATELY NOT swept, because zero is a real and important answer:
  *
  *   lpLockedPct      0% locked is the worst case, not a missing one
  *   creatorBalance   a deployer who has sold out really does hold nothing
  *   score            a normalised 0 is the vendor's cleanest grade
  *   graphInsiders    0 found is a result once the graph has run
+ *   insiderNetworks  same — the array's presence is what says the graph ran
+ *   labelledHolders  0 of 20 labelled is the finding the holder panel prints
+ *   transferFee.pct  0% fee is the normal, checkable case
+ *
+ * The dividing line, stated once so the next field lands on the right side of
+ * it: sweep a count whose zero is arithmetically impossible given something
+ * else in the same payload; keep a zero that a real token can actually have.
  */
 export function counted(n: number | undefined): number | undefined {
   return n !== undefined && Number.isFinite(n) && n > 0 ? n : undefined;
@@ -246,6 +262,10 @@ export class RugCheckRiskProvider implements TokenRiskProvider {
       markets: counted(Array.isArray(full.markets) ? full.markets.length : undefined),
       totalMarketLiquidityUsd: counted(full.totalMarketLiquidity),
       totalLpProviders: counted(full.totalLPProviders),
+      // Circulating supply in whole tokens. The only real supply figure in this
+      // stack — everything else derives one from market cap over price, which
+      // compounds two vendors' rounding into a number nobody published.
+      supply: supplyOf(full),
       launchpad: full.launchpad?.name,
       insiderNetworks: Array.isArray(full.insiderNetworks) ? full.insiderNetworks.length : undefined,
       graphInsiders: full.graphInsidersDetected,
@@ -266,6 +286,24 @@ export class RugCheckRiskProvider implements TokenRiskProvider {
       detailed,
     };
   }
+}
+
+/**
+ * Supply in whole tokens, from the vendor's own base-units figure.
+ *
+ * Goes through `counted` for the same reason every other count does: a mint
+ * with a price and a pool cannot have zero supply, so a zero here is the vendor
+ * not having read the mint account. A missing `decimals` is treated as absent
+ * rather than assumed to be nine — off by a factor of a billion is worse than
+ * a dash.
+ */
+export function supplyOf(r: {
+  token?: { supply?: number; decimals?: number };
+}): number | undefined {
+  const raw = counted(r.token?.supply);
+  const decimals = r.token?.decimals;
+  if (raw === undefined || decimals === undefined || !Number.isFinite(decimals)) return undefined;
+  return raw / 10 ** decimals;
 }
 
 /**

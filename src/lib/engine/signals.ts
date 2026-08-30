@@ -50,9 +50,21 @@ function measured(def: FactorDef, f: FeatureVector): boolean {
   return !def.needs.some((n) => f.unmeasured!.includes(n));
 }
 
-/** The provider count, or null when nobody computed one. */
+/**
+ * The provider count, or null when nobody computed one.
+ *
+ * A zero counts as nobody having computed one, and that belt-and-braces guard
+ * is not decoration: the vendor returns `totalLPProviders: 0` for "not indexed"
+ * on most freshly-listed mints, and a zero reaching here would take
+ * `Math.max(1, 0)` and produce the sentence "a single provider holds the pool
+ * — that party can withdraw it". Inventing the WORST reading from an absence is
+ * the same bug as inventing the best one, and it is the one that would have
+ * shipped: the provider normalises the field to undefined, but nothing stops a
+ * second source, a cache or a test fixture from passing a bare zero through.
+ */
 function knownProviders(f: FeatureVector): number | null {
-  return (f.unmeasured ?? []).includes("lpProviders") ? null : f.lpProviders;
+  if ((f.unmeasured ?? []).includes("lpProviders")) return null;
+  return f.lpProviders > 0 ? f.lpProviders : null;
 }
 
 /**
@@ -569,12 +581,24 @@ function riskFlags(f: FeatureVector): RiskFlag[] {
   // rug — so grading it high-severity fired EXTREME RISK on exactly the tokens
   // where it means least. The penalty still scales; the alarm does not.
   if (has("lpLocked") && f.lpLockedPct < 0.5) {
+    // The DETAIL has to carry the provider count for the same reason the panel
+    // and the provenance line do. "Whoever holds the rest can withdraw it, and
+    // no source here says who that is" was the last place that falsehood
+    // survived after the penalty and the panel were fixed — it reached the
+    // reader through the bear case, on a token where 43 independent parties
+    // hold the LP and the app knew it.
+    const providers = knownProviders(f);
+    const locked = `${(f.lpLockedPct * 100).toFixed(1)}% of LP locked`;
     add(
       "lp_lock",
       "Liquidity pool largely unlocked",
       "medium",
-      `${(f.lpLockedPct * 100).toFixed(1)}% of LP locked — whoever holds the rest can withdraw it, ` +
-        `and no source here says who that is`,
+      providers === null
+        ? `${locked} — whoever holds the rest can withdraw it, and no source here says who that is`
+        : providers <= 1
+          ? `${locked}, and one provider holds the pool — that party can withdraw it`
+          : `${locked}, spread over ${providers} independent providers — no one of them can ` +
+            `withdraw the pool, though how much each holds is not published`,
     );
   }
 
@@ -652,6 +676,102 @@ function classifyKind(f: FeatureVector, factors: SignalFactor[], score: number):
  * to do. The score stays an honest weighted mean of what was measured, and the
  * LABEL carries the veto.
  */
+/**
+ * Where a serial deployer stops being a penalty and starts capping the verdict.
+ *
+ * TWO HUNDRED AND FIFTY mints, and fewer than one in twenty reaching a pool.
+ *
+ * The count is NOT the thing being judged. It is a sample-size floor: the
+ * graduation rate is what says whether a deployer's mints work, and a rate over
+ * three mints is noise. At 250 the rate is determined closely enough to
+ * separate 2% from 8%, which is the distinction that matters here.
+ *
+ * The RATE does the discriminating, and it is what keeps this from being a tax
+ * on being prolific. A launchpad operator or a builder whose mints graduate at
+ * 30% clears it however many they have issued.
+ *
+ * Measured against today's live trending list, which is the population that
+ * matters — every row is a pump.fun-era mint:
+ *
+ *   CATE       19,098 / 341    1.8%   capped
+ *   PBJ        13,843 / 199    1.4%   capped
+ *   STONK       6,161 /  11    0.2%   capped
+ *   BUTTHOLE    6,161 /  11    0.2%   capped   (same deployer as STONK)
+ *   MAGA        4,681 / 202    4.3%   capped
+ *   STACY         731 /  33    4.5%   capped
+ *   Orangutan     405 /  34    8.4%   NOT capped — the rate clears it
+ *   PINK           55 /   1           NOT capped — no sample
+ *   nub, fone, ANTFUN, HNT, TROLL, ALEIAH: 1-5 mints, nowhere near
+ *
+ * Six of fourteen. That is high, and it is high because this population really
+ * is mostly serial deployers — but it is not the "flags half the feed on a
+ * naive threshold" failure, because the one deployer here with hundreds of
+ * mints AND a working record is exactly the one it lets through.
+ *
+ * The first draft of this used 1,000 and it was an arbitrary cliff: it capped
+ * MAGA at 4,681 mints / 4.3% and cleared STACY at 731 / 4.5%, which are the
+ * same object. A threshold that splits two tokens a percentage point apart is
+ * not measuring anything.
+ */
+export const FACTORY_MINTS = 250;
+export const FACTORY_GRADUATION_RATE = 0.05;
+
+/**
+ * A measured fact that holds the label at WATCH, or null.
+ *
+ * THE JUDGEMENT CALL, written down where the rule is rather than in a report
+ * nobody reads next to the code.
+ *
+ * The question was whether a serial deployer should veto a positive label the
+ * way a live mint authority does. It should not, and the reason is that the two
+ * facts are different KINDS of fact:
+ *
+ *   A live mint authority is a CAPABILITY. The key exists, it is on chain, its
+ *   holder can inflate the supply unilaterally at any moment, and nothing the
+ *   token does between now and then changes that. Binary, verified, and no
+ *   quantity of good tape trades it away — so it vetoes.
+ *
+ *   A deployer's mint count is a BASE RATE. It confers no power over this mint
+ *   and takes nothing from anybody; it says this token is one attempt among
+ *   many, which is a prior about the outcome rather than a fact about the
+ *   contract.
+ *
+ * And a veto needs a threshold that survives the population. W2 measured it:
+ * the MEDIAN new pump.fun deployer is on their 75th mint. Any veto line low
+ * enough to be principled about "serial" would abstain on half the feed, and a
+ * verdict that fires on half the feed carries no information — the exact
+ * failure the abstention gate has already had twice in this file. Which is why
+ * the threshold below is a sample-size floor with the GRADUATION RATE doing the
+ * actual judging, rather than a line drawn across the mint count.
+ *
+ * So the fact gets three graduated mechanisms instead of one:
+ *
+ *   1. a log-scaled PENALTY on every deployer, discharged by migrations
+ *      (`deployer_history` above) — CATE draws -5.9 through it;
+ *   2. a high-severity FLAG at the factory threshold, which reaches the bear
+ *      case and counts toward the existing `highRisks` gates;
+ *   3. this CAP, which stops the label at WATCH.
+ *
+ * The cap is what closes the review's actual complaint. CATE rendered
+ * POSITIVE / 73 directly beneath the sentence "this deployer has issued 19,083
+ * mints, 340 of which reached a real pool", because a nine-point penalty cannot
+ * outvote a strong tape and the score band had the last word. Now the score
+ * still says 73 — that is the honest weighted mean and it should not be
+ * fudged — and the LABEL says WATCH, with the reason attached.
+ */
+export function labelCapOf(f: FeatureVector): string | null {
+  if ((f.unmeasured ?? []).includes("devHistory")) return null;
+  if (f.devMints < FACTORY_MINTS) return null;
+  const rate = f.devMints > 0 ? f.devMigrations / f.devMints : 0;
+  if (rate >= FACTORY_GRADUATION_RATE) return null;
+  return (
+    `this deployer has issued ${f.devMints.toLocaleString()} mints and ` +
+    `${f.devMigrations.toLocaleString()} of them reached a real pool ` +
+    `(${(rate * 100).toFixed(1)}%) — the label is held at WATCH, because a tape this ` +
+    `strong on a mint from a factory this large is not yet evidence that this one is different`
+  );
+}
+
 export function securityVetoOf(f: FeatureVector): string | null {
   const missing = f.unmeasured ?? [];
   if (!missing.includes("authorities")) {
@@ -668,12 +788,20 @@ export function securityVetoOf(f: FeatureVector): string | null {
   return null;
 }
 
+/** Labels that read as an invitation. The cap must not be able to produce one. */
+const POSITIVE_LABELS: readonly SignalLabel[] = [
+  "EXTREME POSITIVE",
+  "STRONG POSITIVE",
+  "POSITIVE",
+];
+
 function labelOf(
   score: number,
   confidence: number,
   highRisks: number,
   noTrade: string | null,
   securityVeto: string | null,
+  labelCap: string | null,
 ): SignalLabel {
   // The VETO outranks abstention. Checked first because "we read the mint
   // account and the authority is live" is a finding, and NO TRADE is the
@@ -684,13 +812,25 @@ function labelOf(
   if (securityVeto) return "EXTREME RISK";
   if (noTrade) return "NO TRADE";
   if (highRisks >= 2 && score < 55) return "EXTREME RISK";
-  if (score >= 88 && confidence >= 0.6) return "EXTREME POSITIVE";
-  if (score >= 76) return "STRONG POSITIVE";
-  if (score >= 64) return "POSITIVE";
-  if (score >= 54) return "WATCH";
-  if (score >= 45) return "NEUTRAL";
-  if (score >= 35) return "WEAK";
-  return "NEGATIVE";
+  const band: SignalLabel =
+    score >= 88 && confidence >= 0.6
+      ? "EXTREME POSITIVE"
+      : score >= 76
+        ? "STRONG POSITIVE"
+        : score >= 64
+          ? "POSITIVE"
+          : score >= 54
+            ? "WATCH"
+            : score >= 45
+              ? "NEUTRAL"
+              : score >= 35
+                ? "WEAK"
+                : "NEGATIVE";
+  // The cap only ever moves a label DOWN. A capped token that already scores
+  // NEUTRAL stays NEUTRAL — pulling it up to WATCH would make a warning read as
+  // an upgrade, which is how a safety mechanism becomes a recommendation.
+  if (labelCap && POSITIVE_LABELS.includes(band)) return "WATCH";
+  return band;
 }
 
 export function computeSignal(
@@ -726,8 +866,11 @@ export function scoreFeatures(
   let totalWeight = 0;
   /** Weight the model wanted but could not use, for the confidence penalty. */
   let unmeasuredWeight = 0;
-  /** Risk factors that could not be assessed at all. */
-  let unmeasuredRisks = 0;
+  // There is deliberately no COUNT of unmeasured risks here any more. One lived
+  // in this scope, unread, left behind when the abstention gate stopped being a
+  // ratio — and a stale counter beside a live one is how the ratio gate got
+  // rewritten against the wrong denominator in the first place. `auditFactors`
+  // recomputes the count for display from the same `measured()` call.
   /** Which of the SUPPLY_RISK_KEYS specifically went unread, for the named gate. */
   const supplyBlind: string[] = [];
   for (const def of FACTORS) {
@@ -778,7 +921,6 @@ export function scoreFeatures(
     // with a zero penalty for data nobody has. Skipped instead, and counted
     // against confidence below.
     if (!measured(def, f)) {
-      unmeasuredRisks++;
       if ((SUPPLY_RISK_KEYS as readonly string[]).includes(def.key)) supplyBlind.push(def.key);
       factors.push({
         key: def.key,
@@ -807,7 +949,23 @@ export function scoreFeatures(
   }
 
   const regimeMult = REGIME_ADJUST[f.regime] ?? 1;
-  base = base * regimeMult;
+  // The regime scales the DEVIATION from neutral, not the whole mean.
+  //
+  // It used to multiply the 0-100 mean itself, which quietly made the regime a
+  // constant added to (or subtracted from) every factor. A token sitting exactly
+  // at 50 — nothing measured either way — came out at 42.5 in `risk_off` and
+  // 53 in `meme_mania`, so the market's mood alone moved a verdict on a token
+  // the model had no opinion about. Worse for the per-factor table: the
+  // decomposition below distributes that constant across the rows by weight, so
+  // a factor at its exact midpoint drew a positive contribution in a friendly
+  // regime. That is the same defect this pass is fixing everywhere else —
+  // points paid for an absence — arriving through the back door.
+  //
+  // Scaling the deviation keeps what the regime is FOR (amplify a real signal in
+  // a hot market, damp one in a falling market) and drops what it was doing by
+  // accident: 50 maps to 50 under every regime, and a midpoint factor
+  // contributes exactly zero under every regime.
+  base = 50 + (base - 50) * regimeMult;
   // contrast stretch: the weighted mean compresses toward 50 (measured on
   // the demo distribution), so widen around the midpoint before penalties
   const stretched = clamp(50 + (base - 50) * STRETCH, 0, 100);
@@ -826,12 +984,16 @@ export function scoreFeatures(
   // score should have had all along, and it could not before, because the
   // positive rows summed to `stretched` while the penalties were scaled by
   // RISK_SCALE on the way out.
+  //
+  // The regime multiplies the deviation here exactly as it does in `base`
+  // above, so the two stay one arithmetic: summing this column reproduces
+  // `stretched - 50` to the rounding, in every regime.
   const riskKeys = new Set(RISK_FACTORS.map((r) => r.key));
   for (const fac of factors) {
     if (riskKeys.has(fac.key)) continue;
     if (fac.weight === 0) continue;
     fac.contribution = Number(
-      (STRETCH * (Math.abs(fac.weight) / totalWeight) * (regimeMult * fac.normalized * 100 - 50)).toFixed(1),
+      (STRETCH * regimeMult * (Math.abs(fac.weight) / totalWeight) * (fac.normalized * 100 - 50)).toFixed(1),
     );
   }
 
@@ -845,6 +1007,7 @@ export function scoreFeatures(
   const highRisks = risks.filter((r) => r.severity === "high").length;
 
   const securityVeto = securityVetoOf(f);
+  const labelCap = labelCapOf(f);
 
   // NO TRADE gates — the engine is allowed to abstain
   let noTrade: string | null = null;
@@ -895,7 +1058,7 @@ export function scoreFeatures(
   else if (f.sampleSize < 12) noTrade = "insufficient sample behind the features";
   else if (f.worstStalenessMs > 3 * HOUR) noTrade = "inputs are stale";
 
-  const label = labelOf(score, confidence, highRisks, noTrade, securityVeto);
+  const label = labelOf(score, confidence, highRisks, noTrade, securityVeto, labelCap);
   const kind = classifyKind(f, factors, score);
 
   const positives = factors
@@ -924,6 +1087,11 @@ export function scoreFeatures(
     // The veto leads, because it is not one bear argument among several — it is
     // the reason the label says EXTREME RISK whatever the tape did.
     ...(securityVeto ? [`Disqualifying: ${securityVeto}`] : []),
+    // Then the cap, for the same reason one rung down: it is why the label is
+    // WATCH rather than POSITIVE, and the review found it missing from exactly
+    // this list — "WHAT COULD MAKE THIS FAIL carries one bullet, about volume"
+    // on a token whose deployer had issued nineteen thousand mints.
+    ...(labelCap ? [`Caps the verdict: ${labelCap}`] : []),
     ...risks.map((r) => `${r.name}: ${r.detail}`),
     f.momentum24h > 60 ? "entry is late in the move — favorable expectancy decays fast after vertical legs" : "the setup depends on continued participation; volume fading invalidates it",
   ];
@@ -940,6 +1108,7 @@ export function scoreFeatures(
     label,
     ...(noTrade ? { noTradeReason: noTrade } : {}),
     ...(securityVeto ? { securityVeto } : {}),
+    ...(labelCap ? { labelCap } : {}),
     profile: profileId,
     factors,
     risks,

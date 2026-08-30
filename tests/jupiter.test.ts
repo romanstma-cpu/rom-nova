@@ -63,9 +63,39 @@ describe("jupiter — absence is declared, never defaulted", () => {
       "insiderPct",
       "bundlerPct",
       "sniperPct",
+      // The LP provider count is in no Jupiter payload at any depth, and a
+      // zero there reads as "one party holds the pool, they can withdraw it".
+      "lpProviders",
+      // Nor the deployer's other mints on a payload with no audit block. A
+      // devMints of zero reads as "first mint from this deployer — no track
+      // record either way", which is a claim about a wallet nobody looked up.
+      "devHistory",
     ]) {
       expect(u, `${f} must be declared unmeasured`).toContain(f);
     }
+  });
+
+  it("stops calling the deployer history unmeasured once the audit carries it", () => {
+    expect(toSnapshot(FULL).unmeasured ?? []).not.toContain("devHistory");
+    // But the LP provider count is never Jupiter's to answer.
+    expect(toSnapshot(FULL).unmeasured ?? []).toContain("lpProviders");
+  });
+
+  it("carries all four activity windows, and omits the ones it was not given", () => {
+    // The block DEX Screener and Photon lead with, already in this payload and
+    // thrown away: the page surfaced it only as a derived "imbalance %".
+    const w = toSnapshot(FULL).windows!;
+    expect(w["1h"]).toEqual({
+      buys: 3583,
+      sells: 3454,
+      traders: 1255,
+      buyVolumeUsd: undefined,
+      sellVolumeUsd: undefined,
+    });
+    expect(w["24h"]?.buyVolumeUsd).toBe(1000);
+    // stats5m carried only a price change, so it contributes no trade window.
+    expect(w["5m"]).toBeUndefined();
+    expect(toSnapshot(SPARSE).windows).toBeUndefined();
   });
 
   it("never invents an average organic score", () => {

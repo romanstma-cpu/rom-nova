@@ -392,10 +392,22 @@ export async function liveFeatures(
       // LP lock is the one that earns its own line whatever its value. An
       // unlocked pool is the mechanic behind most memecoin losses and it is
       // invisible to every other source in this stack.
+      //
+      // The sentence has to carry the provider count with it. "The pool can be
+      // withdrawn" is a true and useful warning when one party holds the LP and
+      // a FALSE claim when forty-three independent parties do — measured on
+      // PUMP, where this line printed the warning above a panel reading "435
+      // pools · 43 LP providers".
       if (r.lpLockedPct !== undefined && r.lpLockedPct < 0.5) {
+        const locked = `only ${(r.lpLockedPct * 100).toFixed(1)}% of liquidity is locked`;
         provenance.push(
-          `WARNING: only ${(r.lpLockedPct * 100).toFixed(1)}% of liquidity is locked — ` +
-            `the pool can be withdrawn`,
+          r.totalLpProviders === undefined
+            ? `WARNING: ${locked} — the rest can be withdrawn, and no source here says by how ` +
+                `many separate parties it is held`
+            : r.totalLpProviders <= 1
+              ? `WARNING: ${locked} and one provider holds the pool — that party can withdraw it`
+              : `${locked}, spread over ${r.totalLpProviders} independent providers — no single ` +
+                `one of them can withdraw the pool, and the LP penalty is scaled down accordingly`,
         );
       }
       // `insiderPct` is set by the provider ONLY when the insider-graph
@@ -427,10 +439,29 @@ export async function liveFeatures(
       // The only source in this stack that sees a permanent delegate at all.
       if (r.permanentDelegate !== undefined) unmeasured.delete("permanentDelegate");
       if (r.lpLockedPct !== undefined) unmeasured.delete("lpLocked");
+      // And the only one that counts LP PROVIDERS, which is the other half of
+      // that lock figure. The vendor returns 0 for "not indexed" on most
+      // freshly-listed mints and the adapter normalises that to undefined, so
+      // this stays unmeasured far more often than not — and unmeasured is the
+      // conservative state here: `dispersionDampener` charges the LP penalty in
+      // full when the count is unknown, and discounts it only on evidence.
+      if (r.totalLpProviders !== undefined) unmeasured.delete("lpProviders");
     } else {
       provenance.push(`${sources.risk.name}: no report for this mint — risk ungraded`);
     }
   }
+
+  // Two fields that must be unmeasured unless somebody actually published them,
+  // asserted here rather than trusted from the snapshot's own declaration.
+  //
+  // A snapshot adapter is free to forget, and the cost of forgetting is not a
+  // missing number — it is a FABRICATED FINDING. `lpProviders: 0` reads as "one
+  // party holds the pool, they can withdraw it"; `devMints: 0` reads as "first
+  // mint from this deployer — no track record either way". Both are confident
+  // sentences about a wallet nobody looked up, and both are the failure mode
+  // this whole file exists to prevent, so the guard lives at the seam.
+  if (risk?.totalLpProviders === undefined) unmeasured.add("lpProviders");
+  if (info.devMints === undefined) unmeasured.add("devHistory");
 
   const totalTrades1h = snapshot.buys1h + snapshot.sells1h;
   const liquidityUsd = snapshot.liquidityUsd;
@@ -553,8 +584,8 @@ export async function liveFeatures(
     permanentDelegate: risk?.permanentDelegate != null,
     lpLockedPct: risk?.lpLockedPct ?? 0,
     // Zero here means the vendor did not compute it — the provider normalises
-    // that to undefined, and "lpProviders" stays unmeasured so the LP penalty
-    // takes no discount it did not earn.
+    // that to undefined, and "lpProviders" is asserted into the unmeasured set
+    // above in that case, so the LP penalty takes no discount it did not earn.
     lpProviders: risk?.totalLpProviders ?? 0,
     // Same 18% rule the simulator uses, so the two are comparable.
     exitDepthUsd: liquidityUsd * 0.18,

@@ -42,7 +42,14 @@
 
 import { providerFetch } from "./http";
 import type { TokenDataProvider } from "./types";
-import type { LaunchObservation, TokenInfo, TokenSnapshot, UnmeasuredField } from "../types";
+import type {
+  LaunchObservation,
+  TokenInfo,
+  TokenSnapshot,
+  TradeWindow,
+  TradeWindowKey,
+  UnmeasuredField,
+} from "../types";
 
 interface JupStats {
   priceChange?: number;
@@ -139,6 +146,26 @@ export function accelFromPct(pct: number | undefined): number | undefined {
 function frac(pct: number | undefined): number | undefined {
   if (pct === undefined || !Number.isFinite(pct)) return undefined;
   return pct / 100;
+}
+
+/**
+ * One interval's stats block as a TradeWindow, or undefined when the source
+ * said nothing about that window.
+ *
+ * Nothing is coerced to zero. A brand-new mint genuinely has windows with no
+ * trades, and a five-minute-old token has no 24h window at all — those are
+ * different facts and the panel prints them differently.
+ */
+function windowOf(s: JupStats | undefined): TradeWindow | undefined {
+  if (!s) return undefined;
+  const w: TradeWindow = {
+    buys: Number.isFinite(s.numBuys) ? s.numBuys : undefined,
+    sells: Number.isFinite(s.numSells) ? s.numSells : undefined,
+    traders: Number.isFinite(s.numTraders) ? s.numTraders : undefined,
+    buyVolumeUsd: Number.isFinite(s.buyVolume) ? s.buyVolume : undefined,
+    sellVolumeUsd: Number.isFinite(s.sellVolume) ? s.sellVolume : undefined,
+  };
+  return Object.values(w).some((v) => v !== undefined) ? w : undefined;
 }
 
 /**
@@ -281,6 +308,18 @@ export function toSnapshot(m: JupMint, now = Date.now()): TokenSnapshot {
   // Neither of these is in this payload at any depth.
   push("permanentDelegate");
   push("lpLocked");
+  // Nor is the LP PROVIDER COUNT, which is the other half of the lock figure.
+  // Only the risk vendor publishes it, and `liveFeatures` removes this from the
+  // set when that vendor actually returns a count — so an absent count keeps
+  // the LP penalty at full weight rather than buying a dispersion discount off
+  // a zero nobody computed.
+  push("lpProviders");
+  // The deployer's track record. Present on most pump.fun mints and absent on
+  // plenty of others, and the difference matters: an absent devMints arriving
+  // as zero makes `max(1, 0)` and reads as "first mint from this deployer — no
+  // track record either way", which is a claim about the wallet rather than an
+  // admission that nothing was published about it.
+  if (m.audit?.devMints === undefined) push("devHistory");
 
   return {
     mint: m.id,
@@ -313,8 +352,28 @@ export function toSnapshot(m: JupMint, now = Date.now()): TokenSnapshot {
     volumeAccel: accel,
     holderGrowthPct: s24h.holderChange,
     liquidityChangePct: s24h.liquidityChange,
+    // All four windows, carried whole. `buys1h`/`sells1h` above are the two the
+    // feature vector reads; these are the twelve figures a reader actually
+    // scans, and they were already in this payload being thrown away.
+    windows: windowsOf(m),
     unmeasured,
   };
+}
+
+/** Every interval this payload broke out, or undefined if it broke out none. */
+function windowsOf(m: JupMint): Partial<Record<TradeWindowKey, TradeWindow>> | undefined {
+  const out: Partial<Record<TradeWindowKey, TradeWindow>> = {};
+  const pairs: [TradeWindowKey, JupStats | undefined][] = [
+    ["5m", m.stats5m],
+    ["1h", m.stats1h],
+    ["6h", m.stats6h],
+    ["24h", m.stats24h],
+  ];
+  for (const [key, stats] of pairs) {
+    const w = windowOf(stats);
+    if (w) out[key] = w;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 /**

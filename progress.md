@@ -41,11 +41,41 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 
 | # | Stream | Reference to beat | State |
 |---|---|---|---|
-| W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | 🟡 round 2 complete · awaiting critic |
-| W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | 🟡 round 2 partial · critical item done |
-| W3 | Token deep-dive | Photon token page, GMGN, DexScreener | 🟡 round 3 repaired · awaiting critic |
-| W4 | UI/UX + performance craft | Axiom & Photon density and latency | ⏸ after W1–W3 |
-| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | ⏸ after W1–W3 |
+| W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | ✅ shipped in 1.4.0 · critic list open |
+| W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | 🔨 round 2 · graduation latency |
+| W3 | Token deep-dive | Photon token page, GMGN, DexScreener | 🔨 round 3 · LP over-penalty |
+| W4 | UI/UX + performance craft | Axiom & Photon density and latency | ⏸ until W1–W3 pass |
+| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | ⏸ until W1–W3 pass |
+| — | **Blind critic on the MERGED 1.4.0 build** | all of the above | 🔍 reviewing |
+
+### Why a critic on the merged build
+
+Every prior review looked at ONE stream in its own worktree. Eleven files were
+touched by more than one stream and eight conflicts were resolved by hand —
+**nobody has reviewed the result.** Cross-stream regressions are the one class no
+existing review could have caught: a shared engine change breaking another
+stream's assumption, a hand-resolved conflict dropping a line, two pages
+disagreeing about the same field.
+
+### Open, by stream
+
+**W2 — the biggest measurable gap in the app.** Graduations arrive at p50
+**123.6s** against Axiom's seconds. Free to fix: pump.fun's own `/coins` is
+keyless and measured **2.0s fresh** where GeckoTerminal is 89s stale. Also: the
+lag stat structurally excludes graduations, and three overclaims in copy
+including a rate-limit headroom comment that measurement contradicts (150 calls
+at 1/s → **93 × 429**).
+
+**W3 — the same trap, a third time.** LP lock charges PUMP its largest single
+penalty over **43 independent LP providers**, under a red line reading "the pool
+can be withdrawn" that is simply false at that provider count. Round 2 demoted
+the flag and left the penalty at maximum. Plus a vendor zero (`totalLpProviders:
+0` on 30 of 30 fresh mints) that is the identical bug class to one already fixed
+on a sibling field in the same panel.
+
+**W1 — open but shipped.** Electron main-process RPC proxy for 30+ day wallet
+age, factual labels (exchange/program identification, which Solscan publishes
+free), and `/whales` discovery still simulated.
 
 Wave 1 (W1–W3) is running in parallel, each in its own git worktree. Blind
 critics are dispatched as each artifact lands.

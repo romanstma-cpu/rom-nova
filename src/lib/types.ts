@@ -1323,9 +1323,17 @@ export interface BacktestResult {
 export interface ProviderHealth {
   name: string;
   mode: "live" | "demo" | "disabled";
-  status: "ok" | "degraded" | "down";
-  latencyMs: number;
-  errorRatePct: number;
+  /**
+   * `unknown` is a real state and the most common one on a cold /status load:
+   * the provider is enabled and simply has not been asked anything yet. It used
+   * to report `ok`, which is a clean bill of health issued without an
+   * examination.
+   */
+  status: "ok" | "degraded" | "down" | "unknown";
+  /** Undefined until at least one request has completed — 0ms is not "fast". */
+  latencyMs?: number;
+  /** Undefined until at least one request — 0% over zero requests is not "reliable". */
+  errorRatePct?: number;
   lastSuccessTs: number;
   lastDataTs: number;
   note?: string;

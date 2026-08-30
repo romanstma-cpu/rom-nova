@@ -14,6 +14,7 @@ import { SolanaRpcSecurityProvider } from "./solana-rpc";
 import { SqdFlowProvider } from "./sqd";
 import { RugCheckRiskProvider } from "./rugcheck";
 import { JupiterHoldingsProvider } from "./holdings";
+import { lastOutcome } from "./health-log";
 import type {
   MarketDataProvider,
   ProviderSet,
@@ -296,7 +297,31 @@ export function dataMode(): DataMode {
   const bounded: string[] = [];
 
   (p.token.name === "demo" ? simulated : live).push("tokens");
-  (p.market.name === "demo" ? simulated : live).push("prices & candles");
+  // Candles are the one capability here whose CONFIGURATION and whose BEHAVIOUR
+  // routinely disagree. The provider name says a real adapter is wired; it says
+  // nothing about whether the vendor is answering, and GeckoTerminal rate-limits
+  // easily enough that this repo already serialises it behind a 2.1s gap. Worse,
+  // its 429 carries no `access-control-allow-origin` header, so a browser sees
+  // `TypeError: Failed to fetch` — an outage, as far as anything downstream can
+  // tell. The chip went on advertising "prices & candles — LIVE" while every
+  // chart on the site was quietly rendering the simulator.
+  //
+  // So this reads the last actual OUTCOME where there is one, and falls back to
+  // the configuration only before anything has been fetched.
+  if (p.market.name === "demo") {
+    simulated.push("prices & candles");
+  } else {
+    const health = lastOutcome("candles");
+    if (health && !health.ok) {
+      bounded.push(
+        `price history — the last candle request to ${p.market.name} FAILED` +
+          (health.note ? ` (${health.note})` : "") +
+          "; charts are falling back, and a rate-limited response is indistinguishable from an outage from a browser",
+      );
+    } else {
+      live.push("prices & candles");
+    }
+  }
   (p.security.name === "demo" ? simulated : live).push("mint & freeze authority");
   (p.flow ? live : simulated).push("whale flow");
   // Wallet activity is real whenever the chain reader is on, whatever the

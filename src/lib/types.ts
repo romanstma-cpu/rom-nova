@@ -97,6 +97,40 @@ export type UnmeasuredField =
   | "momentum"
   | "volumeAccel"
   /**
+   * POOLED LIQUIDITY. The field this list was built for, and the one it was
+   * missing.
+   *
+   * Jupiter returns `liquidity: undefined` on a freshly-minted token — its
+   * indexer has not priced the pool yet — and the snapshot builder coerced that
+   * to `0` while the LAUNCH builder in the same file passed it through and
+   * rendered "the source has not priced this pool yet". One field, two
+   * behaviours, twelve lines apart.
+   *
+   * The coerced side is the one that reaches the scorer, and a zero there is
+   * not a small error. Measured on 747MxrN9…pump at one minute old: "Liquidity
+   * Quality -16.4, $0 pooled" against "-1.0, $3.6K pooled" for the same mint
+   * minutes later, with Jupiter's API reporting liquidity=3160.13 the whole
+   * time. Every new mint's score was depressed by roughly sixteen points by an
+   * absence rendered as a confident zero — on precisely the population a
+   * launch terminal exists to look at.
+   *
+   * The liquidity factor also gates `exitDepthUsd`, `regimeOf` and the
+   * profiles' `minLiquidityUsd` floor, so this is the widest-blast-radius
+   * absence in the vector.
+   */
+  | "liquidity"
+  /**
+   * 24h CHANGE in that pool, and in the holder count.
+   *
+   * Separate from the levels, because a source can publish a level and no
+   * history — which is exactly the case on a token minutes old. Both were
+   * `?? 0` in `liveFeatures`, so a mint four minutes into its life scored
+   * "liquidity +0.0% vs 24h ago" and "holders +0.0% over 24h": measurements of
+   * a period that has not happened yet.
+   */
+  | "liquidityChange"
+  | "holderGrowth"
+  /**
    * Wallet flow. Real when a flow provider is configured and nothing at all
    * without one — and until it was declarable, the whale and smart-money
    * factors scored their placeholder zeros as "nobody is accumulating this",

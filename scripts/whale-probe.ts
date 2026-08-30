@@ -10,7 +10,7 @@ void (async () => {
   for (const r of res.data) {
     const absent = (r.unmeasured ?? []).includes("whaleFlow" as never);
     console.log(
-      `${r.symbol.padEnd(12)} whaleFlow=${absent ? "UNMEASURED" : r.whaleFlow6hUsd.toFixed(2).padStart(12)}  ` +
+      `${r.symbol.padEnd(12)} whaleFlow=${absent ? "UNMEASURED" : r.whaleFlowUsd.toFixed(2).padStart(12)}  ` +
         `window=${r.flowMinutes ?? "—"}min complete=${r.flowComplete ?? "—"}  ` +
         `movers=${r.topWallets?.length ?? 0}  ` +
         `biggest=${r.topWallets?.[0] ? `$${r.topWallets[0].usd.toFixed(0)}` : "—"}`,

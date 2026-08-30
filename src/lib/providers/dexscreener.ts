@@ -53,6 +53,11 @@ const DEX_UNMEASURED: readonly UnmeasuredField[] = [
   // findings: "one party holds the pool" and "first mint from this wallet".
   "lpProviders",
   "devHistory",
+  // No 24h history for the pool or the holder base. Both were `?? 0` at the
+  // engine seam, which scored "flat" — a measurement of a trend nobody
+  // published, and on a token minutes old, of a day that has not happened.
+  "liquidityChange",
+  "holderGrowth",
 ];
 
 interface DexPair {

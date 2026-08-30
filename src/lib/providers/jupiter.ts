@@ -276,6 +276,21 @@ export function toSnapshot(m: JupMint, now = Date.now()): TokenSnapshot {
   const unmeasured: UnmeasuredField[] = [];
   const push = (f: UnmeasuredField) => unmeasured.push(f);
 
+  // POOLED LIQUIDITY, declared like everything else rather than coerced.
+  //
+  // This adapter had two answers for one field: the launch builder below passes
+  // `m.liquidity` through undefined and the feed prints "the source has not
+  // priced this pool yet", while the snapshot coerced the same undefined to a
+  // zero that the SCORER reads. Measured on 747MxrN9…pump at one minute old,
+  // Liquidity Quality charged -16.4 for "$0 pooled" while Jupiter's own API was
+  // reporting liquidity=3160.13 for that mint.
+  const liquidity = Number.isFinite(m.liquidity) ? m.liquidity : undefined;
+  if (liquidity === undefined) push("liquidity");
+  // And the two 24h CHANGES. A token four minutes old has no 24h history, and
+  // "+0.0% vs 24h ago" is a measurement of a period that has not happened.
+  if (s24h.liquidityChange === undefined) push("liquidityChange");
+  if (s24h.holderChange === undefined) push("holderGrowth");
+
   const top10 = frac(m.audit?.topHoldersPercentage);
   if (top10 === undefined) push("top10Pct");
   const devHolds = frac(m.audit?.devBalancePercentage);
@@ -327,7 +342,9 @@ export function toSnapshot(m: JupMint, now = Date.now()): TokenSnapshot {
     priceUsd: m.usdPrice ?? 0,
     marketCapUsd: m.mcap ?? 0,
     fdvUsd: m.fdv ?? m.mcap ?? 0,
-    liquidityUsd: m.liquidity ?? 0,
+    // Still a number, because the field is not optional — but it is declared
+    // unmeasured above when it is this default, so nothing scores it.
+    liquidityUsd: liquidity ?? 0,
     // Real 24h volume, both sides, rather than a figure divided down from it.
     volume24hUsd: (s24h.buyVolume ?? 0) + (s24h.sellVolume ?? 0),
     // Genuine 1h counts. The previous version divided 24h counts by 24, which

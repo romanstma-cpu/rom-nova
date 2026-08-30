@@ -25,6 +25,9 @@ import {
 import { DemoStore } from "@/lib/demo/store";
 import { handleCandles, handleTokenDetail, MINT_SHAPE } from "@/lib/api/handlers";
 import { safePath } from "@/lib/local";
+import { whaleFlowCell } from "@/lib/client";
+import { bucketFor } from "@/lib/providers/jupiter-chart";
+import { lastOutcome, noteOutcome, resetOutcomes, HEALTH_TTL_MS } from "@/lib/providers/health-log";
 import { computeSignal, auditFactors, scoreFeatures, PROFILES, RISK_FACTORS } from "@/lib/engine/signals";
 import { extractFeatures } from "@/lib/engine/features";
 import { authorityState } from "@/lib/providers/jupiter";
@@ -208,6 +211,35 @@ describe("a vendor's zero that means 'not indexed yet'", () => {
     });
     const r = await new RugCheckRiskProvider().getTokenRisk(MINT, true);
     expect(r?.supply).toBeUndefined();
+  });
+});
+
+describe("the chart's second source, and a chip that stops guessing", () => {
+  it("asks for a bucket the endpoint will actually fill", () => {
+    // Hourly wherever the bar cap holds the window, because hourly is what the
+    // rest of the app plots and what the primary serves.
+    const day = 86_400_000;
+    expect(bucketFor(Date.now() - 7 * day, Date.now()).interval).toBe("1_HOUR");
+    expect(bucketFor(Date.now() - 7 * day, Date.now()).candles).toBe(168);
+    // And coarsens rather than truncating when the window outruns the cap.
+    expect(bucketFor(Date.now() - 400 * day, Date.now()).interval).not.toBe("1_HOUR");
+    expect(bucketFor(Date.now() - 400 * day, Date.now()).candles).toBeLessThanOrEqual(1000);
+  });
+
+  it("records what the last candle fetch DID, not what is configured", () => {
+    // `dataMode()` decided "prices & candles — LIVE" from the provider's name,
+    // which is a fact about configuration. GeckoTerminal's 429 carries no
+    // access-control-allow-origin header, so a browser sees "Failed to fetch"
+    // and the chip advertised live candles while every chart fell back.
+    resetOutcomes();
+    expect(lastOutcome("candles")).toBeNull();
+    noteOutcome("candles", false, "429");
+    expect(lastOutcome("candles")).toMatchObject({ ok: false, note: "429" });
+    // A stale outcome stops describing "now" and must not keep asserting either
+    // answer — null means "nothing tried lately", not "it worked".
+    const later = Date.now() + HEALTH_TTL_MS + 1;
+    expect(lastOutcome("candles", later)).toBeNull();
+    resetOutcomes();
   });
 });
 
@@ -711,6 +743,150 @@ describe("an unmeasured or midpoint input cannot produce a positive contribution
       const s = scoreFeatures(strongVector({ regime }), demoMint, now, "balanced");
       expect(auditFactors(s).reconciled, `reconciliation broke in ${regime}`).toBe(s.score);
     }
+  });
+});
+
+// ------------------------- an unpriced pool is not a pool worth nothing
+
+describe("a pool nobody has priced cannot depress the score", () => {
+  const factorRow = (s: ReturnType<typeof scoreFeatures>, key: string) =>
+    auditFactors(s).rows.find((r) => r.key === key)!;
+
+  it("stands the liquidity factor down instead of scoring $0", () => {
+    // The whole defect in one assertion. `log10(max(0,1))/6.5` is zero, which
+    // is the FLOOR of this factor — an absence rendered as the worst possible
+    // measurement, measured at -16.4 points on a one-minute-old mint whose
+    // pool the same API was simultaneously reporting at $3,160.
+    const blind = scoreFeatures(
+      strongVector({ liquidityUsd: 0, exitDepthUsd: 0, unmeasured: ["liquidity"] }),
+      demoMint,
+      now,
+      "aggressive",
+    );
+    expect(factorRow(blind, "liquidity").measured).toBe(false);
+    expect(factorRow(blind, "liquidity").contribution).toBe(0);
+  });
+
+  it("takes the derived factors down with it", () => {
+    // `exitDepthUsd` is 18% of the pool, so an unpriced pool made it zero —
+    // and zero is the MAXIMUM severity Exit Liquidity Risk can express. A full
+    // penalty charged for a number nobody published.
+    const blind = scoreFeatures(
+      strongVector({ liquidityUsd: 0, exitDepthUsd: 0, unmeasured: ["liquidity"] }),
+      demoMint,
+      now,
+      "aggressive",
+    );
+    for (const key of ["exit_liquidity", "structure"]) {
+      expect(factorRow(blind, key).measured, `${key} reads a pool nobody priced`).toBe(false);
+      expect(factorRow(blind, key).contribution).toBe(0);
+    }
+    // And the high-severity "Thin exit liquidity ~$0" flag must not fire.
+    expect(blind.risks.some((r) => r.key === "exit" && r.severity === "high")).toBe(false);
+    // Something still says the pool is unknown — silence is not the fix.
+    expect(blind.risks.some((r) => r.key === "liquidity_unknown")).toBe(true);
+  });
+
+  it("does not enforce a liquidity floor against a pool it cannot see", () => {
+    const blind = scoreFeatures(
+      strongVector({ liquidityUsd: 0, exitDepthUsd: 0, unmeasured: ["liquidity"] }),
+      demoMint,
+      now,
+      "conservative",
+    );
+    // "liquidity $0 below the Conservative floor of $150.0K" was a definite
+    // claim about a token standing in for an indexer being behind.
+    expect(blind.noTradeReason ?? "").not.toMatch(/\$0 below/);
+    expect(blind.noTradeReason ?? "").toMatch(/no source has priced this pool/);
+  });
+
+  it("charges nothing where the bare zero charged fourteen points", () => {
+    // The review's before/after, measured on CONTRIBUTIONS rather than on the
+    // score — a vector strong enough to isolate the liquidity factors also
+    // saturates the 0-100 ceiling, which would hide exactly what is being
+    // asserted. The points are the claim; the clamp is not.
+    const pooled = (over: Partial<FeatureVector>) => {
+      const s = scoreFeatures(strongVector(over), demoMint, now, "aggressive");
+      const rows = auditFactors(s).rows;
+      return ["liquidity", "structure", "exit_liquidity"]
+        .map((k) => rows.find((r) => r.key === k)!.contribution)
+        .reduce((a, b) => a + b, 0);
+    };
+    const bare = pooled({ liquidityUsd: 0, exitDepthUsd: 0 });
+    const declared = pooled({ liquidityUsd: 0, exitDepthUsd: 0, unmeasured: ["liquidity"] });
+    // What the bug cost: three factors, all reading one absent number.
+    expect(bare).toBeLessThan(-10);
+    // What it costs now: nothing at all, in either direction.
+    expect(declared).toBe(0);
+  });
+
+  it("abstains rather than letting the stand-down flatter the token", () => {
+    // The other half, and the reason standing down is safe: removing three
+    // penalties makes an unpriced token score HIGHER, so something has to stop
+    // that reading as a recommendation. The liquidity gate does.
+    const blind = scoreFeatures(
+      strongVector({ liquidityUsd: 0, exitDepthUsd: 0, unmeasured: ["liquidity"] }),
+      demoMint,
+      now,
+      "aggressive",
+    );
+    expect(blind.label).toBe("NO TRADE");
+    expect(blind.noTradeReason).toMatch(/no source has priced this pool/);
+  });
+
+  it("keeps the liquidity trend out of the PROSE when it was not published", () => {
+    const s = scoreFeatures(
+      strongVector({ liquidityChangePct: 0, unmeasured: ["liquidityChange"] }),
+      demoMint,
+      now,
+      "balanced",
+    );
+    const row = factorRow(s, "liquidity");
+    // Still scored — standing the whole factor down for a missing trend would
+    // throw away the most important number on the page on every fresh mint.
+    expect(row.measured).toBe(true);
+    // But it must not CLAIM a measurement it does not have.
+    expect(row.explanation).not.toMatch(/\+0\.0% vs 24h ago/);
+    expect(row.explanation).toMatch(/no 24h history/);
+  });
+
+  it("stands holder growth down rather than scoring a day that has not happened", () => {
+    const s = scoreFeatures(
+      strongVector({ holderGrowthPct: 0, unmeasured: ["holderGrowth"] }),
+      demoMint,
+      now,
+      "balanced",
+    );
+    expect(factorRow(s, "holder_growth").measured).toBe(false);
+    expect(factorRow(s, "holder_growth").contribution).toBe(0);
+  });
+});
+
+// ------------------------------------- the window the whale column measures
+
+describe("a ten-minute scan is not a six-hour window", () => {
+  it("colours a measured zero neutral, not green", () => {
+    // Production showed $0 on eleven of twelve scanner rows, all rendered
+    // green, reading as "no whale sold this in six hours". It meant "nobody
+    // moved $20,000 in the last ten minutes".
+    expect(whaleFlowCell(0, 10).cls).toBe("dim");
+    expect(whaleFlowCell(1_000, 10).cls).toBe("pos");
+    expect(whaleFlowCell(-1_000, 10).cls).toBe("neg");
+  });
+
+  it("names the window it actually covered, per row", () => {
+    // Per row rather than from a constant, because a byte-budgeted read that
+    // stopped at four minutes covered four, not ten.
+    expect(whaleFlowCell(0, 4).title).toContain("last 4 min");
+    expect(whaleFlowCell(0, 10).title).toContain("NOT six hours");
+    // And says so honestly when nothing recorded the window.
+    expect(whaleFlowCell(0, undefined).title).toContain("a short chain scan");
+  });
+
+  it("stops the invalidation copy promising a 6h whale window", () => {
+    const s = scoreFeatures(strongVector(), demoMint, now, "balanced");
+    expect(s.invalidation.some((i) => /over 6h/.test(i))).toBe(false);
+    expect(s.invalidation.some((i) => /whale netflow/.test(i))).toBe(true);
   });
 });
 

@@ -21,6 +21,8 @@ import { buildFlowSeries, buildTokenRows, buildWalletRows } from "./rows";
 import { DEMO, candlesFor, trendingRows, walletProfile } from "./source";
 import { liveTokenDetail } from "./detail";
 import { isPlausibleAddress } from "../providers/wallet-chain";
+import { resolveRpcRoute } from "../providers/rpc-endpoint";
+import { identifyAccount } from "../providers/account-kind";
 import { launchFeed, type LaunchFeed } from "./launches";
 import { dataMode, providerHealth } from "../providers/registry";
 import type { AlertCondition, BacktestConfig, StrategyProfileId } from "../types";
@@ -201,7 +203,52 @@ export async function handleTokenDetail(
     if (liveError && err instanceof ApiError && err.status === 404) {
       throw new ApiError(503, `live data unavailable — ${liveError}. This is a source problem, not a verdict on the token.`);
     }
+    // Before giving up: ASK THE CHAIN WHAT THIS ADDRESS IS.
+    //
+    // "unknown mint" is a definite claim about a token, and the commonest way
+    // to reach it is pasting a WALLET into the token page. `/whale` already
+    // handles the mirror case — give it a mint and it says "this is a TOKEN
+    // MINT, not a wallet" and offers the right page — and this side answered
+    // with two words that explain nothing.
+    //
+    // One RPC call, on a path that is already an error, so it costs nothing in
+    // the normal case.
+    if (err instanceof ApiError && err.status === 404) {
+      const redirect = await whatIsThisAddress(mint);
+      if (redirect) throw new ApiError(404, redirect);
+    }
     throw err;
+  }
+}
+
+/**
+ * A better sentence than "unknown mint", when the chain can supply one.
+ *
+ * Returns null when nothing useful can be said — a failed RPC call must not
+ * turn into a confident claim about the address, so the caller keeps its
+ * original error.
+ */
+async function whatIsThisAddress(address: string): Promise<string | null> {
+  try {
+    const route = await resolveRpcRoute();
+    if (!route?.transactions) return null;
+    // The same endpoint `walletProfile` identifies against, so the two pages
+    // cannot disagree about what an address is.
+    const id = await identifyAccount(address, route.transactions);
+    if (id.kind === "wallet") {
+      return `that is a WALLET, not a token mint — open it on the wallet page instead: /whale?a=${address}`;
+    }
+    if (id.kind === "token-account") {
+      return `${id.detail}. A token account is not a mint and not a wallet; the owner named above is the address to look up.`;
+    }
+    if (id.kind === "program" || id.kind === "empty") return id.detail;
+    // A real mint that nothing lists is the honest original answer, said better.
+    if (id.kind === "mint") {
+      return "this IS a token mint, but no source in this stack lists it — no pool, no price, no history. That is an absence of coverage, not a verdict on the token.";
+    }
+    return null;
+  } catch {
+    return null;
   }
 }
 

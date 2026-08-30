@@ -696,15 +696,7 @@ function HolderPanel({ detail }: { detail: LiveTokenDetail }) {
                 <tr key={`${r.rank}-${r.owner}`} className="trow">
                   <td className="px-3 py-1 faint">{r.rank}</td>
                   <td className="px-2">
-                    <a
-                      className="hover:text-[var(--accent)]"
-                      href={`${EXPLORER}${r.owner}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      title={r.account ? `owner ${r.owner}\ntoken account ${r.account}` : r.owner}
-                    >
-                      {shortAddr(r.owner)} ↗
-                    </a>
+                    <AddressLinks owner={r.owner} account={r.account} />
                   </td>
                   <td className="px-2">
                     {r.isCreator && <span className="chip chip-neg mr-1">deployer</span>}
@@ -775,15 +767,7 @@ function FlowPanelView({ detail }: { detail: LiveTokenDetail }) {
             {f.movers.map((m) => (
               <tr key={m.owner} className="trow">
                 <td className="px-3 py-1">
-                  <a
-                    className="hover:text-[var(--accent)]"
-                    href={`${EXPLORER}${m.owner}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    title={m.owner}
-                  >
-                    {shortAddr(m.owner)} ↗
-                  </a>
+                  <AddressLinks owner={m.owner} />
                 </td>
                 <td className={`px-2 ${m.usd >= 0 ? "pos" : "neg"}`}>{m.usd >= 0 ? "BUY" : "SELL"}</td>
                 <td className="text-right px-2 dim">{fmtNum(Math.abs(m.tokens))}</td>
@@ -1212,6 +1196,41 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="faint text-[10.5px]">{label}</span>
       <span className="num">{children}</span>
     </div>
+  );
+}
+
+/**
+ * An on-chain address, linked to BOTH places a reader might want it.
+ *
+ * Every address in the holder table and the flow table pointed at solscan and
+ * nowhere else — so the most natural click in the product, from a wallet that
+ * just moved size to that wallet's profile, left the product entirely. The
+ * scanner made the opposite choice for its own mover list, and these two tables
+ * were the ones that did not.
+ *
+ * Nova's own page leads, because that is the one this app can say something
+ * about; the explorer keeps its arrow and its new tab.
+ */
+function AddressLinks({ owner, account }: { owner: string; account?: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <Link
+        className="hover:text-[var(--accent)]"
+        href={`/whale?a=${owner}`}
+        title={account ? `owner ${owner}\ntoken account ${account}\n\nOpen this wallet in Nova` : `${owner}\n\nOpen this wallet in Nova`}
+      >
+        {shortAddr(owner)}
+      </Link>
+      <a
+        className="faint hover:text-[var(--accent)] text-[10px]"
+        href={`${EXPLORER}${owner}`}
+        target="_blank"
+        rel="noreferrer"
+        title="open on solscan"
+      >
+        ↗
+      </a>
+    </span>
   );
 }
 

@@ -145,15 +145,42 @@ export const FACTORS: FactorDef[] = [
   {
     key: "liquidity",
     name: "Liquidity Quality",
+    /**
+     * Needs the POOL, not the trend in it, and the asymmetry is deliberate.
+     *
+     * The level is the defect the review caught: `liquidity: undefined` from an
+     * unindexed new mint became `$0`, and `log10(max(0,1))/6.5` is zero — a
+     * total wipeout of the factor, measured at -16.4 points on a token whose
+     * pool Jupiter was simultaneously reporting as $3,160. That is an absence
+     * masquerading as the worst possible measurement, so the factor stands
+     * down instead.
+     *
+     * The 24h CHANGE is not declared, because standing the whole factor down
+     * for a missing trend would throw away the single most important number on
+     * the page on every fresh mint — trading a false reading for no reading at
+     * all. Its multiplier bottoms out at 0.7 for a flat pool, and a flat pool
+     * IS the median across the trending list, so an unknown trend scoring 0.7
+     * lands a token where its typical peer already sits rather than penalising
+     * it. What was wrong there was the PROSE, which claimed a measurement:
+     * "+0.0% vs 24h ago" on a token four minutes old.
+     */
+    needs: ["liquidity"],
     normalize: (f) => clamp(Math.log10(Math.max(f.liquidityUsd, 1)) / 6.5) * clamp(0.7 + f.liquidityChangePct / 60),
-    explain: (f) => `${usd(f.liquidityUsd)} pooled, ${pct(f.liquidityChangePct)} vs 24h ago`,
+    explain: (f) =>
+      (f.unmeasured ?? []).includes("liquidityChange")
+        ? `${usd(f.liquidityUsd)} pooled — no 24h history for this pool, so only the depth is scored`
+        : `${usd(f.liquidityUsd)} pooled, ${pct(f.liquidityChangePct)} vs 24h ago`,
   },
   {
     key: "holder_growth",
     name: "Holder Growth",
     normalize: (f) => clamp(0.5 + Math.tanh(f.holderGrowthPct / 15) * 0.5),
     explain: (f) => `holders ${pct(f.holderGrowthPct)} over 24h`,
-    needs: ["holders"],
+    // `holders` is the count; `holderGrowth` is the change in it. A source can
+    // publish the first without the second, and on a token minutes old it
+    // always does — "holders +0.0% over 24h" was a scored measurement of a day
+    // that has not happened.
+    needs: ["holders", "holderGrowth"],
   },
   {
     key: "distribution",
@@ -181,6 +208,10 @@ export const FACTORS: FactorDef[] = [
   {
     key: "structure",
     name: "Market Structure",
+    // `exitDepthUsd` is derived from the pool — 18% of it — so an unpriced pool
+    // makes this "nothing is exitable", which is a finding rather than the
+    // silence it is. The declaration has to follow the derivation.
+    needs: ["liquidity"],
     normalize: (f) => clamp(0.5 + f.buySellImbalance * 0.5) * clamp(0.5 + Math.tanh(f.exitDepthUsd / 60_000) * 0.5),
     explain: (f) =>
       `buy/sell imbalance ${(f.buySellImbalance * 100).toFixed(0)}%, ~${usd(f.exitDepthUsd)} exitable within 5% impact`,
@@ -354,6 +385,11 @@ export const RISK_FACTORS: FactorDef[] = [
   {
     key: "exit_liquidity",
     name: "Exit Liquidity Risk",
+    // Same derivation, same declaration. This one is the dangerous direction:
+    // an unpriced pool made `exitDepthUsd` zero, which is the MAXIMUM severity
+    // this factor can express — a full penalty charged for a number nobody
+    // published.
+    needs: ["liquidity"],
     normalize: (f) => clamp(1 - Math.tanh(f.exitDepthUsd / 40_000)),
     explain: (f) => `only ~${usd(f.exitDepthUsd)} exitable near current price`,
   },
@@ -626,9 +662,18 @@ function riskFlags(f: FeatureVector): RiskFlag[] {
   }
   if (has("insiderPct") && f.insiderPct > 0.15) add("insider", "Insider exposure", "high", `insider-flagged top holders hold ~${(f.insiderPct * 100).toFixed(0)}% of supply`);
   if (has("bundlerPct") && has("sniperPct") && f.bundlerPct + f.sniperPct > 0.18) add("bundler", "Bundler/sniper supply", "medium", `${((f.bundlerPct + f.sniperPct) * 100).toFixed(0)}% of supply from bundlers/snipers`);
-  if (f.exitDepthUsd < 15_000) add("exit", "Thin exit liquidity", "high", `~${usd(f.exitDepthUsd)} exitable near price`);
-  else if (f.exitDepthUsd < 40_000) add("exit", "Modest exit liquidity", "medium", `~${usd(f.exitDepthUsd)} exitable near price`);
-  if (f.liquidityChangePct < -25) add("liq_drop", "Liquidity draining", "high", `pool ${pct(f.liquidityChangePct)} in 24h`);
+  // Both of these read the POOL, directly or through `exitDepthUsd`. An
+  // unpriced pool is a zero, and a zero fires the HIGH-severity branch of each
+  // — "Thin exit liquidity: ~$0 exitable near price" and, at scale, the two
+  // high-severity flags needed to trip EXTREME RISK, all from an absence. A
+  // token nobody has indexed is not a token nobody can sell.
+  if (has("liquidity")) {
+    if (f.exitDepthUsd < 15_000) add("exit", "Thin exit liquidity", "high", `~${usd(f.exitDepthUsd)} exitable near price`);
+    else if (f.exitDepthUsd < 40_000) add("exit", "Modest exit liquidity", "medium", `~${usd(f.exitDepthUsd)} exitable near price`);
+  } else {
+    add("liquidity_unknown", "Pool not priced", "medium", "no source has published this pool's depth yet, so nothing here can say what is exitable");
+  }
+  if (has("liquidityChange") && f.liquidityChangePct < -25) add("liq_drop", "Liquidity draining", "high", `pool ${pct(f.liquidityChangePct)} in 24h`);
   if (has("organicScore") && f.organicScore < 0.35) add("organic", "Low organic activity", "medium", "trading pattern looks partly inorganic");
   if (f.ageHours < 24) add("age", "Very young token", "medium", `${f.ageHours.toFixed(0)} hours since launch`);
   if (f.momentum24h > 150) add("extended", "Vertically extended", "medium", `24h ${pct(f.momentum24h)} — chase risk`);
@@ -1049,7 +1094,12 @@ export function scoreFeatures(
   } else if (coverage < 0.6) {
     noTrade = `only ${(coverage * 100).toFixed(0)}% of the model's inputs were available`;
   } else if (confidence < profile.minConfidence) noTrade = `confidence ${(confidence * 100).toFixed(0)}% below the ${profile.name} floor`;
-  else if (f.liquidityUsd < profile.minLiquidityUsd) noTrade = `liquidity ${usd(f.liquidityUsd)} below the ${profile.name} floor of ${usd(profile.minLiquidityUsd)}`;
+  // The liquidity floor, which must not be enforced against a pool nobody has
+  // priced. "liquidity $0 below the Balanced floor of $40.0K" was a definite
+  // claim about a token standing in for the indexer not having caught up.
+  else if ((f.unmeasured ?? []).includes("liquidity")) {
+    noTrade = `no source has priced this pool yet, so the ${profile.name} liquidity floor of ${usd(profile.minLiquidityUsd)} cannot be tested`;
+  } else if (f.liquidityUsd < profile.minLiquidityUsd) noTrade = `liquidity ${usd(f.liquidityUsd)} below the ${profile.name} floor of ${usd(profile.minLiquidityUsd)}`;
   // The generic count is suppressed when a veto is present, because the veto is
   // the SPECIFIC version of the same claim. "4 independent high-severity risks"
   // and "the mint authority is LIVE" describe one token; the second is the one
@@ -1073,9 +1123,13 @@ export function scoreFeatures(
   const missing = f.unmeasured ?? [];
   const invalidation = [
     `liquidity falls below ${usd(f.liquidityUsd * 0.65)}`,
+    // "over 6h" was a promise this stack cannot keep. The flow read is a short,
+    // byte-budgeted chain scan — ten minutes, truncated further when the budget
+    // bites — and the token page said so on the same screen. Naming the window
+    // honestly is the whole fix; widening it is not affordable.
     missing.includes("whaleFlow")
-      ? "whale flow becomes observable and shows net distribution — no flow source is answering right now"
-      : `whale netflow turns below ${usd(-Math.max(50_000, Math.abs(f.whaleNetFlowUsd)))} over 6h`,
+      ? "whale flow becomes observable and shows net distribution — no whale-sized move has been seen in the short window this reads"
+      : `whale netflow turns below ${usd(-Math.max(50_000, Math.abs(f.whaleNetFlowUsd)))} on a subsequent flow read (a ten-minute chain scan, not a 6h window)`,
     f.smartMoneyWallets > 0 ? "tracked smart money flips to net selling" : "no smart-money confirmation appears within 24h",
     `price loses the 24h structure (${pct(-Math.max(12, Math.abs(f.momentum24h) * 0.4))} from here)`,
     missing.includes("devSold")

@@ -62,6 +62,10 @@ const GT_UNMEASURED: readonly UnmeasuredField[] = [
   // silences — see the same two lines in the DEX Screener adapter.
   "lpProviders",
   "devHistory",
+  // Same two absences as the DEX Screener adapter, for the same reason: this
+  // API publishes levels, not the 24h change in them.
+  "liquidityChange",
+  "holderGrowth",
 ];
 
 /**

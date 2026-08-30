@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useApi, fmtUsd, fmtPct, fmtNum, fmtAge } from "@/lib/client";
+import { useApi, fmtUsd, fmtPct, fmtNum, fmtAge, whaleFlowCell } from "@/lib/client";
 import { Score, RiskBadge, TokenMark, Freshness, Empty } from "@/components/ui/bits";
 import type { TokenRow } from "@/lib/api/rows";
 
@@ -78,7 +78,7 @@ export default function TokenRadar() {
               {th("volumeAccel", "Vol accel")}
               {th("holders", "Holders")}
               {th("holderGrowthPct", "Δ24h")}
-              {th("whaleFlow6hUsd", "Whale 6h")}
+              {th("whaleFlowUsd", "Whale flow")}
               {th("smFlow6hUsd", "Smart 6h")}
               {th("top10Pct", "Top10")}
               {th("organicScore", "Organic")}
@@ -107,7 +107,12 @@ export default function TokenRadar() {
                 <td className={`text-right px-2 ${r.volumeAccel > 1.6 ? "warn" : "dim"}`}>{r.volumeAccel.toFixed(1)}×</td>
                 <td className="text-right px-2 dim">{fmtNum(r.holders)}</td>
                 <Cell v={r.holderGrowthPct} />
-                <td className={`text-right px-2 ${r.whaleFlow6hUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(r.whaleFlow6hUsd)}</td>
+                <td
+                  className={`text-right px-2 ${whaleFlowCell(r.whaleFlowUsd, r.flowMinutes).cls}`}
+                  title={whaleFlowCell(r.whaleFlowUsd, r.flowMinutes).title}
+                >
+                  {fmtUsd(r.whaleFlowUsd)}
+                </td>
                 <td className={`text-right px-2 ${r.smFlow6hUsd > 0 ? "pos" : r.smFlow6hUsd < 0 ? "neg" : "faint"}`}>
                   {r.smFlow6hUsd !== 0 ? fmtUsd(r.smFlow6hUsd) : "—"}
                 </td>

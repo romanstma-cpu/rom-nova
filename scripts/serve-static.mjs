@@ -41,6 +41,26 @@ http
     }
     p = p.slice("/nova".length);
     let file = path.join(root, p);
+
+    // A slashless path that names a real directory REDIRECTS, as Pages does.
+    //
+    // This build sets `trailingSlash`, so every internal link is already
+    // slashed and production 301s anything that is not. The harness did neither:
+    // `/nova/scanner` resolved to a directory that exists, so the `.html`
+    // fallback below never fired and the `isFile()` check then 404'd it. The
+    // page a reviewer typed by hand was the one page the local server refused,
+    // which cost two separate reviews time before anyone traced it.
+    //
+    // Redirecting rather than quietly serving the index matters: relative asset
+    // URLs resolve against a different base without the slash, so serving it
+    // directly would work here and break on Pages — a harness that diverges from
+    // production in the direction of being more forgiving is worse than one that
+    // 404s, because it hides the failure until deploy.
+    if (!p.endsWith("/") && existsSync(file) && statSync(file).isDirectory()) {
+      res.writeHead(301, { Location: `/nova${p}/${url.search}` });
+      return res.end();
+    }
+
     if (p.endsWith("/")) file = path.join(file, "index.html");
     if (!existsSync(file) && existsSync(file + ".html")) file += ".html";
     if (!existsSync(file) || !statSync(file).isFile()) {

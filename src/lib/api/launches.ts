@@ -38,6 +38,15 @@
 //                                     45-call run simply stopped before the wall.
 //                                     There is no headroom to raise the poll rate
 //                                     into; do not read one out of this block.
+//   jupiter datapi gems 1 call / 3s = 1,200/hr, one POST carrying both the
+//                                     `graduated` and `recent` buckets. 106
+//                                     consecutive requests returned zero 429s —
+//                                     6 with no gap, 60 at 1/s, 40 at 1/3s —
+//                                     p50 117ms. Read that as "3s is a third of
+//                                     the fastest rate measured clean", not as
+//                                     a budget: the paragraph below is what
+//                                     happens when a short clean run is treated
+//                                     as headroom.
 //   rugcheck summary    <= 8 / pass, once per mint for its whole life. 36 calls
 //                                       at 1.25/s returned zero 429s, p50
 //                                       131ms, ~300B each.
@@ -52,8 +61,8 @@
 //                                       one comma-joined query (100 mints in
 //                                       one 207ms call, measured).
 //
-// Around 1,500 requests an hour with a tab open, against limits that tolerated
-// several times that.
+// Around 2,700 requests an hour with a tab open, spread across three vendors,
+// each at a rate that was measured clean past the point where it should break.
 
 import { FLAGS, getProviders } from "../providers/registry";
 import { JupiterTokenProvider, jupHue } from "../providers/jupiter";
@@ -67,8 +76,12 @@ import type { Provenance } from "./source";
  * How often the primary feed may hit Jupiter.
  *
  * The poll interval is half the feed's own latency: a launch waits on average
- * half of it before anyone asks. Measured end to end, source indexing costs
- * about 2.3s and is not negotiable, so this is the only dial there is.
+ * half of it before anyone asks. The source's own indexing delay is the rest of
+ * it and is not negotiable — measured at a p50 of about 5.7s behind pool
+ * creation even when polled once a second, with a floor of 2.3s on the best
+ * rows. An earlier version of this comment quoted that 2.3s floor as though it
+ * were the typical case; the median is what a reader actually experiences, and
+ * it is more than twice as far back.
  *
  * Three seconds = 1,200 requests an hour per open tab, and 60 consecutive calls
  * at that cadence came back clean. It is NOT a third of some larger budget:
@@ -80,18 +93,38 @@ export const LAUNCH_POLL_MS = 3_000;
 /**
  * The secondary sweep for pools Jupiter's launchpad feed never lists.
  *
- * Six seconds rather than twenty, and it is worth saying exactly what that buys
- * and what it does not. Graduations were measured arriving at p50 ~124s, and
- * the sweep interval was only the last ~20s of that: GeckoTerminal's own
- * new-pool index runs 18-94s behind the chain (p50 ~60s for pools, ~89s for
- * graduations), and that is a floor no polling rate touches. Six seconds is
- * still 10/min against a limit that 429s on the fifth no-gap request but
+ * No longer the graduation path — see `GEMS_POLL_MS` — but still the only
+ * source that sees a pool opened outside a launchpad entirely. GeckoTerminal's
+ * new-pool index runs 18-94s behind the chain on its own and that is a floor no
+ * polling rate touches, so six seconds is about the interval and nothing else.
+ * It is 10/min against a limit that 429s on the fifth no-gap request but
  * tolerates ~30/min, and it goes through the adapter's serialised 2.1s queue.
- *
- * The obvious escape — pump.fun's own API — does not exist for a browser. See
- * the note in `poolSweep`.
  */
 export const POOL_POLL_MS = 6_000;
+/**
+ * The graduation path, on the primary's own cadence because it is the primary's
+ * own vendor.
+ *
+ * Graduations were the feed's worst number by an order of magnitude — p50 about
+ * two minutes, against Axiom's "Migrated" column in seconds — because the only
+ * graduation source wired here was GeckoTerminal. Measured head to head over
+ * seven minutes, arrival lag against each response's own HTTP `Date` so neither
+ * figure carries this machine's clock:
+ *
+ *   datapi gems.graduated   n=11  min 1.0s  p50  3.0s  p90  4.0s  max  5.0s
+ *   geckoterminal new_pools n=14  min 11.0s p50 40.0s  p90 72.0s  max 78.0s
+ *
+ * and on the six graduations BOTH sources saw — the only comparison not
+ * confounded by them seeing different events — gems led by a median of 50s.
+ *
+ * Three seconds because 106 consecutive requests measured zero 429s at up to
+ * 1/s including a six-request no-gap burst, so this is a third of the fastest
+ * clean rate observed rather than the edge of it. That is a statement about
+ * what was measured, not a headroom budget to raise the rate into: the last
+ * comment in this file that inferred headroom from a short clean run was wrong,
+ * and 150 calls at 1/s on the OTHER Jupiter host 429 from request 89 onward.
+ */
+export const GEMS_POLL_MS = 3_000;
 
 /**
  * How long without a successful primary pass before the feed is stale.
@@ -216,6 +249,7 @@ interface FeedState {
   riskAsked: Set<string>;
   lastPrimaryAt: number;
   lastPoolSweepAt: number;
+  lastGemsAt: number;
   lastWindowSeconds: number | null;
   addedLastPass: number | null;
   /**
@@ -237,6 +271,7 @@ const state: FeedState = {
   riskAsked: new Set(),
   lastPrimaryAt: 0,
   lastPoolSweepAt: 0,
+  lastGemsAt: 0,
   lastWindowSeconds: null,
   addedLastPass: null,
   startedAt: 0,
@@ -255,6 +290,7 @@ export function resetLaunchFeed(): void {
   state.riskAsked.clear();
   state.lastPrimaryAt = 0;
   state.lastPoolSweepAt = 0;
+  state.lastGemsAt = 0;
   state.lastWindowSeconds = null;
   state.addedLastPass = null;
   state.startedAt = 0;
@@ -289,19 +325,53 @@ export function mergeLaunch(
     rows.set(obs.mint, { ...obs, triage: triageLaunch(obs, risk, risk ? 0 : undefined) });
     return { added: true };
   }
+  // A graduation outranks a plain pool: once a curve has completed, that is
+  // what the row is about.
+  const wasGrad = existing.event === "graduation";
+  const isGrad = obs.event === "graduation";
+  const event = wasGrad || isGrad ? "graduation" : "pool";
+
   const merged: LaunchObservation = {
     ...existing,
     ...obs,
     // Never moved by a later sighting.
     firstSeenAt: existing.firstSeenAt,
-    // The earlier of the two creation claims. GeckoTerminal reports the pool it
-    // indexed; Jupiter reports the mint's first pool. For a graduation those are
-    // different events, and a later source reporting a LATER time for a mint
-    // already in the feed is describing a second pool, not correcting the first.
-    poolCreatedAt: Math.min(existing.poolCreatedAt, obs.poolCreatedAt),
-    // A graduation outranks a plain pool: once a curve has completed, that is
-    // what the row is about.
-    event: existing.event === "graduation" || obs.event === "graduation" ? "graduation" : "pool",
+    /**
+     * WHICH MOMENT THE ROW IS ABOUT, which stopped being obvious the moment a
+     * second graduation source arrived.
+     *
+     * This was `Math.min` of the two claims, which is right for two sources
+     * describing the SAME pool and wrong in both directions once a mint can be
+     * seen twice — first as a fresh curve, then as a graduation:
+     *
+     *   promotion   the mint is already in the feed from the primary listing,
+     *               its curve opened twenty minutes ago, and it now graduates.
+     *               `min` keeps the CURVE time, so the row reads GRAD with an
+     *               age of twenty minutes and contributes a twenty-minute
+     *               graduation lag to a statistic measuring seconds.
+     *
+     *   regression  the row is already a graduation and the primary listing
+     *               mentions the mint again with its curve time. `min` drags
+     *               the row back to the curve, silently, on a later poll.
+     *
+     * So: a graduation row is dated by the graduation, a pool row by the
+     * earliest creation claim anyone made, and a plain sighting can never move
+     * a graduation's date.
+     */
+    poolCreatedAt:
+      event !== "graduation" || (wasGrad && isGrad)
+        ? Math.min(existing.poolCreatedAt, obs.poolCreatedAt)
+        : isGrad
+          ? obs.poolCreatedAt
+          : existing.poolCreatedAt,
+    // Spreading `obs` over `existing` overwrites with undefined wherever the
+    // newer payload simply does not carry the field — and the primary listing
+    // carries neither of these. Losing `graduatedAt` would un-date a graduation
+    // on the next poll; `bondingCurvePct` legitimately disappears at graduation
+    // but must not blink out every time an unrelated source refreshes the row.
+    graduatedAt: obs.graduatedAt ?? existing.graduatedAt,
+    bondingCurvePct: obs.bondingCurvePct ?? existing.bondingCurvePct,
+    event,
     source: existing.source,
   };
   // Set once, then frozen. Recomputing it on every refresh turned a verdict
@@ -414,40 +484,50 @@ async function primaryPass(jup: JupiterTokenProvider, now: number): Promise<void
 }
 
 /**
- * The secondary sweep: pools GeckoTerminal saw that Jupiter's `recent` will
- * never list.
+ * The tertiary sweep: pools GeckoTerminal saw that neither Jupiter feed lists.
  *
  * Filtered to the AMMs rather than the launchpads, because the `pump-fun` rows
  * here are the same bonding curves Jupiter already delivered thirty seconds
- * sooner. What is left is the graduations and the pools nobody launched through
- * a launchpad — and every one of them needs an audit block GeckoTerminal does
- * not have, which is why they are batched into a single Jupiter query rather
- * than looked up one at a time.
+ * sooner. What is left is the pools nobody launched through a launchpad — and
+ * every one of them needs an audit block GeckoTerminal does not have, which is
+ * why they are batched into a single Jupiter query rather than looked up one at
+ * a time.
  *
- * THIS IS THE SLOW HALF OF THE FEED AND IT IS NOT FIXABLE FROM A BROWSER
+ * THIS IS NO LONGER THE GRADUATION PATH, AND THAT IS THE POINT
  *
- * Graduations arrive around a minute and a half behind the chain where new
- * mints arrive in about six seconds. The obvious fix is pump.fun's own API,
- * which does serve a new-coin list and does answer in about two seconds — from
- * a server. It is unusable here, measured three ways:
+ * It used to be the only one, and it made graduations the worst number in the
+ * feed: p50 around two minutes, against seconds for a new mint. Measured head
+ * to head, this source arrives at p50 40s where `gemsPass` arrives at p50 3.0s,
+ * and it lost on every one of the six graduations both of them saw. So
+ * graduations now come from `gemsPass` and this sweep keeps only the job
+ * nothing else does — a pool opened directly on an AMM, which no launchpad feed
+ * will ever mention.
  *
- *   no Origin header          200 (this is the measurement that misleads)
- *   Origin: app://rom-nova    403
- *   Origin: https://romapps.xyz  403
- *   Access-Control-Allow-Origin  absent on every response, including the 200s
+ * Rows are still merged rather than dropped when both see the same pool. The
+ * merge stamps `firstSeenAt` once, so whichever source arrives first wins the
+ * latency measurement on its own and adding a source can never slow the feed
+ * down; it only removes the case where the slow one was all there was.
  *
- * and from an actual browser tab, `fetch` on three of its endpoints threw
- * `TypeError: Failed to fetch`. A browser always sends Origin, so the 200 can
- * never be reached from one; and with no ACAO header the body could not be read
- * even if it were. Nova is a static export that runs in the visitor's tab, so
- * "works from curl" is not a category of working.
+ * WHAT IS STILL NOT REACHABLE, RE-MEASURED RATHER THAN INHERITED
  *
- * The chain itself is no better for this. `logsSubscribe` on the PumpSwap
- * program — the narrowest filter that catches a graduation — measured 455
- * frames/s and 4,020 MB/hr to extract roughly two pool creations a minute.
+ * pump.fun's own API is fresher than either (its board carried a coin 2.0s old)
+ * and it cannot be read from a browser. The measurement that says otherwise is
+ * the easy one to run:
  *
- * So GeckoTerminal's own staleness (18-94s observed, p50 around a minute) is
- * the floor, and the sweep interval is the only part that was ever ours to fix.
+ *   no Origin header             200   (this is the misleading result)
+ *   Origin: app://rom-nova       403   {"message":"Not allowed by CORS"}
+ *   Origin: https://romapps.xyz  403   same
+ *   Origin: https://pump.fun     200   access-control-allow-origin: https://pump.fun
+ *   OPTIONS preflight            403
+ *
+ * It allowlists its own origin. `Origin` is a forbidden header name, so a page
+ * cannot set it and the browser always sends the real one — no arrangement of
+ * client code reaches that 200. Nova is a static export running in the
+ * visitor's tab, so "works from curl" is not a category of working.
+ *
+ * The chain itself is no better. `logsSubscribe` on the PumpSwap program — the
+ * narrowest filter that catches a graduation — measured 455 frames/s and 4,020
+ * MB/hr to extract roughly two pool creations a minute.
  */
 async function poolSweep(jup: JupiterTokenProvider, gt: GeckoTerminalTokenProvider, now: number): Promise<void> {
   const pools = await gt.getNewPools(1);
@@ -503,6 +583,46 @@ async function poolSweep(jup: JupiterTokenProvider, gt: GeckoTerminalTokenProvid
       authorityKnown: false,
       source: "coingecko",
     }, undefined, now);
+  }
+}
+
+/**
+ * The graduation pass: launchpad curves that have just completed into a real
+ * AMM pool, from the same vendor that already serves the mint feed.
+ *
+ * One POST returns both buckets. The `graduated` bucket is the point; the
+ * `recent` bucket is asked for in the same request for one field nothing else
+ * wired here carries — how far along its bonding curve a mint is — which is a
+ * column Axiom ships and Nova did not.
+ *
+ * The curve figure is written straight onto the row rather than merged through
+ * an observation, because it is not a triage input and re-triaging every row on
+ * every curve tick would burn the risk cache for no change in verdict.
+ */
+async function gemsPass(jup: JupiterTokenProvider, now: number): Promise<void> {
+  const { graduations, curves } = await jup.getGems(now);
+
+  // The graduation baseline, shared with the GeckoTerminal sweep because there
+  // is one graduation pipeline and it now has two mouths. Set once, from
+  // whichever source reports first: anything newer than the freshest row that
+  // was ALREADY listed when the tab opened is a graduation this feed actually
+  // waited for, and everything at or before it is backfill whose apparent age
+  // says when the tab opened.
+  if (state.sweepStartedAt === 0 && graduations.length > 0) {
+    state.sweepStartedAt = Math.max(...graduations.map((g) => g.poolCreatedAt));
+  }
+
+  for (const g of graduations) {
+    mergeLaunch(state.rows, g, state.riskByMint.get(g.mint), now);
+  }
+
+  for (const [mint, pct] of curves) {
+    const row = state.rows.get(mint);
+    // Only rows this feed already holds. The `recent` bucket is a second
+    // listing of the same mints the primary pass delivers, and adding rows from
+    // it here would put launches into the feed through a path whose latency
+    // nothing measures.
+    if (row && row.bondingCurvePct !== pct) state.rows.set(mint, { ...row, bondingCurvePct: pct });
   }
 }
 
@@ -578,6 +698,19 @@ async function refresh(): Promise<void> {
       state.lastError = err instanceof Error ? err.message : String(err);
       // Not zero. Zero is a claim that nothing launched.
       state.addedLastPass = null;
+    }
+  }
+
+  if (now - state.lastGemsAt >= GEMS_POLL_MS) {
+    state.lastGemsAt = now;
+    try {
+      await gemsPass(jup, now);
+    } catch {
+      // Not counted as a feed failure. The primary listing is what the stale
+      // marker is about, and a graduation source that misses a pass costs
+      // graduations rather than the feed — the same reasoning as the sweep
+      // below. Counting it here would put the page in a warning state over a
+      // half of the feed that is still working.
     }
   }
 

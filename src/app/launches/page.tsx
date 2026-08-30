@@ -118,6 +118,77 @@ function CheckStrip({ launch }: { launch: TokenLaunch }) {
   );
 }
 
+/**
+ * The source's own indexing floor, measured across a sustained 1/s run.
+ *
+ * It cannot publish a pool it has not indexed, so this is the fastest the
+ * fastest row can honestly be. A minimum lag materially under it is not a fast
+ * feed, it is a slow clock.
+ */
+const SOURCE_FLOOR_MS = 2_300;
+
+/** Curve fraction at which a mint is close enough to graduating to filter for. */
+const NEAR_GRADUATION = 0.8;
+
+/**
+ * Evidence that this machine's clock is FLATTERING the figures above.
+ *
+ * WHICH DIRECTION A NEGATIVE LAG ACTUALLY PROVES, because the first version of
+ * this function got it backwards and the live feed caught it.
+ *
+ * Every figure here is `firstSeenAt - poolCreatedAt`, one timestamp from the
+ * local clock and one from the source. With the local clock offset by `s`
+ * (positive = ahead), that arithmetic is `true_lag + s`. So:
+ *
+ *   clock AHEAD   every lag is INFLATED. It can never go negative, and there is
+ *                 no upper bound to test a lag against, so this direction is
+ *                 not detectable from these numbers at all. It is also the safe
+ *                 direction — it makes the feed look worse than it is.
+ *
+ *   clock BEHIND  every lag is REDUCED by the offset. This is the dangerous
+ *                 direction and the one that had no signal, and it is not
+ *                 hypothetical: this machine bracketed at 2.39s behind on one
+ *                 day and 2.85s weeks later, drifting, against Cloudflare and
+ *                 Google both. It is also the only direction that is testable,
+ *                 twice over — which is why both tests below point at it.
+ *
+ * Labelling `lagMinMs < 0` as "clock ahead" was exactly wrong: a clock running
+ * ahead cannot produce it. Seeing a pool before the source says it existed
+ * means our "now" reads EARLIER than the source's.
+ */
+export function clockSkewHint(feed: LaunchFeed | null | undefined): { label: string; title: string } | null {
+  if (!feed || feed.lagMinMs === null || feed.lagSamples < 3) return null;
+  const tail =
+    "\n\nThe opposite direction — a clock running ahead — inflates these figures instead, and cannot be " +
+    "detected here at all: it never produces an impossible reading, only a pessimistic one.\n\n" +
+    "`npm run probe:launches` brackets the offset off the HTTP Date header against three independent " +
+    "servers and reports every figure both raw and corrected.";
+  if (feed.lagMinMs < 0) {
+    return {
+      label: "clock behind",
+      title:
+        `The fastest row on this page was seen ${(Math.abs(feed.lagMinMs) / 1000).toFixed(1)}s BEFORE the source ` +
+        "says its pool was created, which is impossible — so this machine's clock reads earlier than the " +
+        "source's. That difference is SUBTRACTED from every lag figure above, making the feed look faster " +
+        "than it is by however far the clock is off." +
+        tail,
+    };
+  }
+  if (feed.lagMinMs < SOURCE_FLOOR_MS) {
+    return {
+      label: "clock may be behind",
+      title:
+        `The fastest row on this page was seen ${(feed.lagMinMs / 1000).toFixed(1)}s after its pool was created, ` +
+        `which is under the ${(SOURCE_FLOOR_MS / 1000).toFixed(1)}s floor this source was measured at over a ` +
+        "sustained run. It cannot publish a pool it has not indexed yet, so the likeliest explanation is a " +
+        "local clock running behind the source's — which subtracts itself from every figure above." +
+        "\n\nThis one is evidence, not proof: the source could genuinely have got quicker." +
+        tail,
+    };
+  }
+  return null;
+}
+
 function OriginCell({ launch }: { launch: TokenLaunch }) {
   const { devMints, devMigrations, launchpad, venue } = launch;
   const where = launchpad ?? venue;
@@ -155,6 +226,7 @@ export default function LaunchesPage() {
   const [minLiq, setMinLiq] = useState("0");
   const [hideSerial, setHideSerial] = useState(false);
   const [hideAvoid, setHideAvoid] = useState(false);
+  const [nearGrad, setNearGrad] = useState(false);
   const [venue, setVenue] = useState("all");
   const [open, setOpen] = useState<string | null>(null);
   /** Mints seen in a previous render, so only genuinely new rows flash. */
@@ -252,10 +324,15 @@ export default function LaunchesPage() {
       if (liq > 0 && l.liquidityUsd !== undefined && l.liquidityUsd < liq) return false;
       if (hideSerial && (l.devMints ?? 0) >= 50) return false;
       if (hideAvoid && l.triage.verdict === "avoid") return false;
+      // A mint with no published curve figure is not a mint at 0%, so this
+      // filter drops it rather than judging it. Same rule as min-liquidity
+      // above: an absent measurement must not be filtered as though it were a
+      // low one.
+      if (nearGrad && !(l.bondingCurvePct !== undefined && l.bondingCurvePct >= NEAR_GRADUATION)) return false;
       if (venue !== "all" && (l.launchpad ?? l.venue) !== venue) return false;
       return true;
     });
-  }, [feed, minLiq, hideSerial, hideAvoid, venue]);
+  }, [feed, minLiq, hideSerial, hideAvoid, nearGrad, venue]);
 
   const lag = feed?.lagP50Ms;
   const stale = feed?.stale === true;
@@ -263,10 +340,11 @@ export default function LaunchesPage() {
   const clockNote =
     "\n\nUNCORRECTED. This is local-clock arithmetic: your clock minus the source's timestamp, and a " +
     "browser cannot bracket the difference because none of these APIs expose the HTTP Date header to " +
-    "scripts (no Access-Control-Expose-Headers). A clock running BEHIND the source flatters this " +
-    "number and a clock running ahead inflates it — the machine this was built on ran 2.3s behind, " +
-    "which would have understated the true lag by that much. `npm run probe:launches` brackets the " +
-    "offset properly and reports both figures.";
+    "scripts — checked, and all four send no Access-Control-Expose-Headers at all. A clock running " +
+    "BEHIND the source subtracts itself from this number and flatters it; a clock running ahead " +
+    "inflates it. `npm run probe:launches` brackets the offset against three independent servers and " +
+    "reports every figure both raw and corrected.";
+  const skew = clockSkewHint(feed);
 
   return (
     <div className="p-3 flex flex-col gap-2 h-full min-h-0">
@@ -335,6 +413,14 @@ export default function LaunchesPage() {
             )}
           </span>
         )}
+        {/* Both directions of clock skew, not just the flattering-to-nobody
+            one. A clock running behind subtracts itself from every figure
+            above and used to pass without comment. */}
+        {feed && !stale && skew && (
+          <span className="text-[10.5px] warn" title={skew.title}>
+            ⚠ {skew.label}
+          </span>
+        )}
         {/* Graduations reported separately because they are an order of
             magnitude slower and were previously excluded from the headline
             entirely — see LaunchFeed.gradLagP50Ms. */}
@@ -344,12 +430,18 @@ export default function LaunchesPage() {
             title={
               "Median lag for GRADUATIONS — a launchpad curve completing into a real AMM pool.\n\n" +
               `From ${feed.gradLagSamples} graduation${feed.gradLagSamples === 1 ? "" : "s"} that happened after the ` +
-              "secondary sweep started.\n\n" +
-              "This is the slow half of the feed and it is a source floor, not a tuning choice. GeckoTerminal's " +
-              "new-pool index is the only browser-reachable graduation source and it runs 18-94s behind the chain " +
-              "on its own. pump.fun's API answers in ~2s but 403s any request carrying an Origin header and sends " +
-              "no CORS header at all, so a browser cannot read it; watching the PumpSwap program over the public " +
-              "RPC costs ~4,020 MB/hr for about two pool creations a minute." +
+              "graduation sweep started.\n\n" +
+              "This used to be the slow half of the feed by an order of magnitude — around two minutes, because " +
+              "GeckoTerminal's new-pool index was the only graduation source wired in and it runs 18-94s behind " +
+              "the chain before any polling interval is added. Jupiter's own pool API publishes a graduated list " +
+              "and answers this app's origin, and measured head to head over seven minutes it arrived at p50 3.0s " +
+              "against GeckoTerminal's 40.0s, leading on every graduation both of them saw.\n\n" +
+              "GeckoTerminal is still polled for pools opened straight onto an AMM, which no launchpad feed lists. " +
+              "A graduation only it catches really did take that long to arrive, so those are counted here too and " +
+              "this figure is the blended truth rather than the best case.\n\n" +
+              "pump.fun's own board is fresher still and cannot be read from a browser: it allowlists its own " +
+              "origin and 403s everything else, and Origin is a header a page is not allowed to set. Watching the " +
+              "PumpSwap program over the public RPC costs ~4,020 MB/hr for about two pool creations a minute." +
               clockNote
             }
           >
@@ -395,6 +487,17 @@ export default function LaunchesPage() {
           >
             hide AVOID
           </button>
+          <button
+            className={`btn text-[11px] ${nearGrad ? "btn-primary" : ""}`}
+            onClick={() => setNearGrad((x) => !x)}
+            title={
+              `Show only mints at or past ${NEAR_GRADUATION * 100}% of their bonding curve — the ones closest to ` +
+              "graduating into a real pool.\n\nRows whose launchpad publishes no curve figure are hidden by this " +
+              "filter rather than treated as 0%: an unmeasured curve is not a low one."
+            }
+          >
+            near graduation
+          </button>
           <button className={`btn text-[11px] ${paused ? "btn-danger" : ""}`} onClick={() => setPaused((x) => !x)}>
             {paused ? "▶ resume" : "⏸ pause"}
           </button>
@@ -435,9 +538,10 @@ export default function LaunchesPage() {
         one they still hold. Hover any glyph for the sentence behind it, or click a row to open all of
         them.{" "}
         <span className="dim">
-          Mints arrive within seconds; graduations run about a minute and a half behind, which is the
-          source&rsquo;s own delay rather than this page&rsquo;s — the two lag figures above report them
-          separately.
+          Mints and graduations both arrive within seconds, and the two lag figures above report them
+          separately because they come down different pipes and averaging the two would hide both.
+          <b> Curve</b> is how far a launchpad mint has climbed toward graduating; it reads{" "}
+          <i>n/a</i> once there is no curve left and a dash when nobody published one.
         </span>
       </div>
 
@@ -463,6 +567,17 @@ export default function LaunchesPage() {
                 title="Market cap as the listing source publishes it. On a token minutes old it is what separates a curve nobody is buying from one people are."
               >
                 MCap
+              </th>
+              <th
+                className="text-right px-2 font-medium w-[74px]"
+                title={
+                  "How far along its bonding curve a launchpad mint has climbed, as the launchpad publishes it. " +
+                  "A curve completing is a graduation, so this is the one column that says which rows are close.\n\n" +
+                  "n/a once the curve is gone — a graduated token is in a real pool and has no curve to be a " +
+                  "fraction of. A dash means nobody published a figure, which is most non-launchpad pools."
+                }
+              >
+                Curve
               </th>
               <th className="text-right px-2 font-medium">Price</th>
               <th className="text-right px-2 font-medium" title="Holder count as published. On a token this young it is mostly a measure of age.">
@@ -555,6 +670,27 @@ export default function LaunchesPage() {
                         fmtUsd(l.marketCapUsd)
                       )}
                     </td>
+                    {/* Three distinct states, and they must not collapse into
+                        one. A graduated token HAS no curve (n/a); an unlisted
+                        pool has one nobody published (dash); and 0% is a real
+                        reading about a curve nobody has bought into. A default
+                        of zero would render all three as the last one. */}
+                    <td className="text-right px-2 text-[11px]">
+                      {l.event === "graduation" ? (
+                        <span className="faint" title="graduated — the curve is gone, this token is in a real pool">
+                          n/a
+                        </span>
+                      ) : l.bondingCurvePct === undefined ? (
+                        <span className="faint" title="no launchpad curve figure published for this mint">—</span>
+                      ) : (
+                        <span
+                          className={l.bondingCurvePct >= 0.8 ? "pos" : l.bondingCurvePct >= 0.5 ? "warn" : "dim"}
+                          title={`${(l.bondingCurvePct * 100).toFixed(1)}% of the way to graduating, as the launchpad publishes it.`}
+                        >
+                          {(l.bondingCurvePct * 100).toFixed(0)}%
+                        </span>
+                      )}
+                    </td>
                     <td className="text-right px-2">
                       {l.priceUsd === undefined ? (
                         <span className="faint" title="the source has not priced this mint yet">—</span>
@@ -589,7 +725,7 @@ export default function LaunchesPage() {
                   </tr>
                   {expanded && (
                     <tr>
-                      <td colSpan={11} className="px-3 pb-3 pt-1">
+                      <td colSpan={12} className="px-3 pb-3 pt-1">
                         <div className="text-[11px] flex flex-col gap-1">
                           <div className="dim pb-1">{triageHeadline(l.triage)}</div>
                           {l.triage.checks.map((c) => (

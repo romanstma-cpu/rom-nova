@@ -110,8 +110,62 @@ interface JupMint {
   firstPool?: { createdAt?: string };
 }
 
+/**
+ * A pool row from `datapi.jup.ag`'s `gems` buckets.
+ *
+ * A different host and a different shape from the `tokens/v2` rows above: the
+ * POOL is the record and the token hangs off it as `baseAsset`, which is the
+ * right way round for a feed about pools coming into existence.
+ */
+interface GemsPool {
+  id: string;
+  /** "Meteora", "swap.pump.fun", "pump.fun" — the venue, not the launchpad. */
+  dex?: string;
+  /** "pumpfun-amm", "meteora-damm-v2", "pumpfun" — the pool program. */
+  type?: string;
+  createdAt?: string;
+  liquidity?: number;
+  /**
+   * Curve completion as a PERCENTAGE, 0..100 — not a fraction, which is the
+   * easy way to be wrong by two orders of magnitude here.
+   *
+   * The `recent` bucket is full of values below 1 because a mint seconds old
+   * is a fraction of one percent along its curve, and reading 0.78 as "78%"
+   * looks entirely plausible on a single row. Measured across all three
+   * buckets, which is what settles it:
+   *
+   *   aboutToGraduate  n=30  min 65.76  median 74.58  max 91.49
+   *   recent           n=30  min  0.00  median  1.07  max 47.39
+   *   graduated        n=30  field absent entirely
+   *
+   * Absent once the curve has completed, which is the right shape: after
+   * graduation there is no curve left to be a fraction of.
+   */
+  bondingCurve?: number;
+  volume24h?: number;
+  baseAsset?: JupMint & { graduatedAt?: string; graduatedPool?: string };
+}
+
+interface GemsBucket {
+  pools?: GemsPool[];
+  total?: number;
+}
+
+interface GemsResponse {
+  recent?: GemsBucket;
+  graduated?: GemsBucket;
+  aboutToGraduate?: GemsBucket;
+}
+
 /** Which interval rankings this adapter will accept. */
 export type JupInterval = "5m" | "1h" | "6h" | "24h";
+
+/**
+ * Jupiter's pool-shaped API. A different host from `tokens/v2` above, keyless
+ * the same way, and it reflects `app://rom-nova` on both the preflight and the
+ * POST — see `getGems` for the measurements.
+ */
+const DATAPI = "https://datapi.jup.ag/v1";
 
 export function baseUrl(): string {
   return process.env.JUPITER_API_KEY
@@ -377,6 +431,55 @@ export function toLaunch(m: JupMint, seenAt: number, source = "jupiter"): Launch
   };
 }
 
+/**
+ * A `gems` pool row as a launch observation.
+ *
+ * Deliberately routed through `toLaunch` rather than reimplemented. The audit
+ * reading — and in particular `authorityKnown`, which is what separates "the
+ * mint authority is LIVE" from "nobody audited this mint" — lives in exactly
+ * one place, and a second hand-rolled copy of it here is how a token nobody
+ * looked at eventually gets graded as safely renounced.
+ *
+ * Only the POOL facts are overridden afterwards, because they are the facts
+ * `toLaunch` cannot know from a token payload alone.
+ */
+export function gemsToLaunch(p: GemsPool, seenAt: number): LaunchObservation | null {
+  const base = p.baseAsset;
+  if (!base?.id) return null;
+  const obs = toLaunch(base, seenAt, "jupiter-datapi");
+
+  // Which moment this row is ABOUT.
+  //
+  // `toLaunch` reports `firstPool.createdAt`, which for a graduated mint is
+  // when its bonding curve opened — measured 33 seconds before graduation on
+  // one row and potentially months before on another. The event being reported
+  // here is the AMM pool opening, so the graduation time wins where there is
+  // one, and the pool's own creation time is the fallback.
+  const poolAt = Date.parse(base.graduatedAt ?? p.createdAt ?? "");
+
+  return {
+    ...obs,
+    poolCreatedAt: Number.isFinite(poolAt) ? poolAt : obs.poolCreatedAt,
+    // The venue is the pool's DEX ("swap.pump.fun", "Meteora"), which is what
+    // a graduation row is about; `launchpad` still carries where it started.
+    venue: p.dex ?? obs.venue,
+    // The pool's own depth beats the token aggregate on a pool seconds old,
+    // for the same reason the GeckoTerminal path prefers it. Zero is not a
+    // reading here: an unpriced pool must stay undefined or it renders as a
+    // dead one and sails through a minimum-liquidity filter.
+    liquidityUsd: p.liquidity || obs.liquidityUsd,
+    // Percent to fraction, the same conversion `frac` does for every other
+    // share in this file. The suffix says Pct and the value is a fraction
+    // because that is the convention `top10Pct` and `devHoldsPct` already set.
+    bondingCurvePct: curveFraction(p.bondingCurve),
+  };
+}
+
+/** A 0..100 curve percentage as a 0..1 fraction, or nothing at all. */
+function curveFraction(v: number | undefined): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) ? v / 100 : undefined;
+}
+
 type Detailed = TokenInfo & { snapshot: TokenSnapshot };
 
 export class JupiterTokenProvider implements TokenDataProvider {
@@ -468,6 +571,90 @@ export class JupiterTokenProvider implements TokenDataProvider {
     const rows = await this.list(`search?query=${mints.slice(0, 100).join(",")}`);
     for (const m of rows) out.set(m.id, toLaunch(m, seenAt));
     return out;
+  }
+
+  /**
+   * Graduations, and curve progress for the mints still climbing — one POST.
+   *
+   * THIS IS THE FIX FOR THE FEED'S WORST NUMBER, AND IT WAS FREE.
+   *
+   * Graduations used to arrive only through GeckoTerminal's `new_pools`, whose
+   * own index runs 18-94s behind the chain before any polling interval is
+   * added. Clock-corrected, that put graduations on screen at a p50 of about
+   * two minutes while Axiom's "Migrated" column is in seconds. It was the
+   * single largest competitive gap in the feed.
+   *
+   * `datapi.jup.ag/v1/pools/gems` is the same vendor already serving the mint
+   * feed, keyless, and it publishes a `graduated` bucket directly. Measured:
+   *
+   *   preflight OPTIONS      204, access-control-allow-origin: app://rom-nova,
+   *                          access-control-allow-headers: content-type
+   *   POST with that Origin  200
+   *   106 requests           zero 429s (6 with no gap, 60 at 1/s, 40 at 1/3s),
+   *                          p50 117ms
+   *
+   * WHY NOT pump.fun's OWN API, which is fresher still
+   *
+   * Because it cannot be read from a browser, and the measurement that says
+   * otherwise is the one that is easy to run. Re-verified here rather than
+   * taken on trust:
+   *
+   *   no Origin header             200   (this is the misleading result)
+   *   Origin: app://rom-nova       403   {"message":"Not allowed by CORS"}
+   *   Origin: https://romapps.xyz  403   same
+   *   Origin: https://pump.fun     200   acao: https://pump.fun
+   *   OPTIONS preflight            403
+   *
+   * It allowlists its own origin and nothing else. `Origin` is a forbidden
+   * header name, so a page cannot set it and a browser always sends the real
+   * one — there is no arrangement of client code that reaches the 200. Nova is
+   * a static export running in the visitor's tab, so "works from curl" is not
+   * a category of working.
+   *
+   * The other two buckets come back in the same response and are requested for
+   * one field the `tokens/v2` feed does not carry at all: `bondingCurve`, how
+   * far a launchpad mint is along its curve. They cost nothing extra.
+   *
+   * BOTH are needed, and `aboutToGraduate` is the one that matters. The
+   * `recent` bucket medians 1.07% because its rows are seconds old, so a curve
+   * column fed from it alone would be a page of near-zeroes and a
+   * "near graduation" filter that matched nothing. `aboutToGraduate` is where
+   * the 65-91% rows live — the mints actually close to completing.
+   */
+  async getGems(seenAt = Date.now()): Promise<{ graduations: LaunchObservation[]; curves: Map<string, number> }> {
+    const res = await providerFetch<GemsResponse>(this.name, `${DATAPI}/pools/gems`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers() },
+      // `limit` is sent but not honoured — 3, 5 and 30 all returned 30 rows.
+      // Asked for anyway so the intent is on the record if it starts being read.
+      body: JSON.stringify({
+        recent: { timeframe: "24h", limit: 30 },
+        aboutToGraduate: { timeframe: "24h", limit: 30 },
+        graduated: { timeframe: "24h", limit: 30 },
+      }),
+      timeoutMs: 10_000,
+    });
+
+    const graduations: LaunchObservation[] = [];
+    for (const p of res.graduated?.pools ?? []) {
+      // A graduated row carrying no parseable graduation time is dropped rather
+      // than dated. `toLaunch` falls back to `seenAt` when a payload has no
+      // usable timestamp, which is harmless for a row that only needs to exist
+      // and is NOT harmless here: it would enter the graduation statistic
+      // reporting a lag of zero and flatter the exact number this source was
+      // added to fix. Better to miss one graduation than to invent a fast one.
+      if (!Number.isFinite(Date.parse(p.baseAsset?.graduatedAt ?? p.createdAt ?? ""))) continue;
+      const obs = gemsToLaunch(p, seenAt);
+      if (obs) graduations.push({ ...obs, event: "graduation" });
+    }
+
+    const curves = new Map<string, number>();
+    for (const p of [...(res.recent?.pools ?? []), ...(res.aboutToGraduate?.pools ?? [])]) {
+      const mint = p.baseAsset?.id;
+      const frac = curveFraction(p.bondingCurve);
+      if (mint && frac !== undefined) curves.set(mint, frac);
+    }
+    return { graduations, curves };
   }
 
   async getRecentTokens(limit: number) {

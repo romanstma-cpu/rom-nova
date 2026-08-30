@@ -380,7 +380,11 @@ export function providerHealth(): ProviderHealth[] {
             "THE LAUNCH FEED: its /recent endpoint carries brand-new mints at a measured p50 of " +
             "about 5.7s behind pool creation (2.3s at BEST, and the median is what a reader " +
             "experiences), the freshest keyless view of a launch found here — but it caps at 30 " +
-            "rows with no cursor, so whatever falls off that page is gone" +
+            "rows with no cursor, so whatever falls off that page is gone. AND GRADUATIONS: the " +
+            "same vendor's datapi.jup.ag/v1/pools/gems publishes a graduated list that reflects " +
+            "this app's origin on both the preflight and the POST, measured at p50 3.0s against " +
+            "GeckoTerminal's 40.0s over the same seven minutes — it replaced GeckoTerminal as the " +
+            "graduation path, which was the single worst latency in the feed at roughly two minutes" +
             (process.env.JUPITER_API_KEY ? " · API key present, higher rate limit" : ""),
         }
       : { ...demoHealth("jupiter"), mode: "disabled", status: "down", note: "disabled via ENABLE_JUPITER" },

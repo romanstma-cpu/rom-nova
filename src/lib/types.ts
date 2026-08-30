@@ -935,6 +935,24 @@ export interface LaunchObservation {
   buys5m?: number;
   sells5m?: number;
   traders5m?: number;
+  /**
+   * How far along the launchpad's bonding curve this mint is, as a FRACTION
+   * 0..1 — the same convention as `top10Pct` and `devHoldsPct`, whose names
+   * also say Pct and whose values are also fractions.
+   *
+   * The source publishes it as a percentage 0..100 and the adapter divides.
+   * Worth stating because the mistake is silent: the source's `recent` bucket
+   * medians 1.07, so a brand-new mint's raw 0.78 reads perfectly plausibly as
+   * "78% of the way to graduating" when it means 0.78%.
+   *
+   * Undefined means nobody published a figure, and that is NOT the same as
+   * zero: a curve at 0% and a curve nobody measured look identical once a
+   * default is applied, and the second is the common case because the field
+   * only appears on launchpad rows. Absent after graduation too — there is no
+   * curve left to be a fraction of — which is why the row's `event` and not
+   * this field is what says whether a token has graduated.
+   */
+  bondingCurvePct?: number;
   /** Jupiter's own "this mint looks suspicious" flag, when it sets one. */
   sus?: boolean;
   mintAuthorityRevoked: boolean;

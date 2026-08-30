@@ -139,7 +139,32 @@ export type UnmeasuredField =
    * simulator does not model it at all, so a demo vector declares it here
    * rather than inventing a lock.
    */
-  | "lpLocked";
+  | "lpLocked"
+  /**
+   * How many independent parties provide that liquidity.
+   *
+   * Without it an unlocked pool reads as "the deployer can withdraw it", which
+   * is only true when one party holds the LP. The vendor returns 0 for "not
+   * computed" on most mints, so this is unmeasured far more often than not.
+   */
+  | "lpProviders"
+  /**
+   * Whether the deployer has been SELLING, as opposed to how much it holds.
+   *
+   * The simulator knows; nothing live does. It was hardcoded `false` on every
+   * live token, which quietly disabled the high-severity "Dev selling" flag,
+   * the rug-escalation branch, and half of the dev risk factor — while the
+   * invalidation copy promised the reader that flag would appear.
+   */
+  | "devSold"
+  /**
+   * How many tokens this deployer has minted, and how many reached a pool.
+   *
+   * Displayed prominently on the page ("this wallet has issued 19,042 mints…
+   * a serial deployer is a warning") and, until it was declared here, invisible
+   * to the scorer — the same failure as the authorities, one card over.
+   */
+  | "devHistory";
 
 /** Point-in-time market state for a token. `ts` is when it was observed. */
 export interface TokenSnapshot {
@@ -423,6 +448,17 @@ export interface FeatureVector {
   permanentDelegate: boolean;
   /** Share of LP locked or burned, 0..1. */
   lpLockedPct: number;
+  /**
+   * Independent liquidity providers behind that pool.
+   *
+   * Carried because the lock percentage alone is not the risk. "0.04% locked"
+   * across 43 independent providers and "0.04% locked" held by the deployer
+   * alone are the same number describing opposite situations.
+   */
+  lpProviders: number;
+  /** Mints this deployer has issued, and how many reached a real pool. */
+  devMints: number;
+  devMigrations: number;
   exitDepthUsd: number; // how much can exit within 5% impact
   regime: MarketRegime;
   /** count of independent data points behind this vector */

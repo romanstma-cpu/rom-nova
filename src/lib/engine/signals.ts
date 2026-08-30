@@ -50,6 +50,34 @@ function measured(def: FactorDef, f: FeatureVector): boolean {
   return !def.needs.some((n) => f.unmeasured!.includes(n));
 }
 
+/** The provider count, or null when nobody computed one. */
+function knownProviders(f: FeatureVector): number | null {
+  return (f.unmeasured ?? []).includes("lpProviders") ? null : f.lpProviders;
+}
+
+/**
+ * How much an unlocked pool still matters once N parties hold it.
+ *
+ * Not a theorem. It is a bounded scale chosen so that the two ends are right
+ * and nothing in between is absurd:
+ *
+ *   unknown or 1 provider   1.00   the deployer may hold the pool — full weight
+ *   2                       0.71
+ *   10                      0.32
+ *   43 (PUMP, measured)     0.15
+ *
+ * `1/sqrt(n)` because the split between providers is NOT published — one of
+ * forty-three could still hold most of it — so the risk has to fall with the
+ * count without ever reaching zero. An unknown count gets the full penalty
+ * rather than the benefit of the doubt, which keeps the fail-safe direction:
+ * this can only ever reduce a penalty on evidence, never on absence.
+ */
+export function dispersionDampener(f: FeatureVector): number {
+  const providers = knownProviders(f);
+  if (providers === null) return 1;
+  return 1 / Math.sqrt(Math.max(1, providers));
+}
+
 const usd = (x: number) =>
   `${x < 0 ? "-" : ""}$${Math.abs(x) >= 1e6 ? (Math.abs(x) / 1e6).toFixed(2) + "M" : Math.abs(x) >= 1e3 ? (Math.abs(x) / 1e3).toFixed(1) + "K" : Math.abs(x).toFixed(0)}`;
 const pct = (x: number) => `${x >= 0 ? "+" : ""}${x.toFixed(1)}%`;
@@ -198,13 +226,30 @@ export const RISK_FACTORS: FactorDef[] = [
     // supply; a deployer who can withdraw the pool does not need a mint
     // authority to take the money. Half the pool locked is treated as the point
     // where withdrawal stops being the obvious move.
+    //
+    // SCALED BY HOW MANY PARTIES HOLD IT, which is the correction that was
+    // missing. "0.04% locked" says nothing on its own: for PUMP that figure
+    // sits across 435 pools and 43 independent providers, none of whom
+    // withdrawing is a rug, and charging it the maximum cost the token a whole
+    // verdict band. The previous pass demoted the FLAG to medium and left the
+    // PENALTY at full — conceding the point in prose and charging anyway.
     needs: ["lpLocked"],
-    normalize: (f) => clamp(1 - f.lpLockedPct / 0.5),
-    explain: (f) =>
-      `${(f.lpLockedPct * 100).toFixed(1)}% of the pool's LP is locked or burned` +
-      (f.lpLockedPct < 0.5
-        ? " — the rest can be withdrawn, though nothing here says by whom, and a mature token spread over many independent providers reads low for a reason that is not a rug"
-        : ""),
+    normalize: (f) => clamp(1 - f.lpLockedPct / 0.5) * dispersionDampener(f),
+    explain: (f) => {
+      const locked = `${(f.lpLockedPct * 100).toFixed(1)}% of the pool's LP is locked or burned`;
+      if (f.lpLockedPct >= 0.5) return locked;
+      const providers = knownProviders(f);
+      if (providers === null) {
+        return `${locked} — the rest can be withdrawn, and no source here says by how many separate parties it is held`;
+      }
+      if (providers <= 1) {
+        return `${locked}, and a single provider holds the pool — that party can withdraw it`;
+      }
+      return (
+        `${locked}, but it is spread over ${providers} independent providers, so no one of them ` +
+        `holds the pool — the penalty is scaled down accordingly, not removed`
+      );
+    },
   },
   {
     key: "concentration_risk",
@@ -242,10 +287,57 @@ export const RISK_FACTORS: FactorDef[] = [
   },
   {
     key: "dev_risk",
-    name: "Dev Activity",
-    normalize: (f) => clamp(f.devHoldsPct / 0.15) * (f.devSold ? 1 : 0.5) + (f.devSold ? 0.3 : 0),
-    explain: (f) => (f.devSold ? `dev wallet has been selling (holds ${(f.devHoldsPct * 100).toFixed(1)}%)` : `dev holds ${(f.devHoldsPct * 100).toFixed(1)}%`),
+    name: "Dev Holdings",
+    // Split from the selling signal below. The two used to be one factor whose
+    // formula multiplied by `devSold ? 1 : 0.5` — and `devSold` is hardcoded
+    // false on every live token, so every live token silently took the halved
+    // branch. That is an unmeasured field steering a measured one, which is the
+    // bug this whole machinery exists to stop. Holdings are published; keep
+    // scoring them.
+    normalize: (f) => clamp(f.devHoldsPct / 0.15),
+    explain: (f) => `dev holds ${(f.devHoldsPct * 100).toFixed(1)}% of supply`,
     needs: ["devHoldsPct"],
+  },
+  {
+    key: "dev_selling",
+    name: "Dev Selling",
+    // Its own factor so it can stand down honestly. Nothing in the live stack
+    // watches the deployer's balance over time, so on real tokens this abstains
+    // and the invalidation copy no longer promises a flag that cannot fire.
+    normalize: (f) => (f.devSold ? 1 : 0),
+    explain: (f) =>
+      f.devSold
+        ? "the deployer wallet has been reducing its position"
+        : "the deployer wallet has not sold in the observed window",
+    needs: ["devSold"],
+  },
+  {
+    key: "deployer_history",
+    name: "Deployer History",
+    // The page has printed "this wallet has issued 19,042 mints — a serial
+    // deployer is a warning" since the scanner shipped, and the scorer could
+    // not see it: devMints reached TokenInfo, the row and the card, never the
+    // vector. CATE rendered POSITIVE/73 under that sentence.
+    needs: ["devHistory"],
+    normalize: (f) => {
+      const mints = Math.max(1, f.devMints);
+      // Log scale: one mint is nothing, ten is a pattern, a thousand is a
+      // factory. Saturates around 1,000.
+      const volume = clamp((Math.log10(mints) - 0.3) / 2);
+      // Migrations only ever DISCHARGE the severity. An absent count arrives as
+      // zero, and a zero here withholds mitigation rather than inventing a
+      // finding — the fail-safe direction, and the only one available while
+      // Jupiter publishes devMigrations on some mints and not others.
+      const graduated = f.devMigrations / mints;
+      return clamp(volume * (1 - clamp(graduated / 0.25)));
+    },
+    explain: (f) => {
+      if (f.devMints <= 1) return "first mint from this deployer — no track record either way";
+      const rate = f.devMigrations > 0 ? `, ${f.devMigrations} of which reached a real pool` : "";
+      return `this deployer has issued ${f.devMints.toLocaleString()} mints${rate}${
+        f.devMigrations > 0 ? "" : " and no migration count was published"
+      }`;
+    },
   },
   {
     key: "exit_liquidity",
@@ -359,6 +451,20 @@ export const PROFILES: Record<StrategyProfileId, StrategyProfile> = {
 
 // ---------------------------------------------------------------- scoring
 
+/**
+ * Contrast stretch around the midpoint, and the two constants that turn a risk
+ * severity into points.
+ *
+ * Named rather than inline because the audit has to reproduce the arithmetic
+ * exactly: 50 + every contribution equals the score, and that identity breaks
+ * the moment a literal here and a literal there drift apart.
+ */
+export const STRETCH = 1.9;
+const RISK_POINTS = 9;
+const RISK_SCALE = 0.7;
+/** Where a score with no evidence either way sits, and what the audit sums from. */
+export const NEUTRAL_BASE = 50;
+
 const REGIME_ADJUST: Record<string, number> = {
   meme_mania: 1.06,
   risk_on: 1.03,
@@ -370,12 +476,25 @@ const REGIME_ADJUST: Record<string, number> = {
   risk_off: 0.85,
 };
 
-function confidenceOf(f: FeatureVector): number {
-  const sample = clamp(f.sampleSize / 60);
+/**
+ * How good the evidence behind the vector is, ignoring how much of it is there.
+ *
+ * The denominators were tight enough that every live token pinned this at 0.98
+ * and confidence became a restatement of coverage — 77% on eight of twelve
+ * mints reviewed. Widened so a thin tape and a deep one actually separate:
+ * `sampleSize` on a live token is the 1h trade count, which spans two orders of
+ * magnitude across a trending list and used to saturate at sixty.
+ *
+ * `confidence` is this multiplied by coverage, and `auditFactors` reports both
+ * halves so a reader can see which one is binding rather than staring at a
+ * number that never moves.
+ */
+export function evidenceQuality(f: FeatureVector): number {
+  const sample = clamp(Math.log10(Math.max(1, f.sampleSize)) / 3.2);
   const fresh = clamp(1 - f.worstStalenessMs / (2 * HOUR));
-  const maturity = clamp(f.ageHours / 24, 0.25, 1);
-  const liq = clamp(Math.log10(Math.max(f.liquidityUsd, 1)) / 5.5);
-  return clamp(0.15 + 0.45 * sample + 0.2 * fresh + 0.1 * maturity + 0.1 * liq, 0, 0.98);
+  const maturity = clamp(f.ageHours / (24 * 7), 0.15, 1);
+  const liq = clamp(Math.log10(Math.max(f.liquidityUsd, 1)) / 7);
+  return clamp(0.1 + 0.4 * sample + 0.2 * fresh + 0.15 * maturity + 0.15 * liq, 0, 0.98);
 }
 
 function riskFlags(f: FeatureVector): RiskFlag[] {
@@ -426,9 +545,23 @@ function riskFlags(f: FeatureVector): RiskFlag[] {
     if (f.top10Pct > 0.4) add("concentration", "Extreme concentration", "high", `top 10 hold ${(f.top10Pct * 100).toFixed(0)}%`);
     else if (f.top10Pct > 0.28) add("concentration", "Concentrated supply", "medium", `top 10 hold ${(f.top10Pct * 100).toFixed(0)}%`);
   }
-  if (has("devHoldsPct")) {
-    if (f.devSold) add("dev", "Dev selling", "high", "the deployer wallet has reduced its position");
-    else if (f.devHoldsPct > 0.08) add("dev", "Dev holdings", "medium", `dev holds ${(f.devHoldsPct * 100).toFixed(1)}%`);
+  // `devSold` gets its own guard now. It was hardcoded false on every live
+  // token and NOT declared, so this branch could never fire there — while the
+  // invalidation copy told the reader to watch for exactly this flag.
+  if (has("devSold") && f.devSold) {
+    add("dev_selling", "Dev selling", "high", "the deployer wallet has reduced its position");
+  } else if (has("devHoldsPct") && f.devHoldsPct > 0.08) {
+    add("dev", "Dev holdings", "medium", `dev holds ${(f.devHoldsPct * 100).toFixed(1)}%`);
+  }
+  // A serial deployer, in the bear case rather than only on the card.
+  if (has("devHistory") && f.devMints >= 10) {
+    const graduated = f.devMigrations > 0 ? ` (${f.devMigrations} reached a pool)` : " with no published migrations";
+    add(
+      "deployer_history",
+      f.devMints >= 1000 ? "Deployer runs a mint factory" : "Serial deployer",
+      f.devMints >= 1000 && f.devMigrations / f.devMints < 0.05 ? "high" : "medium",
+      `${f.devMints.toLocaleString()} mints from this wallet${graduated}`,
+    );
   }
   if (has("insiderPct") && f.insiderPct > 0.15) add("insider", "Insider exposure", "high", `insider-flagged top holders hold ~${(f.insiderPct * 100).toFixed(0)}% of supply`);
   if (has("bundlerPct") && has("sniperPct") && f.bundlerPct + f.sniperPct > 0.18) add("bundler", "Bundler/sniper supply", "medium", `${((f.bundlerPct + f.sniperPct) * 100).toFixed(0)}% of supply from bundlers/snipers`);
@@ -445,9 +578,14 @@ function classifyKind(f: FeatureVector, factors: SignalFactor[], score: number):
   const get = (k: string) => factors.find((x) => x.key === k)?.normalized ?? 0.5;
   // A verified-live authority is the loudest thing that can be true about a
   // token, so it names the signal rather than being outvoted by the tape.
+  const missing = f.unmeasured ?? [];
   if (securityVetoOf(f)) return "rug_risk_escalation";
   if (f.liquidityChangePct < -35) return "liquidity_collapse";
-  if (f.devSold && f.top10Pct > 0.3) return "rug_risk_escalation";
+  // Both halves have to be measured. `devSold` is hardcoded false on live data,
+  // so this branch was dead there and the escalation never fired.
+  if (!missing.includes("devSold") && !missing.includes("top10Pct") && f.devSold && f.top10Pct > 0.3) {
+    return "rug_risk_escalation";
+  }
   if (score < 40 && f.whaleNetFlowUsd < -40_000) return "whale_exit_warning";
   if (score < 45 && get("distribution") < 0.35) return "distribution_warning";
   if (f.ageHours < 72 && get("smart_money") > 0.6) return "early_accumulation";
@@ -500,10 +638,14 @@ function labelOf(
   noTrade: string | null,
   securityVeto: string | null,
 ): SignalLabel {
-  if (noTrade) return "NO TRADE";
-  // Checked before every score band. A token that can mint more supply is not
-  // a WATCH with a caveat.
+  // The VETO outranks abstention. Checked first because "we read the mint
+  // account and the authority is live" is a finding, and NO TRADE is the
+  // absence of one — the chip said NO TRADE while the banner directly above it
+  // said EXTREME RISK, which is two verdicts on one screen even though both
+  // point the same way. The abstention reason is still carried on the signal
+  // and still shown; it is no longer the headline.
   if (securityVeto) return "EXTREME RISK";
+  if (noTrade) return "NO TRADE";
   if (highRisks >= 2 && score < 55) return "EXTREME RISK";
   if (score >= 88 && confidence >= 0.6) return "EXTREME POSITIVE";
   if (score >= 76) return "STRONG POSITIVE";
@@ -610,7 +752,7 @@ export function scoreFeatures(
       continue;
     }
     const sev = def.normalize(f);
-    const points = sev * 9 * profile.riskWeight;
+    const points = sev * RISK_POINTS * profile.riskWeight;
     penalty += points;
     factors.push({
       key: def.key,
@@ -618,22 +760,39 @@ export function scoreFeatures(
       raw: sev,
       normalized: 1 - sev,
       weight: -profile.riskWeight,
-      contribution: -points,
+      // Scaled the same way the score scales it, so the column adds up.
+      contribution: Number((-points * RISK_SCALE).toFixed(1)),
       explanation: def.explain(f, sev),
     });
   }
 
-  base = base * (REGIME_ADJUST[f.regime] ?? 1);
+  const regimeMult = REGIME_ADJUST[f.regime] ?? 1;
+  base = base * regimeMult;
   // contrast stretch: the weighted mean compresses toward 50 (measured on
   // the demo distribution), so widen around the midpoint before penalties
-  const stretched = clamp(50 + (base - 50) * 1.9, 0, 100);
-  const score = Math.round(clamp(stretched - penalty * 0.7, 0, 100));
+  const stretched = clamp(50 + (base - 50) * STRETCH, 0, 100);
+  const score = Math.round(clamp(stretched - penalty * RISK_SCALE, 0, 100));
 
-  // fill positive contributions proportionally
+  // Contributions are measured FROM THE NEUTRAL MIDPOINT, not from zero.
+  //
+  // The old form was `normalized * weight/total * stretched`, which is always
+  // positive — so a factor sitting exactly at its 0.5 midpoint rendered as
+  // credit. SKHY's "Whale Accumulation +4.8 — no whale-sized trades in the
+  // window" was its third-largest positive contribution, paid for the absence
+  // of the thing the factor measures.
+  //
+  // Rebasing also makes the table reconcile exactly: 50 + every contribution,
+  // signal and risk alike, equals the score. That is the property an auditable
+  // score should have had all along, and it could not before, because the
+  // positive rows summed to `stretched` while the penalties were scaled by
+  // RISK_SCALE on the way out.
+  const riskKeys = new Set(RISK_FACTORS.map((r) => r.key));
   for (const fac of factors) {
-    if (fac.weight > 0 || (fac.weight < 0 && !RISK_FACTORS.some((r) => r.key === fac.key))) {
-      fac.contribution = Number((((fac.normalized * Math.abs(fac.weight)) / totalWeight) * stretched).toFixed(1));
-    }
+    if (riskKeys.has(fac.key)) continue;
+    if (fac.weight === 0) continue;
+    fac.contribution = Number(
+      (STRETCH * (Math.abs(fac.weight) / totalWeight) * (regimeMult * fac.normalized * 100 - 50)).toFixed(1),
+    );
   }
 
   // Confidence falls by the share of the model that could not be evaluated.
@@ -641,7 +800,7 @@ export function scoreFeatures(
   // same number built from all of them, and the difference has to be visible
   // somewhere or the missing third costs nothing.
   const coverage = totalWeight + unmeasuredWeight > 0 ? totalWeight / (totalWeight + unmeasuredWeight) : 1;
-  const confidence = clamp(confidenceOf(f) * coverage, 0, 0.98);
+  const confidence = clamp(evidenceQuality(f) * coverage, 0, 0.98);
   const risks = riskFlags(f);
   const highRisks = risks.filter((r) => r.severity === "high").length;
 
@@ -689,12 +848,20 @@ export function scoreFeatures(
     .slice(0, 5)
     .map((x) => x.explanation);
 
+  // Only ever promises what this data actually watches. The last line used to
+  // tell the reader to expect a "dev selling" flag on a field that is hardcoded
+  // false for every live token — an invalidation condition that could not occur.
+  const missing = f.unmeasured ?? [];
   const invalidation = [
     `liquidity falls below ${usd(f.liquidityUsd * 0.65)}`,
-    `whale netflow turns below ${usd(-Math.max(50_000, Math.abs(f.whaleNetFlowUsd)))} over 6h`,
+    missing.includes("whaleFlow")
+      ? "whale flow becomes observable and shows net distribution — no flow source is answering right now"
+      : `whale netflow turns below ${usd(-Math.max(50_000, Math.abs(f.whaleNetFlowUsd)))} over 6h`,
     f.smartMoneyWallets > 0 ? "tracked smart money flips to net selling" : "no smart-money confirmation appears within 24h",
     `price loses the 24h structure (${pct(-Math.max(12, Math.abs(f.momentum24h) * 0.4))} from here)`,
-    "a new security flag (freeze/mint authority, dev selling) appears",
+    missing.includes("devSold")
+      ? "a new security flag (freeze or mint authority) appears — dev selling is NOT watched here, nothing in this stack tracks the deployer's balance over time"
+      : "a new security flag (freeze/mint authority, dev selling) appears",
   ];
 
   const bearCase = [
@@ -768,6 +935,19 @@ export interface ScoreAudit {
   missingWeight: number;
   /** Risk factors that could not be assessed at all. */
   unmeasuredRisks: number;
+  /**
+   * The two halves of confidence, so it stops reading as a mystery constant.
+   *
+   * `confidence = evidenceQuality × coverage`. Reported separately because on
+   * live tokens coverage is almost always the binding half, and a reader
+   * staring at 77% on every token deserves to see which term is holding it
+   * there.
+   */
+  evidenceQuality: number;
+  /** The baseline every score starts from, before any factor moves it. */
+  base: number;
+  /** 50 + every contribution. Equals the signal's score when the audit is sound. */
+  reconciled: number;
 }
 
 export function auditFactors(signal: Signal): ScoreAudit {
@@ -823,7 +1003,18 @@ export function auditFactors(signal: Signal): ScoreAudit {
   // signal weight at zero would otherwise report NaN coverage, which renders as
   // a confident-looking blank.
   const total = usedWeight + missingWeight;
-  return { rows, coverage: total > 0 ? usedWeight / total : 1, missingWeight, unmeasuredRisks };
+  const contributed = rows.reduce((s, r) => s + r.contribution, 0);
+  return {
+    rows,
+    coverage: total > 0 ? usedWeight / total : 1,
+    missingWeight,
+    unmeasuredRisks,
+    evidenceQuality: evidenceQuality(signal.features),
+    base: NEUTRAL_BASE,
+    // Rounded to the same place the score is, so a reader comparing the two
+    // sees them agree rather than differing in the last decimal.
+    reconciled: Math.round(Math.max(0, Math.min(100, NEUTRAL_BASE + contributed))),
+  };
 }
 
 // ---------------------------------------------------------------- batch + cache

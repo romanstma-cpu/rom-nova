@@ -126,6 +126,31 @@ export function lpFraction(raw: number | undefined): number | undefined {
   return Math.max(0, Math.min(1, raw / 100));
 }
 
+/**
+ * A vendor COUNT, or undefined when the vendor has not computed it yet.
+ *
+ * This endpoint returns 0 for "not indexed" on several independent fields, and
+ * fixing them one at a time is how the same bug shipped twice. Round one:
+ * `totalHolders: 0` printed as "0 holders in total" above twenty populated
+ * rows. Round two, one field over in the same panel: `totalLPProviders: 0`
+ * printed as "22 pools · 0 LP providers · $2.43M across them" — impossible on
+ * its face, and measured on 30 of 30 freshly-listed mints sampled.
+ *
+ * So the rule lives here once and every count goes through it. A count of zero
+ * alongside a priced, pooled, actively-traded token is a silence, and silence
+ * must not render as a measurement.
+ *
+ * DELIBERATELY NOT swept, because zero is a real and important answer:
+ *
+ *   lpLockedPct      0% locked is the worst case, not a missing one
+ *   creatorBalance   a deployer who has sold out really does hold nothing
+ *   score            a normalised 0 is the vendor's cleanest grade
+ *   graphInsiders    0 found is a result once the graph has run
+ */
+export function counted(n: number | undefined): number | undefined {
+  return n !== undefined && Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 function mapRisks(risks: RcRisk[] | undefined) {
   return (risks ?? []).map((r) => ({
     name: r.name ?? "unnamed risk",
@@ -201,13 +226,7 @@ export class RugCheckRiskProvider implements TokenRiskProvider {
       topHolders,
       labelledHolders: labelled,
       insiderPct,
-      // A zero here is the vendor saying "not indexed yet", never "nobody holds
-      // this" — it arrives on freshly-launched mints alongside twenty populated
-      // holder rows, and it reached the page as the sentence "0 holders in
-      // total" printed directly above them. Reproducible on CYBER, PRSCOIN and
-      // FROGGY. Normalised HERE rather than at each reader, because two
-      // consumers had already written two different guards for it.
-      totalHolders: full.totalHolders && full.totalHolders > 0 ? full.totalHolders : undefined,
+      totalHolders: counted(full.totalHolders),
       rugged: full.rugged,
       creator: full.creator || undefined,
       creatorHoldsPct: creatorShare(full),
@@ -224,11 +243,9 @@ export class RugCheckRiskProvider implements TokenRiskProvider {
         full.transferFee?.pct !== undefined && Number.isFinite(full.transferFee.pct)
           ? full.transferFee.pct / 100
           : undefined,
-      markets: Array.isArray(full.markets) ? full.markets.length : undefined,
-      totalMarketLiquidityUsd: Number.isFinite(full.totalMarketLiquidity)
-        ? full.totalMarketLiquidity
-        : undefined,
-      totalLpProviders: Number.isFinite(full.totalLPProviders) ? full.totalLPProviders : undefined,
+      markets: counted(Array.isArray(full.markets) ? full.markets.length : undefined),
+      totalMarketLiquidityUsd: counted(full.totalMarketLiquidity),
+      totalLpProviders: counted(full.totalLPProviders),
       launchpad: full.launchpad?.name,
       insiderNetworks: Array.isArray(full.insiderNetworks) ? full.insiderNetworks.length : undefined,
       graphInsiders: full.graphInsidersDetected,

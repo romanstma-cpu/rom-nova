@@ -94,10 +94,14 @@ export function extractFeatures(store: DemoStore, mint: string, asOf: number): F
     mintAuthorityRevoked: tok.info.mintAuthorityRevoked,
     freezeAuthorityRevoked: tok.info.freezeAuthorityRevoked,
     permanentDelegate: tok.info.permanentDelegate,
-    // The one security fact the simulator has no concept of. Declared below
-    // rather than invented: a synthetic 100% lock would be the most reassuring
+    // The security facts the simulator has no concept of. Declared below rather
+    // than invented: a synthetic 100% lock would be the most reassuring
     // possible reading of something this universe does not model.
     lpLockedPct: 0,
+    lpProviders: 0,
+    // The simulator DOES author a deployer history, so these are real here.
+    devMints: 1,
+    devMigrations: 1,
     exitDepthUsd: liqNow * 0.18,
     regime: market.regime,
     sampleSize: trades.length + Math.min(candles.length, 48) + totalTrades1h,
@@ -106,9 +110,17 @@ export function extractFeatures(store: DemoStore, mint: string, asOf: number): F
     // only thing that knows what it could not see, and the scorer needs that
     // to drop those factors rather than read their zeros as good news.
     //
-    // Plus the one gap the SIMULATOR itself has: it does not model liquidity
-    // locking, so the LP factor stands down here exactly as it would against a
-    // provider that did not publish it.
-    unmeasured: [...(snap.unmeasured ?? []), "lpLocked" as const],
+    // Plus the gaps the SIMULATOR itself has. It does not model liquidity
+    // locking, who provides that liquidity, or a deployer's other mints, so
+    // those factors stand down here exactly as they would against a provider
+    // that did not publish them. `devSold` is NOT among them — the simulator
+    // tracks the deployer's position over time, which is precisely what the
+    // live stack cannot do.
+    unmeasured: [
+      ...(snap.unmeasured ?? []),
+      "lpLocked" as const,
+      "lpProviders" as const,
+      "devHistory" as const,
+    ],
   };
 }

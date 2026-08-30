@@ -126,6 +126,12 @@ const NEVER_AVAILABLE: readonly UnmeasuredField[] = [
   "uniqueSellers1h",
   // Requires a social-listening product.
   "socialScore",
+  // Requires watching the deployer's balance over time. Every live adapter
+  // reports a point-in-time balance and nothing here records history, so
+  // "the dev has been selling" is not a question this stack can answer — and
+  // saying so is the difference between an honest gap and a dead code path
+  // that silently halved the dev risk factor on every real token.
+  "devSold",
   // A flow provider says WHO moved; nothing here says whether they are any
   // good. Wallet reputation needs a track record no source in this stack
   // publishes, so smart money stays unmeasured even when whale flow is real.
@@ -525,7 +531,17 @@ export async function liveFeatures(
     bundlerPct: snapshot.bundlerPct,
     sniperPct: snapshot.sniperPct,
     devHoldsPct: snapshot.devHoldsPct,
+    // Nothing in this stack watches the deployer's balance over time, so this
+    // is a placeholder and NOT a finding. It is declared unmeasured above; the
+    // Dev Selling factor stands down and the invalidation copy stops promising
+    // a flag that could never fire.
     devSold: false,
+    // The deployer's mint history, into the vector at last. It has been on the
+    // scanner row and the deployer card since they shipped, described there as
+    // "a warning", and the scorer could not see it — CATE rendered POSITIVE/73
+    // directly under "this wallet has issued 19,042 mints".
+    devMints: info.devMints ?? 0,
+    devMigrations: info.devMigrations ?? 0,
     // The security facts, in the VECTOR at last. They have been on TokenInfo
     // since the day it was written and the scorer had no field to read them
     // from, so mint authority, freeze authority, the permanent delegate and the
@@ -536,6 +552,10 @@ export async function liveFeatures(
     freezeAuthorityRevoked: freezeRevoked,
     permanentDelegate: risk?.permanentDelegate != null,
     lpLockedPct: risk?.lpLockedPct ?? 0,
+    // Zero here means the vendor did not compute it — the provider normalises
+    // that to undefined, and "lpProviders" stays unmeasured so the LP penalty
+    // takes no discount it did not earn.
+    lpProviders: risk?.totalLpProviders ?? 0,
     // Same 18% rule the simulator uses, so the two are comparable.
     exitDepthUsd: liquidityUsd * 0.18,
     regime: regimeOf(c?.momentum24h ?? 0, c?.volumeAccel ?? 1, liquidityUsd),

@@ -24,7 +24,8 @@
     "probe:detail": "npx --yes esbuild scripts/detail-probe.ts --bundle --platform=node --outfile=node_modules/.cache/detail.cjs --log-level=error && node --max-old-space-size=4096 node_modules/.cache/detail.cjs",
     "probe:verdict": "npx --yes esbuild scripts/verdict-sweep.ts --bundle --platform=node --outfile=node_modules/.cache/vsweep.cjs --log-level=error && node --max-old-space-size=4096 node_modules/.cache/vsweep.cjs",
     "probe:wallet": "npx --yes esbuild scripts/wallet-probe.ts --bundle --platform=node --outfile=node_modules/.cache/wallet.cjs --log-level=error && node --max-old-space-size=4096 node_modules/.cache/wallet.cjs",
-    "probe:desktop-rpc": "node scripts/desktop-rpc-probe.mjs"
+    "probe:desktop-rpc": "node scripts/desktop-rpc-probe.mjs",
+    "probe:launches": "npx --yes esbuild scripts/launch-probe.ts --bundle --platform=node --outfile=node_modules/.cache/launches.cjs --log-level=error && node --max-old-space-size=4096 node_modules/.cache/launches.cjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",

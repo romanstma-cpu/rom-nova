@@ -7,9 +7,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "out");
-// Overridable because several worktrees of this repo get served at once, and a
-// silent bind failure means you spend twenty minutes measuring somebody else's
-// build. `PORT=8797 node scripts/serve-static.mjs`.
+// Overridable because several worktrees of this repo get served at once, and
+// the second one to start does not fail loudly — it EADDRINUSEs while a browser
+// pointed at the port happily renders the OTHER worktree's build, which looks
+// exactly like your changes not having taken effect. Two separate reviews hit
+// this. `PORT=8797 node scripts/serve-static.mjs`.
 const PORT = Number(process.env.PORT) || 8788;
 
 const MIME = {

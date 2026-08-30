@@ -9,6 +9,10 @@ const SECTIONS: { title: string; items: { href: string; label: string; glyph: st
     title: "Monitor",
     items: [
       { href: "/", label: "Dashboard", glyph: "◈" },
+      // Above the scanner on purpose. The scanner ranks what is already moving;
+      // this is the only page in the app whose data is worthless a minute after
+      // it arrives, so it goes where the eye lands first.
+      { href: "/launches", label: "Launch Feed", glyph: "⌁" },
       { href: "/scanner", label: "Scanner", glyph: "≋" },
       { href: "/network", label: "3D Network", glyph: "✦" },
       { href: "/flow", label: "Money Flow", glyph: "⇄" },

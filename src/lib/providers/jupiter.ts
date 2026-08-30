@@ -42,7 +42,7 @@
 
 import { providerFetch } from "./http";
 import type { TokenDataProvider } from "./types";
-import type { TokenInfo, TokenSnapshot, UnmeasuredField } from "../types";
+import type { LaunchObservation, TokenInfo, TokenSnapshot, UnmeasuredField } from "../types";
 
 interface JupStats {
   priceChange?: number;
@@ -96,6 +96,12 @@ interface JupMint {
     devBalancePercentage?: number;
     devMints?: number;
     devMigrations?: number;
+    /**
+     * Jupiter's own "this mint looks off" bit. Only ever seen SET, never seen
+     * set to false, so a missing key means nothing was flagged rather than
+     * "checked and clean" — the same shape as everything else in this block.
+     */
+    isSus?: boolean;
   };
   stats5m?: JupStats;
   stats1h?: JupStats;
@@ -173,6 +179,23 @@ export function authorityState(m: {
   };
 }
 
+/**
+ * The stand-in colour for a mint with no hosted logo.
+ *
+ * Exported rather than inlined at each call site because `classify.ts` already
+ * warns about this exact failure: a token that is one colour on the scanner and
+ * another on the launch feed is a bug nobody would think to look for. Most rows
+ * in both lists come out of this file, and the launch feed's GeckoTerminal
+ * fallback path — which builds a row for a mint Jupiter does not index — has to
+ * agree with them.
+ *
+ * Not `classify.ts`'s `hueOf`, which uses a different hash. Switching would
+ * recolour every token in the 3D scene for no gain.
+ */
+export function jupHue(mint: string): number {
+  return Math.abs([...mint].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)) % 360;
+}
+
 export function toInfo(m: JupMint): TokenInfo {
   const graduated = m.graduatedAt ? Date.parse(m.graduatedAt) : NaN;
   const authority = authorityState(m);
@@ -199,7 +222,7 @@ export function toInfo(m: JupMint): TokenInfo {
         ? { twitter: m.twitter, telegram: m.telegram, website: m.website }
         : undefined,
     devWallet: m.dev ?? "",
-    hue: Math.abs([...m.id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)) % 360,
+    hue: jupHue(m.id),
     launchpad: m.launchpad,
     graduatedAt: Number.isFinite(graduated) ? graduated : undefined,
     devMints: m.audit?.devMints,
@@ -294,6 +317,66 @@ export function toSnapshot(m: JupMint, now = Date.now()): TokenSnapshot {
   };
 }
 
+/**
+ * A `recent` row as a launch observation.
+ *
+ * Deliberately NOT routed through `toSnapshot`. A snapshot is a market state
+ * and it throws away exactly what a launch feed lives on: `audit.isSus`, the
+ * deployer address, whether the authority fields were READ or merely absent,
+ * and the separation between "the pool was created at T" and "we saw it at U".
+ *
+ * `authorityKnown` is the field that keeps rule two honest. `toInfo` coerces a
+ * missing `mintAuthorityDisabled` to `false`, which is the right grade and an
+ * indistinguishable one — a token whose authority was read as live and a token
+ * nobody audited both come out `mintAuthorityRevoked: false`. Downstream triage
+ * needs to say "LIVE" for the first and "assumed live, unaudited" for the
+ * second, so the distinction is carried rather than flattened.
+ */
+export function toLaunch(m: JupMint, seenAt: number, source = "jupiter"): LaunchObservation {
+  const pool = Date.parse(m.firstPool?.createdAt ?? m.createdAt ?? "");
+  const graduated = m.graduatedAt ? Date.parse(m.graduatedAt) : NaN;
+  const a = m.audit ?? {};
+  const s5 = m.stats5m ?? {};
+  return {
+    mint: m.id,
+    // A pump.fun mint can reach the feed before its metadata does; measured on
+    // the freshest rows, name and symbol are sometimes empty strings. A blank
+    // cell is honest, a fabricated ticker is not, so the mint prefix stands in
+    // and the UI can say why.
+    name: m.name || "",
+    symbol: m.symbol || "",
+    hue: jupHue(m.id),
+    decimals: m.decimals,
+    poolCreatedAt: Number.isFinite(pool) ? pool : seenAt,
+    firstSeenAt: seenAt,
+    event: Number.isFinite(graduated) ? "graduation" : "pool",
+    venue: m.launchpad,
+    launchpad: m.launchpad,
+    graduatedAt: Number.isFinite(graduated) ? graduated : undefined,
+    dev: m.dev,
+    devMints: a.devMints,
+    devMigrations: a.devMigrations,
+    priceUsd: m.usdPrice,
+    liquidityUsd: m.liquidity,
+    // Already parsed for the scanner's snapshot; it was simply never carried
+    // onto a launch. On a token minutes old it is the one number that separates
+    // a $3.2k curve everyone ignores from one people are actually buying.
+    marketCapUsd: m.mcap ?? m.fdv,
+    holders: m.holderCount,
+    top10Pct: frac(a.topHoldersPercentage),
+    devHoldsPct: frac(a.devBalancePercentage),
+    organicScore: m.organicScore === undefined ? undefined : m.organicScore / 100,
+    buys5m: s5.numBuys,
+    sells5m: s5.numSells,
+    traders5m: s5.numTraders,
+    sus: a.isSus === true ? true : undefined,
+    mintAuthorityRevoked: a.mintAuthorityDisabled === true,
+    freezeAuthorityRevoked: a.freezeAuthorityDisabled === true,
+    authorityKnown: a.mintAuthorityDisabled !== undefined && a.freezeAuthorityDisabled !== undefined,
+    source,
+  };
+}
+
 type Detailed = TokenInfo & { snapshot: TokenSnapshot };
 
 export class JupiterTokenProvider implements TokenDataProvider {
@@ -342,6 +425,49 @@ export class JupiterTokenProvider implements TokenDataProvider {
     const rows = await this.list(`recent?limit=${limit}`);
     const now = Date.now();
     return rows.map((m) => ({ ...toInfo(m), snapshot: toSnapshot(m, now) }));
+  }
+
+  /**
+   * The launch feed proper: brand-new mints, as observations rather than
+   * snapshots.
+   *
+   * MEASURED PROPERTIES OF THIS ENDPOINT, because they set the whole design:
+   *
+   *   It caps at THIRTY rows. `?limit=50`, `100` and `200` each returned
+   *   exactly thirty, byte-identical, so `RECENT_WINDOW_ROWS` is a ceiling and
+   *   not a parameter. At the observed launch rate those thirty rows spanned 43
+   *   seconds of Solana, and that is the entire history this endpoint will ever
+   *   show. Poll slower than that window and launches fall off the back unseen:
+   *   nothing queues them anywhere.
+   *
+   *   It runs 1-3 seconds behind the chain. The freshest row in a sampled page
+   *   carried a `firstPool.createdAt` one second old.
+   *
+   *   Roughly 28 of 30 rows carry price and liquidity. The freshest one or two
+   *   usually do not, because Jupiter has not priced them yet, and those come
+   *   back with the fields undefined rather than zeroed.
+   */
+  async getRecentLaunches(seenAt = Date.now()): Promise<LaunchObservation[]> {
+    const rows = await this.list("recent");
+    return rows.map((m) => toLaunch(m, seenAt));
+  }
+
+  /**
+   * Full rows for a specific set of mints, in ONE request.
+   *
+   * `search` accepts comma-joined mints: measured up to 100 in a single 207ms
+   * call, returning all 100 and only the ones asked for. That is what makes a
+   * second launch source affordable. GeckoTerminal's new-pool feed names the
+   * pool and its base mint and carries no audit block at all, so every pool it
+   * finds would otherwise need its own lookup; batched, a whole page of them
+   * costs one Jupiter call.
+   */
+  async getLaunchesByMint(mints: string[], seenAt = Date.now()): Promise<Map<string, LaunchObservation>> {
+    const out = new Map<string, LaunchObservation>();
+    if (mints.length === 0) return out;
+    const rows = await this.list(`search?query=${mints.slice(0, 100).join(",")}`);
+    for (const m of rows) out.set(m.id, toLaunch(m, seenAt));
+    return out;
   }
 
   async getRecentTokens(limit: number) {

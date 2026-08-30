@@ -17,6 +17,7 @@ import {
   handleClusters,
   handleEvents,
   handleFlow,
+  handleLaunches,
   handleLiveMovers,
   handleMarket,
   handleNetwork,
@@ -99,6 +100,11 @@ export async function localGet(url: string): Promise<LocalResponse> {
           body: await handleTokenDetail(store, m[1], num(q.get("asOf")), (q.get("profile") ?? "balanced") as StrategyProfileId),
         };
     }
+    // Awaited, like candles: in the static build this is a real fetch from the
+    // visitor's own browser. The feed's rolling state lives in this module for
+    // the life of the tab, which is exactly what makes first-seen timestamps —
+    // and therefore the measured lag — meaningful.
+    if (p === "/api/launches") return { status: 200, body: await handleLaunches() };
     if (p === "/api/wallets") return { status: 200, body: handleWallets(store) };
     // Before the /:address route, which would otherwise match "movers".
     if (p === "/api/wallets/movers") return { status: 200, body: await handleLiveMovers(num(q.get("limit")) ?? 25) };

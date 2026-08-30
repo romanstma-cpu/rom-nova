@@ -247,6 +247,110 @@ already follows.
 `getNewPools` already uses it for price, liquidity and trade counts, with a
 comment naming the `$0` / `0/0` failure. Nothing to do.
 
+## 8. [coordinator A] Is the triage failing too much to be useful?
+
+Reproduced and it is worse than reported: **128 of 184 rows AVOID (70%)**, not
+61%. But the attribution on this build differs from the critic's, because this
+build now carries graduations:
+
+| check | fails (n=93 sample) |
+|---|---|
+| Vendor flags | 39 |
+| Creator rug history | 25 |
+| LP locked | 24 |
+| Creator history | 14 |
+| Deployer allocation | 8 |
+| Top-10 concentration | 4 |
+
+### The creator thresholds are not drifted — an independent outcome validates them
+
+Re-measured the population the way the original comment did (pages of `recent`,
+twenty seconds apart), 96 distinct mints. Then measured a population the check
+never gets to see: the mints that actually **graduated**.
+
+| population | n | median devMints | ≥50 | ≥1,000 | would fail `creator_history` |
+|---|---|---|---|---|---|
+| brand-new mints | 96 | 32 | 41% | 13% | **33%** |
+| tokens that graduated | 37 | **2** | 8% | 0% | **3%** |
+
+A deployer who trips these thresholds is about **ten times rarer among tokens
+that completed their curve** than among tokens that merely launched. The check
+fires on a third of the firehose because a third of the firehose comes from
+wallets whose tokens go nowhere. **Thresholds stay**, on that evidence rather
+than on the size of the resulting number.
+
+What did change: the calibration comment was stale and is now true. Median
+deployer moved 75 → 32 mints, the industrial 1,000+ band 28% → 13%, so the
+sentence calling it "a quarter of the stream" is gone. The `DEAD_MINT_RATE`
+branch — 50+ mints with under 5% reaching a pool — turns out to do most of the
+work (20 of 32 failures) rather than the headline 1,000+ branch (12). Three
+user-visible strings quoting the old figures were corrected too. The comment
+also now states the limit of the comparison: 37 is a small cohort and nothing
+here shows causation, only that the check separates two populations.
+
+**On overlap:** 10 of 93 rows fail both creator checks. They are different
+evidence from different vendors — "issued N mints" (Jupiter) versus "previously
+rugged" (RugCheck) — so this is not the single-fact double-counting the file's
+header warns about. Left as two checks.
+
+### Considered and rejected: extending the structural exclusion to graduations
+
+`vendorCheck` excludes liquidity/LP/concentration findings while a token is on
+its curve, because every pump.fun launch starts near $3.2k. 23 of the vendor
+failures are graduated tokens failing on exactly those findings, and extending
+the exclusion would have cut the AVOID rate cheaply.
+
+I measured instead of assuming, and it does not hold. Freshly graduated pools:
+
+```
+under 5 min: n=11   min $0   median $0   max $20,509
+```
+
+A median of **$0**. "Low Liquidity" on a graduated pool is either true or
+not-yet-indexed — in neither case is it the structural artifact that justifies
+the curve exclusion. **Not extended.**
+
+### What I did instead: make the number interpretable rather than smaller
+
+Tuning the checks until AVOID looked reasonable would have been the easy way to
+make them look useful, and it would have broken the thing the calibration
+comment exists to protect. So the rate is disclosed rather than massaged:
+
+- a **mix** readout in the header — AVOID/CAUTION/UNVERIFIED as percentages of
+  the live feed — so a reader sees that AVOID is the base rate of a new-mint
+  market, not a specific alarm about the row in front of them;
+- an **unverified only** filter, which is the top of the funnel (~14% of rows)
+  and the one selection a reader actually wants, with a tooltip that refuses to
+  call it a recommendation.
+
+Nothing is hidden: every failing check still renders ✕ with its full sentence.
+
+## 9. [coordinator B] Pool accounts offered as traders — no surface in this area
+
+Checked rather than assumed. The launch feed's only outbound links are
+`/nova/token/?m=<mint>` — **zero** wallet links across 184 rows. The deployer
+appears solely as a *count* (`devMints`) in the Origin cell, never as an address
+and never as something clickable. `identifyAccount` has nothing to guard here.
+
+The feed does carry `dev` in its payload, so if a future change ever links it,
+that is the point at which `identifyAccount` must be applied.
+
+## 10. [coordinator FYI] GeckoTerminal 429 with no CORS header
+
+Confirmed and already handled, for a reason that predates the report: the
+GeckoTerminal sweep's failures are swallowed and deliberately **not** counted
+toward `failures` or the stale marker, precisely because it 429s often enough by
+design that counting it would leave the page in a permanent warning state. A
+throttle there cannot produce a false FEED STALLED.
+
+It also matters much less now — GeckoTerminal is no longer the graduation path.
+
+**One correction to the brief:** this does *not* strengthen the case for moving
+graduations to pump.fun `/coins`, because that route does not exist for a
+browser at any latency. See §1 — it 403s every origin but its own, and `Origin`
+is a header a page cannot set. The graduations moved to Jupiter's datapi
+instead, which is reachable, and got the same win.
+
 ## What remains structurally impossible
 
 - **Beating ~5.7s on new mints.** Not chargeable and I am not closing it with a
@@ -276,7 +380,27 @@ npx eslint <touched>      clean
 
 Served on **port 8793** (non-default, as instructed) and confirmed the served
 HTML contained the `near graduation` marker that exists only in this change —
-so the numbers below came from this build and not another worktree's.
-`document.visibilityState` was forced to `visible` before measuring, because the
-page correctly refuses to poll a hidden tab and would otherwise have looked
-dead.
+so the numbers came from this build and not another worktree's. That precaution
+earned its keep twice: the browser twice drifted onto other tabs mid-session,
+once to production `romapps.xyz` and once to another worktree on `127.0.0.1:8794`,
+and returned empty or foreign readings until the tab was pinned explicitly.
+
+`document.visibilityState` was forced to `visible` before every measurement,
+because the page correctly refuses to poll a hidden tab and would otherwise have
+looked completely dead.
+
+`main` was merged before the final gates (2 commits: scanner sort, `/status`
+unasked-provider reporting, `/track` baseline, toasts, first-run banner). Clean
+merge, one auto-merge in `src/lib/types.ts`.
+
+### End to end on the shipped build
+
+| figure | before | after |
+|---|---|---|
+| graduation lag | p50 123.6s (clock-corrected) | **1–3s raw**, ~3.9–5.9s corrected |
+| mint lag | ~6s | 3.1–5.2s raw (unchanged; source floor) |
+| verdict mix | undisclosed | shown, `67%/15%/18%` |
+
+Filters verified live: `unverified only` cut 81 rows to 14, all UNVERIFIED;
+`near graduation` returned a row at 85%, which only exists because the
+`aboutToGraduate` bucket was added.

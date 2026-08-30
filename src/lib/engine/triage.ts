@@ -42,28 +42,61 @@ import type { TokenRisk } from "../providers/types";
 
 /**
  * Creator-history thresholds, set from the measured composition of the feed
- * rather than from instinct.
+ * rather than from instinct — and RE-MEASURED, because a threshold calibrated
+ * against a population is only as true as the last time the population was
+ * looked at.
  *
- * 47 distinct brand-new mints were sampled across three pages twenty seconds
- * apart. Every one carried a `devMints` count, and the distribution is not
- * what an outsider would guess:
+ * FIRST MEASUREMENT (47 mints, three pages twenty seconds apart)
  *
- *   1 mint          10 of 47   (21%)
- *   2-4              4 of 47    (9%)
- *   5-49             9 of 47   (19%)
- *   50+             24 of 47   (51%)
- *   1,000+          13 of 47   (28%)
+ *   1 mint 21% · 2-4 9% · 5-49 19% · 50+ 51% · 1,000+ 28%
  *   median 75 mints · p90 3,536 · max 155,516
  *
- * The MEDIAN new pump.fun token comes from a wallet on its 75th mint. So 50 is
- * not a red line — it is the middle of the population, and failing it would
- * mark half the feed as AVOID and teach a reader to ignore the verdict inside
- * an hour. A wallet at a thousand mints is a different animal: that is a
- * quarter of the stream, produced by a machine, and one of them was on its
- * 155,516th token.
+ * SECOND MEASUREMENT (96 distinct mints, ten passes twenty seconds apart)
+ *
+ *   1 mint          13 of 96   (14%)
+ *   2-4             11 of 96   (11%)
+ *   5-49            33 of 96   (34%)
+ *   50-999          27 of 96   (28%)
+ *   1,000+          12 of 96   (13%)
+ *   median 32 mints · p90 2,485 · max 24,437
+ *
+ * The shape held and the tail thinned: the median deployer moved from their
+ * 75th mint to their 32nd, and the industrial 1,000+ band from 28% of the
+ * stream to 13%. So the original reasoning survives — 50 is still the middle of
+ * the population and still must not be a red line — but the sentence that
+ * called 1,000+ "a quarter of the stream" is no longer true and now says so.
+ *
+ * WHAT ACTUALLY FIRES, AND THE OUTCOME THAT VALIDATES IT
+ *
+ * Against that population `creator_history` fails 33% of brand-new mints, and
+ * the DEAD_MINT_RATE branch does most of the work rather than the headline
+ * 1,000+ one: 20 of the 32 failures are wallets at 50+ mints with under 5%
+ * reaching a pool, against 12 for sheer volume.
+ *
+ * A third of the firehose is a lot, and the question is whether the check is
+ * discriminating or just miserable. So the same measurement was run against the
+ * tokens that actually GRADUATED — an outcome the check does not get to see:
+ *
+ *   graduations (37)  1 mint 27% · 2-4 46% · 5-49 19% · 50-999 8% · 1,000+ 0%
+ *                     median 2 mints · p90 36 · max 557
+ *                     would fail creator_history: 3%
+ *
+ * A deployer who trips these thresholds is roughly TEN TIMES rarer among tokens
+ * that completed their curve than among tokens that launched — 3% against 33%.
+ * The check fires on a third of the stream because a third of the stream comes
+ * from wallets whose tokens do not get anywhere, and the thresholds stay where
+ * they are on that evidence rather than on the size of the resulting number.
+ *
+ * A CAUTION ABOUT THAT COMPARISON: the graduation cohort is small (37) and it
+ * is not a controlled experiment — nothing here proves the deployer's history
+ * CAUSES the outcome. It is enough to show the check separates two populations
+ * that differ, which is the claim being made and the only one supported.
  */
 export const INDUSTRIAL_DEPLOYER_MINTS = 1_000;
-/** The median deployer. Worth naming, not worth condemning on its own. */
+/**
+ * Well above the median deployer. Worth naming, not worth condemning on its
+ * own — it only fails in combination with DEAD_MINT_RATE below.
+ */
 export const SERIAL_DEPLOYER_MINTS = 50;
 /** Enough prior mints to be worth mentioning at all. */
 export const REPEAT_DEPLOYER_MINTS = 5;
@@ -198,7 +231,7 @@ function creatorCheck(l: LaunchObservation): LaunchCheck {
       "creator_history",
       "Creator history",
       "fail",
-      `This wallet has issued ${n} mints.${reached} At this volume nobody is having ideas — this is an output of a machine, and roughly a quarter of everything on this feed comes from wallets like it.`,
+      `This wallet has issued ${n} mints.${reached} At this volume nobody is having ideas — this is the output of a machine. Wallets like it produced 13% of 96 sampled fresh mints and 0 of 37 sampled graduations.`,
     );
   }
   if (l.devMints >= SERIAL_DEPLOYER_MINTS && rate !== undefined && rate < DEAD_MINT_RATE) {
@@ -214,7 +247,7 @@ function creatorCheck(l: LaunchObservation): LaunchCheck {
       "creator_history",
       "Creator history",
       "warn",
-      `This wallet has issued ${n} mints.${reached} For calibration: across 47 sampled fresh mints the MEDIAN deployer was on their 75th, so this is the middle of the population rather than an outlier.`,
+      `This wallet has issued ${n} mints.${reached} For calibration: across 96 sampled fresh mints the MEDIAN deployer was on their 32nd and 41% were at 50 or more, so this is the upper half of a crowded population rather than an outlier.`,
     );
   }
   if (l.devMints >= REPEAT_DEPLOYER_MINTS) {
@@ -229,7 +262,7 @@ function creatorCheck(l: LaunchObservation): LaunchCheck {
     "creator_history",
     "Creator history",
     l.devMints <= 1
-      ? "First mint from this wallet — the top fifth of the feed by this measure. There is no history to hold against it, which is not the same as a clean one: every serial deployer's first token looked exactly like this."
+      ? "First mint from this wallet — 14% of 96 sampled fresh mints, and 27% of the ones that went on to graduate. There is no history to hold against it, which is not the same as a clean one: every serial deployer's first token looked exactly like this."
       : `This wallet has issued ${n} mints.${reached}`,
   );
 }

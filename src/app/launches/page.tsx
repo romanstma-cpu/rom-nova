@@ -227,6 +227,7 @@ export default function LaunchesPage() {
   const [hideSerial, setHideSerial] = useState(false);
   const [hideAvoid, setHideAvoid] = useState(false);
   const [nearGrad, setNearGrad] = useState(false);
+  const [cleanOnly, setCleanOnly] = useState(false);
   const [venue, setVenue] = useState("all");
   const [open, setOpen] = useState<string | null>(null);
   /** Mints seen in a previous render, so only genuinely new rows flash. */
@@ -324,6 +325,7 @@ export default function LaunchesPage() {
       if (liq > 0 && l.liquidityUsd !== undefined && l.liquidityUsd < liq) return false;
       if (hideSerial && (l.devMints ?? 0) >= 50) return false;
       if (hideAvoid && l.triage.verdict === "avoid") return false;
+      if (cleanOnly && l.triage.verdict !== "unverified") return false;
       // A mint with no published curve figure is not a mint at 0%, so this
       // filter drops it rather than judging it. Same rule as min-liquidity
       // above: an absent measurement must not be filtered as though it were a
@@ -332,7 +334,25 @@ export default function LaunchesPage() {
       if (venue !== "all" && (l.launchpad ?? l.venue) !== venue) return false;
       return true;
     });
-  }, [feed, minLiq, hideSerial, hideAvoid, nearGrad, venue]);
+  }, [feed, minLiq, hideSerial, hideAvoid, cleanOnly, nearGrad, venue]);
+
+  /**
+   * How the verdict is distributed across the whole feed, right now.
+   *
+   * Without it AVOID is uninterpretable. Measured across 184 live rows it lands
+   * on about 70% of them, and a reader who does not know that reads each one as
+   * a specific warning rather than as the base rate of a market where most new
+   * mints are junk. Shown rather than tuned away: the checks were validated
+   * against the graduation cohort and left alone, so the honest fix is to say
+   * what the number IS instead of massaging it down.
+   */
+  const mix = useMemo(() => {
+    const all = feed?.launches ?? [];
+    const n = all.length;
+    if (n === 0) return null;
+    const count = (v: string) => all.filter((l) => l.triage.verdict === v).length;
+    return { n, avoid: count("avoid"), caution: count("caution"), unverified: count("unverified") };
+  }, [feed]);
 
   const lag = feed?.lagP50Ms;
   const stale = feed?.stale === true;
@@ -413,6 +433,30 @@ export default function LaunchesPage() {
             )}
           </span>
         )}
+        {/* The verdict's own base rate, because AVOID on most of the feed is a
+            fact about the market and reads as a fact about the row. */}
+        {mix && (
+          <span
+            className="text-[10.5px] num dim"
+            title={
+              `Of ${mix.n} rows in the feed right now: ${mix.avoid} AVOID, ${mix.caution} CAUTION, ` +
+              `${mix.unverified} UNVERIFIED.\n\n` +
+              "AVOID lands on most of a new-mint feed and that is the market, not a verdict tuned to alarm. " +
+              "The creator thresholds behind it were re-measured against two populations: they fail 33% of " +
+              "brand-new mints but only 3% of the mints that went on to graduate, so they separate the two " +
+              "rather than condemning everything.\n\n" +
+              "The number is shown instead of tuned down because tuning it would be the easy way to make a " +
+              "check look useful. Use 'unverified only' for the top of the funnel."
+            }
+          >
+            mix{" "}
+            <span className="neg">{Math.round((100 * mix.avoid) / mix.n)}%</span>
+            <span className="faint">/</span>
+            <span className="warn">{Math.round((100 * mix.caution) / mix.n)}%</span>
+            <span className="faint">/</span>
+            <span>{Math.round((100 * mix.unverified) / mix.n)}%</span>
+          </span>
+        )}
         {/* Both directions of clock skew, not just the flattering-to-nobody
             one. A clock running behind subtracts itself from every figure
             above and used to pass without comment. */}
@@ -486,6 +530,18 @@ export default function LaunchesPage() {
             title="Hide rows where at least one triage check failed."
           >
             hide AVOID
+          </button>
+          <button
+            className={`btn text-[11px] ${cleanOnly ? "btn-primary" : ""}`}
+            onClick={() => setCleanOnly((x) => !x)}
+            title={
+              "Show only rows where NO check failed and none warned — the best this page will ever say about a " +
+              "launch.\n\nThis is the top of the funnel, not a recommendation: UNVERIFIED means nothing has been " +
+              "found yet on a token far too young to have a record, and most of these checks pass by nobody " +
+              "finding anything rather than by a reading."
+            }
+          >
+            unverified only
           </button>
           <button
             className={`btn text-[11px] ${nearGrad ? "btn-primary" : ""}`}

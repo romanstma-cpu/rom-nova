@@ -193,7 +193,18 @@ export interface TokenRisk {
   /** Pools the vendor found, and the liquidity it totals across them. */
   markets?: number;
   totalMarketLiquidityUsd?: number;
+  /**
+   * How many independent parties provide that liquidity.
+   *
+   * The other half of `lpLockedPct`, and without it that figure is unreadable:
+   * "0.04% locked" held by the deployer alone and "0.04% locked" spread over
+   * forty-three separate providers are the same number describing opposite
+   * situations. Undefined when the vendor returned no count — which, measured,
+   * is most freshly-listed mints.
+   */
   totalLpProviders?: number;
+  /** Circulating supply in whole tokens, when the vendor read the mint. */
+  supply?: number;
   /** Launchpad name per the vendor, when it names one. */
   launchpad?: string;
   /**

@@ -22,7 +22,14 @@
 import { providerFetch } from "./http";
 import { hueOf, narrativeOf } from "./classify";
 import type { MarketDataProvider, TokenDataProvider } from "./types";
-import type { Candle, TokenInfo, TokenSnapshot, UnmeasuredField } from "../types";
+import type {
+  Candle,
+  TokenInfo,
+  TokenSnapshot,
+  TradeWindow,
+  TradeWindowKey,
+  UnmeasuredField,
+} from "../types";
 
 const BASE = "https://api.geckoterminal.com/api/v2";
 const NETWORK = "solana";
@@ -50,7 +57,43 @@ const GT_UNMEASURED: readonly UnmeasuredField[] = [
   "authorities",
   "permanentDelegate",
   "lpLocked",
+  // Nor the LP provider count, nor the deployer's other mints. Both would
+  // otherwise arrive as undeclared zeros that read as findings rather than
+  // silences — see the same two lines in the DEX Screener adapter.
+  "lpProviders",
+  "devHistory",
+  // Same two absences as the DEX Screener adapter, for the same reason: this
+  // API publishes levels, not the 24h change in them.
+  "liquidityChange",
+  "holderGrowth",
 ];
+
+/**
+ * A pool's per-window transaction block, keyed the way this codebase names
+ * windows rather than the way this vendor does.
+ *
+ * A window the vendor did not break out is left OUT of the map, never filled
+ * with zeros: "no 6h data for a pool forty minutes old" and "nobody traded it
+ * in six hours" are different sentences and the panel prints them differently.
+ */
+function gtWindows(
+  txns: Record<string, { buys?: number; sells?: number }> | undefined,
+): Partial<Record<TradeWindowKey, TradeWindow>> | undefined {
+  if (!txns) return undefined;
+  const out: Partial<Record<TradeWindowKey, TradeWindow>> = {};
+  const pairs: [TradeWindowKey, string][] = [
+    ["5m", "m5"],
+    ["1h", "h1"],
+    ["6h", "h6"],
+    ["24h", "h24"],
+  ];
+  for (const [key, api] of pairs) {
+    const t = txns[api];
+    if (!t || (t.buys === undefined && t.sells === undefined)) continue;
+    out[key] = { buys: t.buys, sells: t.sells };
+  }
+  return Object.keys(out).length ? out : undefined;
+}
 
 // ---------------------------------------------------------------- rate limit
 
@@ -308,6 +351,10 @@ export class GeckoTerminalTokenProvider implements TokenDataProvider {
         bundlerPct: 0,
         sniperPct: 0,
         insiderPct: 0,
+        // Buys and sells per window from the DEEPEST pool only, and labelled as
+        // such by the panel that renders it. Unlike liquidity and volume there
+        // is no token-level aggregate here to sum against.
+        windows: gtWindows(top?.transactions),
         unmeasured: GT_UNMEASURED,
       },
     };
@@ -398,6 +445,7 @@ export class GeckoTerminalTokenProvider implements TokenDataProvider {
         bundlerPct: 0,
         sniperPct: 0,
         insiderPct: 0,
+        windows: gtWindows(a.transactions),
         unmeasured: GT_UNMEASURED,
       });
       if (out.length >= limit) break;

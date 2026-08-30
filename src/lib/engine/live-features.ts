@@ -173,8 +173,13 @@ function fromCandles(candles: Candle[], priceNow: number) {
  * so regime is inferred from its recent behaviour — coarse on purpose, and
  * only ever nudges the score by a few percent through REGIME_ADJUST.
  */
-function regimeOf(momentum24h: number, volumeAccel: number, liquidityUsd: number): MarketRegime {
-  if (liquidityUsd < 25_000) return "low_liquidity";
+function regimeOf(
+  momentum24h: number,
+  volumeAccel: number,
+  /** Undefined when nobody priced the pool — never inferred from a zero. */
+  liquidityUsd: number | undefined,
+): MarketRegime {
+  if (liquidityUsd !== undefined && liquidityUsd < 25_000) return "low_liquidity";
   if (Math.abs(momentum24h) > 60) return "high_volatility";
   if (momentum24h < -20) return "risk_off";
   if (volumeAccel > 1.8) return "rotation";
@@ -392,10 +397,22 @@ export async function liveFeatures(
       // LP lock is the one that earns its own line whatever its value. An
       // unlocked pool is the mechanic behind most memecoin losses and it is
       // invisible to every other source in this stack.
+      //
+      // The sentence has to carry the provider count with it. "The pool can be
+      // withdrawn" is a true and useful warning when one party holds the LP and
+      // a FALSE claim when forty-three independent parties do — measured on
+      // PUMP, where this line printed the warning above a panel reading "435
+      // pools · 43 LP providers".
       if (r.lpLockedPct !== undefined && r.lpLockedPct < 0.5) {
+        const locked = `only ${(r.lpLockedPct * 100).toFixed(1)}% of liquidity is locked`;
         provenance.push(
-          `WARNING: only ${(r.lpLockedPct * 100).toFixed(1)}% of liquidity is locked — ` +
-            `the pool can be withdrawn`,
+          r.totalLpProviders === undefined
+            ? `WARNING: ${locked} — the rest can be withdrawn, and no source here says by how ` +
+                `many separate parties it is held`
+            : r.totalLpProviders <= 1
+              ? `WARNING: ${locked} and one provider holds the pool — that party can withdraw it`
+              : `${locked}, spread over ${r.totalLpProviders} independent providers — no single ` +
+                `one of them can withdraw the pool, and the LP penalty is scaled down accordingly`,
         );
       }
       // `insiderPct` is set by the provider ONLY when the insider-graph
@@ -427,10 +444,36 @@ export async function liveFeatures(
       // The only source in this stack that sees a permanent delegate at all.
       if (r.permanentDelegate !== undefined) unmeasured.delete("permanentDelegate");
       if (r.lpLockedPct !== undefined) unmeasured.delete("lpLocked");
+      // And the only one that counts LP PROVIDERS, which is the other half of
+      // that lock figure. The vendor returns 0 for "not indexed" on most
+      // freshly-listed mints and the adapter normalises that to undefined, so
+      // this stays unmeasured far more often than not — and unmeasured is the
+      // conservative state here: `dispersionDampener` charges the LP penalty in
+      // full when the count is unknown, and discounts it only on evidence.
+      if (r.totalLpProviders !== undefined) unmeasured.delete("lpProviders");
     } else {
       provenance.push(`${sources.risk.name}: no report for this mint — risk ungraded`);
     }
   }
+
+  // Two fields that must be unmeasured unless somebody actually published them,
+  // asserted here rather than trusted from the snapshot's own declaration.
+  //
+  // A snapshot adapter is free to forget, and the cost of forgetting is not a
+  // missing number — it is a FABRICATED FINDING. `lpProviders: 0` reads as "one
+  // party holds the pool, they can withdraw it"; `devMints: 0` reads as "first
+  // mint from this deployer — no track record either way". Both are confident
+  // sentences about a wallet nobody looked up, and both are the failure mode
+  // this whole file exists to prevent, so the guard lives at the seam.
+  if (risk?.totalLpProviders === undefined) unmeasured.add("lpProviders");
+  if (info.devMints === undefined) unmeasured.add("devHistory");
+  // The 24h changes, asserted at the seam like the two above. A source that
+  // published no interval history cannot have published a change over one.
+  if (snapshot.liquidityChangePct === undefined) unmeasured.add("liquidityChange");
+  if (snapshot.holderGrowthPct === undefined) unmeasured.add("holderGrowth");
+  // And the pool itself. A zero here is not a thin pool, it is an unindexed
+  // one, and the difference is sixteen points of score on a token minutes old.
+  if (!(snapshot.liquidityUsd > 0)) unmeasured.add("liquidity");
 
   const totalTrades1h = snapshot.buys1h + snapshot.sells1h;
   const liquidityUsd = snapshot.liquidityUsd;
@@ -472,6 +515,26 @@ export async function liveFeatures(
         whaleNetFlowUsd += usd;
         if (usd > 0) whaleBuys++;
         else whaleSells++;
+      }
+      // A window with movement but no WHALE is not evidence about whales.
+      //
+      // The provider answering at all used to be enough to call this measured,
+      // so a ten-minute scan of a token that is four minutes old returned "no
+      // whale-sized trades in the window" and the factor charged -1.7 for it.
+      // A token minutes old cannot have had a $20,000 trade in a ten-minute
+      // window; the window is the constraint, not the token.
+      //
+      // This is the mirror of the credit bug in `scoreFeatures` — the same
+      // confusion pointing the other way — and both resolve the same way: an
+      // absence is not a reading, in either direction. A window that DID
+      // contain a whale is a real measurement and stays one.
+      if (whaleBuys + whaleSells === 0) {
+        unmeasured.add("whaleFlow");
+        provenance.push(
+          `${f.source}: ${f.movements} balance changes, none of them $${WHALE_USD.toLocaleString()}+ — ` +
+            `whale flow stays UNMEASURED rather than scoring "no whales" off a ` +
+            `${FLOW_MINUTES}-minute window`,
+        );
       }
       const window = f.complete
         ? `${FLOW_MINUTES} min`
@@ -517,6 +580,12 @@ export async function liveFeatures(
     // A single snapshot cannot say whether a pool grew or is being drained, so
     // this was hardcoded flat. A source that publishes its own 24h change can
     // say, and a draining pool is the loudest pre-rug signal there is.
+    //
+    // Both of these are still `?? 0` and both are now DECLARED above when the
+    // source did not publish them. The zero is inert in that case: the factors
+    // reading it stand down. Left as a plain zero and undeclared, a token four
+    // minutes into its life scored "liquidity +0.0% vs 24h ago" and "holders
+    // +0.0% over 24h" — measurements of a period that has not happened yet.
     liquidityChangePct: snapshot.liquidityChangePct ?? 0,
     holderGrowthPct: snapshot.holderGrowthPct ?? 0,
     top10Pct,
@@ -553,12 +622,20 @@ export async function liveFeatures(
     permanentDelegate: risk?.permanentDelegate != null,
     lpLockedPct: risk?.lpLockedPct ?? 0,
     // Zero here means the vendor did not compute it — the provider normalises
-    // that to undefined, and "lpProviders" stays unmeasured so the LP penalty
-    // takes no discount it did not earn.
+    // that to undefined, and "lpProviders" is asserted into the unmeasured set
+    // above in that case, so the LP penalty takes no discount it did not earn.
     lpProviders: risk?.totalLpProviders ?? 0,
     // Same 18% rule the simulator uses, so the two are comparable.
     exitDepthUsd: liquidityUsd * 0.18,
-    regime: regimeOf(c?.momentum24h ?? 0, c?.volumeAccel ?? 1, liquidityUsd),
+    // An unpriced pool must not read as a LOW-LIQUIDITY regime, which is the
+    // most punitive multiplier in the table (0.93). Passed as undefined so
+    // `regimeOf` falls through to neutral rather than inferring a market state
+    // from a number nobody published.
+    regime: regimeOf(
+      c?.momentum24h ?? 0,
+      c?.volumeAccel ?? 1,
+      unmeasured.has("liquidity") ? undefined : liquidityUsd,
+    ),
     // Sample size drives confidence, so a candle-less vector must not borrow
     // any: what remains is the 1h trade count and nothing else.
     sampleSize: Math.min(c?.bars ?? 0, 48) + totalTrades1h,

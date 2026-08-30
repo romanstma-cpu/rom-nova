@@ -60,6 +60,43 @@ export interface LocalResponse {
   body: unknown;
 }
 
+/**
+ * How much of an unrouteable path this dispatcher is willing to repeat back.
+ *
+ * `?m=<script>alert(1)</script>` on the token page becomes a request for
+ * `/api/tokens/<script>alert(1)</script>`, which matches nothing (the segment
+ * pattern is `[^/]+` and that string carries a slash) and fell through to a 404
+ * whose body was the raw path. The page prints the handler's message verbatim,
+ * so attacker-supplied text rendered on screen.
+ *
+ * React escapes it, so this was never XSS. But a terminal that will print
+ * whatever a link puts in its query string is a phishing surface.
+ *
+ * The rule: echo the leading segments, and STOP at the first one that is not
+ * already a plain route name. A route here is identified by its leading
+ * segments — `/api/tokens`, `/api/wallets/movers` — so that prefix is the whole
+ * diagnostic value; a segment that would have to be sanitised before printing
+ * is caller content, and the caller does not get to put content on the page.
+ *
+ * Sanitising WITHOUT truncating was tried first and was not enough: it turned
+ * the payload into `/api/tokens/3Cscript3Ealert13C/script3E`, which carries no
+ * markup and is still the attacker's string on the reader's screen.
+ */
+const ECHO_SEGMENTS = 3;
+const ECHO_MAX = 48;
+/** What a route segment looks like when nobody has been creative with it. */
+const PLAIN_SEGMENT = /^[A-Za-z0-9_.:-]+$/;
+
+export function safePath(p: string): string {
+  const kept: string[] = [];
+  for (const seg of p.split("/").filter(Boolean).slice(0, ECHO_SEGMENTS)) {
+    if (!PLAIN_SEGMENT.test(seg)) break;
+    kept.push(seg);
+  }
+  const out = `/${kept.join("/")}`;
+  return out.length > ECHO_MAX ? `${out.slice(0, ECHO_MAX)}...` : out;
+}
+
 export async function localGet(url: string): Promise<LocalResponse> {
   const u = new URL(url, "http://local");
   const p = u.pathname;
@@ -94,6 +131,8 @@ export async function localGet(url: string): Promise<LocalResponse> {
       // Awaited for the same reason candles are: the detail path consults live
       // providers now, so in the static build this is real network work done
       // from the visitor's own browser.
+      // The mint's SHAPE is checked inside the handler rather than here, so the
+      // server route gets the same guard from the same line.
       if (m)
         return {
           status: 200,
@@ -145,7 +184,7 @@ export async function localGet(url: string): Promise<LocalResponse> {
     if (p === "/api/alerts") return { status: 200, body: handleAlertsGet(store) };
     if (p === "/api/paper") return { status: 200, body: handlePaperGet(store) };
     if (p === "/api/research") return { status: 200, body: handleResearchGet(store) };
-    return { status: 404, body: { error: `no local route for ${p}` } };
+    return { status: 404, body: { error: `no local route for ${safePath(p)}` } };
   } catch (err) {
     if (err instanceof ApiError) return { status: err.status, body: { error: err.message } };
     throw err;
@@ -175,7 +214,7 @@ export async function localPost(url: string, body: unknown): Promise<LocalRespon
     }
     if (p === "/api/research") return { status: 200, body: handleResearchNote(store, String(b.mint ?? ""), String(b.note ?? "")) };
     if (p === "/api/research/ask") return { status: 200, body: handleResearchAsk(store, String(b.question ?? "")) };
-    return { status: 404, body: { error: `no local route for ${p}` } };
+    return { status: 404, body: { error: `no local route for ${safePath(p)}` } };
   } catch (err) {
     if (err instanceof ApiError) return { status: err.status, body: { error: err.message } };
     throw err;

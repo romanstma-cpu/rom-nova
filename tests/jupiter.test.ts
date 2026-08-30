@@ -63,9 +63,73 @@ describe("jupiter — absence is declared, never defaulted", () => {
       "insiderPct",
       "bundlerPct",
       "sniperPct",
+      // The LP provider count is in no Jupiter payload at any depth, and a
+      // zero there reads as "one party holds the pool, they can withdraw it".
+      "lpProviders",
+      // Nor the deployer's other mints on a payload with no audit block. A
+      // devMints of zero reads as "first mint from this deployer — no track
+      // record either way", which is a claim about a wallet nobody looked up.
+      "devHistory",
     ]) {
       expect(u, `${f} must be declared unmeasured`).toContain(f);
     }
+  });
+
+  // THE ZEROS BUG INSIDE THE SCORER, on the population the app exists for.
+  //
+  // `liquidity: m.liquidity ?? 0` in the snapshot builder, against
+  // `liquidityUsd: m.liquidity` twelve lines down in the LAUNCH builder, which
+  // renders "the source has not priced this pool yet". One field, two
+  // behaviours, one file — and only the coerced one reached the score.
+  //
+  // Measured on 747MxrN9…pump at one minute old: Liquidity Quality -16.4 for
+  // "$0 pooled" while Jupiter's API was reporting liquidity=3160.13 for that
+  // same mint. Every new mint's score was depressed by ~16 points.
+  it("declares an unpriced pool instead of scoring it as zero", () => {
+    const fresh = { ...FULL, liquidity: undefined };
+    const s = toSnapshot(fresh);
+    expect(s.unmeasured ?? []).toContain("liquidity");
+    // The field is not optional, so the value stays a number — the DECLARATION
+    // is what makes it inert, not the value.
+    expect(s.liquidityUsd).toBe(0);
+    // A real pool must not be declared away.
+    expect(toSnapshot(FULL).unmeasured ?? []).not.toContain("liquidity");
+    expect(toSnapshot(FULL).liquidityUsd).toBe(1_490_572);
+  });
+
+  it("declares the 24h changes a token minutes old cannot have", () => {
+    // "liquidity +0.0% vs 24h ago" and "holders +0.0% over 24h" on a four
+    // minute old mint are measurements of a period that has not happened.
+    const s = toSnapshot({ ...FULL, stats24h: { priceChange: 30 } });
+    expect(s.unmeasured ?? []).toContain("liquidityChange");
+    expect(s.unmeasured ?? []).toContain("holderGrowth");
+    // And where the source DOES publish them, they are measurements.
+    const full = toSnapshot(FULL).unmeasured ?? [];
+    expect(full).not.toContain("liquidityChange");
+    expect(full).not.toContain("holderGrowth");
+  });
+
+  it("stops calling the deployer history unmeasured once the audit carries it", () => {
+    expect(toSnapshot(FULL).unmeasured ?? []).not.toContain("devHistory");
+    // But the LP provider count is never Jupiter's to answer.
+    expect(toSnapshot(FULL).unmeasured ?? []).toContain("lpProviders");
+  });
+
+  it("carries all four activity windows, and omits the ones it was not given", () => {
+    // The block DEX Screener and Photon lead with, already in this payload and
+    // thrown away: the page surfaced it only as a derived "imbalance %".
+    const w = toSnapshot(FULL).windows!;
+    expect(w["1h"]).toEqual({
+      buys: 3583,
+      sells: 3454,
+      traders: 1255,
+      buyVolumeUsd: undefined,
+      sellVolumeUsd: undefined,
+    });
+    expect(w["24h"]?.buyVolumeUsd).toBe(1000);
+    // stats5m carried only a price change, so it contributes no trade window.
+    expect(w["5m"]).toBeUndefined();
+    expect(toSnapshot(SPARSE).windows).toBeUndefined();
   });
 
   it("never invents an average organic score", () => {

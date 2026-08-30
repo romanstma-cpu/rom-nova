@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useApi, fmtUsd, fmtPct, fmtNum, fmtAge } from "@/lib/client";
+import { useApi, fmtUsd, fmtPct, fmtNum, fmtAge, whaleFlowCell } from "@/lib/client";
 import { Score, RiskBadge, TokenMark, Empty, Freshness } from "@/components/ui/bits";
 import type { TokenRow } from "@/lib/api/rows";
 
@@ -66,7 +66,7 @@ export default function ScreenerPage() {
   const exportCsv = () => {
     const cols = [
       "symbol", "name", "mint", "priceUsd", "marketCapUsd", "liquidityUsd", "volume24hUsd", "m5", "h1", "h6", "h24",
-      "holders", "holderGrowthPct", "top10Pct", "organicScore", "whaleFlow6hUsd", "smFlow6hUsd", "signalScore", "signalLabel", "confidence", "riskLevel", "ageHours",
+      "holders", "holderGrowthPct", "top10Pct", "organicScore", "whaleFlowUsd", "smFlow6hUsd", "signalScore", "signalLabel", "confidence", "riskLevel", "ageHours",
     ] as const;
     const lines = [cols.join(","), ...rows.map((r) => cols.map((c) => JSON.stringify(r[c] ?? "")).join(","))];
     const blob = new Blob([lines.join("\n")], { type: "text/csv" });
@@ -136,7 +136,13 @@ export default function ScreenerPage() {
               <th className="text-right px-2 font-medium">24h</th>
               <th className="text-right px-2 font-medium">Buys/Sells 1h</th>
               <th className="text-right px-2 font-medium">Holders</th>
-              <th className="text-right px-2 font-medium">Whale 6h</th>
+              {/* Ten minutes of chain, not six hours — see whaleFlowCell. */}
+              <th
+                className="text-right px-2 font-medium"
+                title="Net movement by wallets that moved $20,000+ of this token, over a short chain scan — ten minutes, not six hours."
+              >
+                Whale flow
+              </th>
               <th className="text-right px-2 font-medium">Smart 6h</th>
               <th className="text-right px-2 font-medium">Signal</th>
               <th className="text-right px-2 font-medium">Conf</th>
@@ -162,7 +168,12 @@ export default function ScreenerPage() {
                 <td className={`text-right px-2 ${r.h24 >= 0 ? "pos" : "neg"}`}>{fmtPct(r.h24)}</td>
                 <td className="text-right px-2 dim">{r.buys1h}/{r.sells1h}</td>
                 <td className="text-right px-2 dim">{fmtNum(r.holders)}</td>
-                <td className={`text-right px-2 ${r.whaleFlow6hUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(r.whaleFlow6hUsd)}</td>
+                <td
+                  className={`text-right px-2 ${whaleFlowCell(r.whaleFlowUsd, r.flowMinutes).cls}`}
+                  title={whaleFlowCell(r.whaleFlowUsd, r.flowMinutes).title}
+                >
+                  {fmtUsd(r.whaleFlowUsd)}
+                </td>
                 <td className={`text-right px-2 ${r.smFlow6hUsd > 0 ? "pos" : "faint"}`}>{r.smFlow6hUsd ? fmtUsd(r.smFlow6hUsd) : "—"}</td>
                 <td className="text-right px-2"><Score value={r.signalScore} width={40} scored={r.scored !== false} reason={r.unscoredReason} /></td>
                 <td className="text-right px-2 dim">{(r.confidence * 100).toFixed(0)}%</td>

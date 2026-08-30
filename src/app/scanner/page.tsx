@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { apiGet, useEventStream, fmtUsd, fmtPct, fmtAge, type StreamEvent } from "@/lib/client";
+import { apiGet, useEventStream, fmtUsd, fmtPct, fmtAge, whaleFlowCell, type StreamEvent } from "@/lib/client";
 import { Score, TokenMark, Empty } from "@/components/ui/bits";
 import { appendPass } from "@/lib/track-store";
 import type { TokenRow } from "@/lib/api/rows";
@@ -275,7 +275,15 @@ export default function ScannerPage() {
               <th className="text-right px-2 font-medium">1h</th>
               <th className="text-right px-2 font-medium">24h</th>
               <th className="text-right px-2 font-medium">Vol accel</th>
-              <th className="text-right px-2 font-medium">Whale 6h</th>
+              {/* NOT "Whale 6h". The window is a ten-minute chain scan, stated
+                  per row in the cell's tooltip because a truncated read covers
+                  less than it asked for. */}
+              <th
+                className="text-right px-2 font-medium"
+                title="Net movement by wallets that moved $20,000+ of this token, over a short chain scan — ten minutes, not six hours. Hover a cell for the window it actually covered."
+              >
+                Whale flow
+              </th>
               <th className="text-left px-2 font-medium">Buyers</th>
               <th className="text-left px-2 font-medium">Origin</th>
               <th className="text-right px-2 font-medium">Liq</th>
@@ -335,10 +343,12 @@ export default function ScannerPage() {
                   </Cell>
                   <Cell
                     show={!absent(r, "whaleFlow")}
-                    cls={r.whaleFlow6hUsd >= 0 ? "pos" : "neg"}
+                    cls={whaleFlowCell(r.whaleFlowUsd, r.flowMinutes).cls}
                     why="no wallet-flow source configured"
                   >
-                    {fmtUsd(r.whaleFlow6hUsd)}
+                    <span title={whaleFlowCell(r.whaleFlowUsd, r.flowMinutes).title}>
+                      {fmtUsd(r.whaleFlowUsd)}
+                    </span>
                   </Cell>
                   <td className="px-2 text-[10px]">
                     {r.topWallets && r.topWallets.length > 0 ? (

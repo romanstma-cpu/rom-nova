@@ -122,10 +122,43 @@ export interface CreatorPanel {
   holdsPct?: number;
   /** The same, per the risk vendor's own two fields. */
   vendorHoldsPct?: number;
+  /**
+   * The figure the panel should actually PRINT, and who published it.
+   *
+   * Resolved here rather than in the component, because the component had two
+   * independent renderings of one question and printed both: a dash reading
+   * "no source published the deployer's balance — this is not zero" sat one
+   * line above "rugcheck independently puts the deployer balance at 0.000%".
+   * Live on PUMP, SKHY, TRX and CATE. Whichever of those two sentences a reader
+   * believed, the other one was wrong.
+   *
+   * The token provider wins when it published a figure, because that is the
+   * field the feature vector scores and the panel must agree with the audit.
+   * The vendor is the fallback, named. Undefined only when NOBODY answered.
+   */
+  holdsShown?: { pct: number; source: string };
   launchpad?: string;
   graduatedAt?: number;
   /** True when the deployer's dev balance was never published by anyone. */
   holdsUnmeasured: boolean;
+}
+
+/** Supply, and the two ratios every reference terminal prints beside it. */
+export interface SupplyPanel {
+  /** Circulating supply in whole tokens, when the risk vendor read the mint. */
+  supply?: number;
+  /** Fully diluted valuation, when the source published one. */
+  fdvUsd?: number;
+  /**
+   * Pooled liquidity over market cap.
+   *
+   * The cheapest read on whether a quoted market cap is reachable: a $40M cap
+   * over a $90k pool means the number in the header is not a price anyone could
+   * get out at. Undefined rather than Infinity when the cap is zero.
+   */
+  liqToMcap?: number;
+  /** Market cap over FDV — how much of the supply is actually circulating. */
+  mcapToFdv?: number;
 }
 
 export interface LiveTokenDetail {
@@ -137,6 +170,7 @@ export interface LiveTokenDetail {
   risk?: TokenRisk;
   holders: HolderTable;
   creator: CreatorPanel;
+  supply: SupplyPanel;
   flow?: FlowPanel;
   /** Whether a source actually read the mint and freeze authorities. */
   authorityChecked: boolean;
@@ -265,7 +299,8 @@ async function assemble(
     audit: auditFactors(signal),
     risk,
     holders: holderTable(risk),
-    creator: creatorPanel(result.info, result.snapshot, risk),
+    creator: creatorPanel(result.info, result.snapshot, risk, providers.token.name),
+    supply: supplyPanel(result.snapshot, risk),
     flow: flowPanel(result.flow, result.info.decimals, result.snapshot.priceUsd),
     authorityChecked: result.authorityChecked,
     authoritySource: result.authoritySource,
@@ -307,21 +342,51 @@ export function creatorPanel(
   info: TokenInfo,
   snapshot: TokenSnapshot,
   risk: TokenRisk | undefined,
+  tokenSource = "the token source",
 ): CreatorPanel {
   const devUnmeasured = (snapshot.unmeasured ?? []).includes("devHoldsPct");
+  // A declared-unmeasured dev balance must not reach the panel as its
+  // placeholder zero. "Dev holds 0.0%" is the most reassuring sentence on the
+  // page and here it would mean nobody published the number.
+  const holdsPct = devUnmeasured ? undefined : snapshot.devHoldsPct;
+  const vendorHoldsPct = risk?.creatorHoldsPct;
   return {
     address: info.devWallet || undefined,
     vendorAddress: risk?.creator,
     mints: info.devMints,
     migrations: info.devMigrations,
-    // A declared-unmeasured dev balance must not reach the panel as its
-    // placeholder zero. "Dev holds 0.0%" is the most reassuring sentence on the
-    // page and here it would mean nobody published the number.
-    holdsPct: devUnmeasured ? undefined : snapshot.devHoldsPct,
-    vendorHoldsPct: risk?.creatorHoldsPct,
+    holdsPct,
+    vendorHoldsPct,
+    // ONE answer for the panel to print. Two sources, one question, resolved in
+    // a stated order instead of being rendered twice in two different states.
+    holdsShown:
+      holdsPct !== undefined
+        ? { pct: holdsPct, source: tokenSource }
+        : vendorHoldsPct !== undefined && risk
+          ? { pct: vendorHoldsPct, source: risk.source }
+          : undefined,
     launchpad: info.launchpad ?? risk?.launchpad,
     graduatedAt: info.graduatedAt,
-    holdsUnmeasured: devUnmeasured && risk?.creatorHoldsPct === undefined,
+    holdsUnmeasured: devUnmeasured && vendorHoldsPct === undefined,
+  };
+}
+
+/**
+ * Supply and its ratios, from figures somebody actually published.
+ *
+ * Supply is NOT derived from market cap over price. That is arithmetic on two
+ * vendors' roundings and it produces a confident number nobody measured, which
+ * is the failure this file keeps having to unlearn. It comes from the risk
+ * vendor's read of the mint account or it is absent.
+ */
+export function supplyPanel(snapshot: TokenSnapshot, risk: TokenRisk | undefined): SupplyPanel {
+  const mcap = snapshot.marketCapUsd;
+  const fdv = snapshot.fdvUsd;
+  return {
+    supply: risk?.supply,
+    fdvUsd: fdv > 0 ? fdv : undefined,
+    liqToMcap: mcap > 0 ? snapshot.liquidityUsd / mcap : undefined,
+    mcapToFdv: fdv > 0 && mcap > 0 ? mcap / fdv : undefined,
   };
 }
 

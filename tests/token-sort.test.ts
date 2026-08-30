@@ -32,7 +32,7 @@ const LIVE_ROWS = [75, 33, 86, 77, 82, 50, 64, 93, 60, 28, 45, 67].map((score, i
     buys1h: 1, sells1h: 1,
     holders: 1, holderGrowthPct: 0, top10Pct: 0,
     organicScore: 0, socialScore: 0, volumeAccel: 1,
-    whaleFlow6hUsd: 0, smFlow6hUsd: 0, smWallets: 0,
+    whaleFlowUsd: 0, smFlow6hUsd: 0, smWallets: 0,
     signalScore: score,
     signalLabel: "WATCH",
     signalKind: "momentum_ignition",

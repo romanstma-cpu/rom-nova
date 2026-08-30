@@ -228,6 +228,40 @@ export const shortAddr = (a: string): string => (a.length <= 10 ? a : `${a.slice
 export const scoreColor = (score: number): string =>
   score >= 76 ? "var(--pos)" : score >= 60 ? "var(--accent)" : score >= 45 ? "var(--text-dim)" : "var(--neg)";
 
+/**
+ * How a whale-netflow cell should be coloured, and what its tooltip must say.
+ *
+ * Two corrections in one place, because they are one mistake.
+ *
+ * COLOUR. `usd >= 0 ? "pos" : "neg"` painted a measured ZERO green. Production
+ * showed $0 on eleven of twelve scanner rows, all green, reading as "no whale
+ * sold this" when the truth was "nobody moved $20,000 in the window". Zero is
+ * the absence of the thing the column measures, so it is neutral.
+ *
+ * WINDOW. The column said "Whale 6h" and the window is a ten-minute chain scan,
+ * truncated further whenever the byte budget bites — which is why the tooltip
+ * takes the row's OWN `flowMinutes` rather than a constant. The token page has
+ * always told the truth about this ("the flow window is ten minutes, not the
+ * life of the chart"); the list contradicted it.
+ */
+export const whaleFlowCell = (
+  usd: number,
+  flowMinutes: number | undefined,
+  threshold = 20_000,
+): { cls: string; title: string } => {
+  const window =
+    flowMinutes === undefined
+      ? "a short chain scan"
+      : `the last ${flowMinutes < 1 ? "<1" : Math.round(flowMinutes)} min of chain`;
+  return {
+    cls: usd > 0 ? "pos" : usd < 0 ? "neg" : "dim",
+    title:
+      usd === 0
+        ? `no single wallet moved $${threshold.toLocaleString()}+ of this token in ${window}. That is a quiet window, not a verdict — and it is NOT six hours.`
+        : `net whale movement over ${window}, counting only wallets that moved $${threshold.toLocaleString()}+`,
+  };
+};
+
 export const labelClass = (label: string): string => {
   if (label.includes("POSITIVE")) return "chip-pos";
   if (label === "NO TRADE" || label === "NEUTRAL" || label === "WATCH") return "chip";

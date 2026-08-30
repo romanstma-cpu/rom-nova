@@ -42,7 +42,14 @@
 
 import { providerFetch } from "./http";
 import type { TokenDataProvider } from "./types";
-import type { LaunchObservation, TokenInfo, TokenSnapshot, UnmeasuredField } from "../types";
+import type {
+  LaunchObservation,
+  TokenInfo,
+  TokenSnapshot,
+  TradeWindow,
+  TradeWindowKey,
+  UnmeasuredField,
+} from "../types";
 
 interface JupStats {
   priceChange?: number;
@@ -196,6 +203,26 @@ function frac(pct: number | undefined): number | undefined {
 }
 
 /**
+ * One interval's stats block as a TradeWindow, or undefined when the source
+ * said nothing about that window.
+ *
+ * Nothing is coerced to zero. A brand-new mint genuinely has windows with no
+ * trades, and a five-minute-old token has no 24h window at all — those are
+ * different facts and the panel prints them differently.
+ */
+function windowOf(s: JupStats | undefined): TradeWindow | undefined {
+  if (!s) return undefined;
+  const w: TradeWindow = {
+    buys: Number.isFinite(s.numBuys) ? s.numBuys : undefined,
+    sells: Number.isFinite(s.numSells) ? s.numSells : undefined,
+    traders: Number.isFinite(s.numTraders) ? s.numTraders : undefined,
+    buyVolumeUsd: Number.isFinite(s.buyVolume) ? s.buyVolume : undefined,
+    sellVolumeUsd: Number.isFinite(s.sellVolume) ? s.sellVolume : undefined,
+  };
+  return Object.values(w).some((v) => v !== undefined) ? w : undefined;
+}
+
+/**
  * Whether the mint and freeze authorities are revoked, and whether this payload
  * actually SAYS.
  *
@@ -303,6 +330,21 @@ export function toSnapshot(m: JupMint, now = Date.now()): TokenSnapshot {
   const unmeasured: UnmeasuredField[] = [];
   const push = (f: UnmeasuredField) => unmeasured.push(f);
 
+  // POOLED LIQUIDITY, declared like everything else rather than coerced.
+  //
+  // This adapter had two answers for one field: the launch builder below passes
+  // `m.liquidity` through undefined and the feed prints "the source has not
+  // priced this pool yet", while the snapshot coerced the same undefined to a
+  // zero that the SCORER reads. Measured on 747MxrN9…pump at one minute old,
+  // Liquidity Quality charged -16.4 for "$0 pooled" while Jupiter's own API was
+  // reporting liquidity=3160.13 for that mint.
+  const liquidity = Number.isFinite(m.liquidity) ? m.liquidity : undefined;
+  if (liquidity === undefined) push("liquidity");
+  // And the two 24h CHANGES. A token four minutes old has no 24h history, and
+  // "+0.0% vs 24h ago" is a measurement of a period that has not happened.
+  if (s24h.liquidityChange === undefined) push("liquidityChange");
+  if (s24h.holderChange === undefined) push("holderGrowth");
+
   const top10 = frac(m.audit?.topHoldersPercentage);
   if (top10 === undefined) push("top10Pct");
   const devHolds = frac(m.audit?.devBalancePercentage);
@@ -335,6 +377,18 @@ export function toSnapshot(m: JupMint, now = Date.now()): TokenSnapshot {
   // Neither of these is in this payload at any depth.
   push("permanentDelegate");
   push("lpLocked");
+  // Nor is the LP PROVIDER COUNT, which is the other half of the lock figure.
+  // Only the risk vendor publishes it, and `liveFeatures` removes this from the
+  // set when that vendor actually returns a count — so an absent count keeps
+  // the LP penalty at full weight rather than buying a dispersion discount off
+  // a zero nobody computed.
+  push("lpProviders");
+  // The deployer's track record. Present on most pump.fun mints and absent on
+  // plenty of others, and the difference matters: an absent devMints arriving
+  // as zero makes `max(1, 0)` and reads as "first mint from this deployer — no
+  // track record either way", which is a claim about the wallet rather than an
+  // admission that nothing was published about it.
+  if (m.audit?.devMints === undefined) push("devHistory");
 
   return {
     mint: m.id,
@@ -342,7 +396,9 @@ export function toSnapshot(m: JupMint, now = Date.now()): TokenSnapshot {
     priceUsd: m.usdPrice ?? 0,
     marketCapUsd: m.mcap ?? 0,
     fdvUsd: m.fdv ?? m.mcap ?? 0,
-    liquidityUsd: m.liquidity ?? 0,
+    // Still a number, because the field is not optional — but it is declared
+    // unmeasured above when it is this default, so nothing scores it.
+    liquidityUsd: liquidity ?? 0,
     // Real 24h volume, both sides, rather than a figure divided down from it.
     volume24hUsd: (s24h.buyVolume ?? 0) + (s24h.sellVolume ?? 0),
     // Genuine 1h counts. The previous version divided 24h counts by 24, which
@@ -367,8 +423,28 @@ export function toSnapshot(m: JupMint, now = Date.now()): TokenSnapshot {
     volumeAccel: accel,
     holderGrowthPct: s24h.holderChange,
     liquidityChangePct: s24h.liquidityChange,
+    // All four windows, carried whole. `buys1h`/`sells1h` above are the two the
+    // feature vector reads; these are the twelve figures a reader actually
+    // scans, and they were already in this payload being thrown away.
+    windows: windowsOf(m),
     unmeasured,
   };
+}
+
+/** Every interval this payload broke out, or undefined if it broke out none. */
+function windowsOf(m: JupMint): Partial<Record<TradeWindowKey, TradeWindow>> | undefined {
+  const out: Partial<Record<TradeWindowKey, TradeWindow>> = {};
+  const pairs: [TradeWindowKey, JupStats | undefined][] = [
+    ["5m", m.stats5m],
+    ["1h", m.stats1h],
+    ["6h", m.stats6h],
+    ["24h", m.stats24h],
+  ];
+  for (const [key, stats] of pairs) {
+    const w = windowOf(stats);
+    if (w) out[key] = w;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 /**

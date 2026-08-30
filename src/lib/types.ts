@@ -97,6 +97,40 @@ export type UnmeasuredField =
   | "momentum"
   | "volumeAccel"
   /**
+   * POOLED LIQUIDITY. The field this list was built for, and the one it was
+   * missing.
+   *
+   * Jupiter returns `liquidity: undefined` on a freshly-minted token — its
+   * indexer has not priced the pool yet — and the snapshot builder coerced that
+   * to `0` while the LAUNCH builder in the same file passed it through and
+   * rendered "the source has not priced this pool yet". One field, two
+   * behaviours, twelve lines apart.
+   *
+   * The coerced side is the one that reaches the scorer, and a zero there is
+   * not a small error. Measured on 747MxrN9…pump at one minute old: "Liquidity
+   * Quality -16.4, $0 pooled" against "-1.0, $3.6K pooled" for the same mint
+   * minutes later, with Jupiter's API reporting liquidity=3160.13 the whole
+   * time. Every new mint's score was depressed by roughly sixteen points by an
+   * absence rendered as a confident zero — on precisely the population a
+   * launch terminal exists to look at.
+   *
+   * The liquidity factor also gates `exitDepthUsd`, `regimeOf` and the
+   * profiles' `minLiquidityUsd` floor, so this is the widest-blast-radius
+   * absence in the vector.
+   */
+  | "liquidity"
+  /**
+   * 24h CHANGE in that pool, and in the holder count.
+   *
+   * Separate from the levels, because a source can publish a level and no
+   * history — which is exactly the case on a token minutes old. Both were
+   * `?? 0` in `liveFeatures`, so a mint four minutes into its life scored
+   * "liquidity +0.0% vs 24h ago" and "holders +0.0% over 24h": measurements of
+   * a period that has not happened yet.
+   */
+  | "liquidityChange"
+  | "holderGrowth"
+  /**
    * Wallet flow. Real when a flow provider is configured and nothing at all
    * without one — and until it was declarable, the whale and smart-money
    * factors scored their placeholder zeros as "nobody is accumulating this",
@@ -166,6 +200,30 @@ export type UnmeasuredField =
    */
   | "devHistory";
 
+/** The four windows every reference terminal breaks activity down by. */
+export type TradeWindowKey = "5m" | "1h" | "6h" | "24h";
+
+/**
+ * Trade activity in one window, exactly as the source published it.
+ *
+ * Every field optional and NOTHING defaulted, because this is the panel a
+ * reader scans fastest and a zero here is the cheapest possible lie: "0 buys /
+ * 0 sells" and "the source does not break this window out" render identically
+ * unless the type can tell them apart.
+ *
+ * `traders` is what DEX Screener and Photon label MAKERS. Jupiter counts it
+ * directly (`numTraders`); DEX Screener does not publish it at all, so it stays
+ * undefined there rather than being approximated from buys + sells, which would
+ * count one wallet that did both twice.
+ */
+export interface TradeWindow {
+  buys?: number;
+  sells?: number;
+  traders?: number;
+  buyVolumeUsd?: number;
+  sellVolumeUsd?: number;
+}
+
 /** Point-in-time market state for a token. `ts` is when it was observed. */
 export interface TokenSnapshot {
   /** Fields this source could not supply. Absent or empty means all present. */
@@ -227,6 +285,18 @@ export interface TokenSnapshot {
   holderGrowthPct?: number;
   /** 24h change in pooled liquidity, percent. A draining pool is the rug tell. */
   liquidityChangePct?: number;
+  /**
+   * Buys, sells and distinct traders per window.
+   *
+   * The single most-glanced-at block on every reference terminal, and the one
+   * thing this app had in its payload and never showed: `buys1h` and `sells1h`
+   * were already in the vector, surfaced only as a derived "imbalance %" buried
+   * in one audit row. Jupiter ships all four windows in the same response as the
+   * price, so this costs nothing extra to carry.
+   *
+   * Absent when the source publishes no per-window breakdown at all.
+   */
+  windows?: Partial<Record<TradeWindowKey, TradeWindow>>;
 }
 
 export interface Candle {
@@ -1035,6 +1105,22 @@ export interface Signal {
    * state and it routes to abstention, not to a verdict.
    */
   securityVeto?: string;
+  /**
+   * A measured fact that CAPS the label without disqualifying the token.
+   *
+   * The middle rung the engine was missing. A live mint authority is a
+   * capability — the key exists and can be used unilaterally right now — so it
+   * vetoes outright. A deployer who has issued nineteen thousand mints is a
+   * base rate, not a capability: it cannot take anyone's money, it only makes
+   * this particular mint one attempt among thousands. Those two facts had one
+   * mechanism between them (a nine-point penalty) and a token could absorb the
+   * penalty and still render POSITIVE under the sentence describing the
+   * factory.
+   *
+   * So this holds the label at WATCH: the tape may be strong and the score says
+   * so, but the engine will not call it positive on tape alone.
+   */
+  labelCap?: string;
   profile: StrategyProfileId;
   factors: SignalFactor[];
   risks: RiskFlag[];

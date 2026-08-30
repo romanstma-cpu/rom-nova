@@ -18,7 +18,14 @@
 import { providerFetch } from "./http";
 import { hueOf, narrativeOf } from "./classify";
 import type { MarketDataProvider, TokenDataProvider } from "./types";
-import type { Candle, TokenInfo, TokenSnapshot, UnmeasuredField } from "../types";
+import type {
+  Candle,
+  TokenInfo,
+  TokenSnapshot,
+  TradeWindow,
+  TradeWindowKey,
+  UnmeasuredField,
+} from "../types";
 
 const BASE = "https://api.dexscreener.com";
 const SOLANA = "solana";
@@ -41,6 +48,16 @@ const DEX_UNMEASURED: readonly UnmeasuredField[] = [
   "authorities",
   "permanentDelegate",
   "lpLocked",
+  // Nor who provides that liquidity, nor what else the deployer has minted.
+  // Both are undeclared zeros otherwise, and both of those zeros read as
+  // findings: "one party holds the pool" and "first mint from this wallet".
+  "lpProviders",
+  "devHistory",
+  // No 24h history for the pool or the holder base. Both were `?? 0` at the
+  // engine seam, which scored "flat" — a measurement of a trend nobody
+  // published, and on a token minutes old, of a day that has not happened.
+  "liquidityChange",
+  "holderGrowth",
 ];
 
 interface DexPair {
@@ -151,8 +168,36 @@ function toSnapshot(pools: DexPair[], mint: string): TokenSnapshot {
     bundlerPct: 0,
     sniperPct: 0,
     insiderPct: 0,
+    // Buys and sells per window, summed across every pool the way volume and
+    // liquidity already are. `traders` is deliberately absent: this API counts
+    // transactions, not distinct wallets, and buys + sells would double-count
+    // anyone who did both.
+    windows: dexWindows(pools),
     unmeasured: DEX_UNMEASURED,
   };
+}
+
+/** Buys and sells per window, summed over every pool. */
+function dexWindows(pools: DexPair[]): Partial<Record<TradeWindowKey, TradeWindow>> | undefined {
+  const keys: [TradeWindowKey, string][] = [
+    ["5m", "m5"],
+    ["1h", "h1"],
+    ["6h", "h6"],
+    ["24h", "h24"],
+  ];
+  const out: Partial<Record<TradeWindowKey, TradeWindow>> = {};
+  for (const [key, api] of keys) {
+    // Present only when at least one pool broke the window out at all — an
+    // absent window and a genuinely quiet one must not look the same.
+    if (!pools.some((p) => p.txns?.[api])) continue;
+    // Volume is published per window but NOT split by side, so the two volume
+    // fields stay undefined rather than being halved into a fiction.
+    out[key] = {
+      buys: sumBy(pools, (p) => p.txns?.[api]?.buys),
+      sells: sumBy(pools, (p) => p.txns?.[api]?.sells),
+    };
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 export class DexScreenerTokenProvider implements TokenDataProvider {

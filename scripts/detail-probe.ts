@@ -72,7 +72,25 @@ async function main(): Promise<void> {
   console.log(`\n  CREATOR`);
   console.log(`    address ${c.address ?? "—"}${c.vendorAddress && c.vendorAddress !== c.address ? `  (vendor says ${c.vendorAddress})` : ""}`);
   console.log(`    mints ${c.mints ?? "—"}  migrations ${c.migrations ?? "—"}  launchpad ${c.launchpad ?? "—"}`);
-  console.log(`    still holds ${c.holdsPct !== undefined ? `${(c.holdsPct * 100).toFixed(3)}%` : "UNMEASURED"}${c.vendorHoldsPct !== undefined ? `  (vendor ${(c.vendorHoldsPct * 100).toFixed(3)}%)` : ""}`);
+  // Reads `holdsShown`, exactly as the page does. Printing `holdsPct` and
+  // `vendorHoldsPct` as two independent lines is what produced "still holds
+  // UNMEASURED (vendor 0.000%)" — the probe reproducing the page's own
+  // contradiction, one line apart, on PUMP, SKHY, TRX and CATE.
+  console.log(
+    `    still holds ${
+      c.holdsShown ? `${(c.holdsShown.pct * 100).toFixed(3)}% (per ${c.holdsShown.source})` : "UNMEASURED — nobody published it"
+    }${
+      c.vendorHoldsPct !== undefined && c.holdsShown && c.holdsShown.source !== d.risk?.source
+        ? `  (${d.risk?.source} independently says ${(c.vendorHoldsPct * 100).toFixed(3)}%)`
+        : ""
+    }`,
+  );
+  const s = d.supply;
+  console.log(
+    `    supply ${s.supply !== undefined ? s.supply.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "—"}` +
+      `  fdv ${s.fdvUsd !== undefined ? usd(s.fdvUsd) : "—"}` +
+      `  liq/mcap ${s.liqToMcap !== undefined ? `${(s.liqToMcap * 100).toFixed(2)}%` : "—"}`,
+  );
 
   console.log(`\n  SECURITY`);
   console.log(`    authorities ${d.authorityChecked ? `read by ${d.authoritySource}` : "UNVERIFIED — nobody read the mint account"}`);

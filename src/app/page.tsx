@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useApi, useEventStream, fmtUsd, fmtPct, fmtNum, fmtAge } from "@/lib/client";
+import { useApi, useEventStream, fmtUsd, fmtPct, fmtNum, fmtAge, whaleFlowCell } from "@/lib/client";
 import { Score, Stat, TokenMark } from "@/components/ui/bits";
 import { FirstRun } from "@/components/FirstRun";
 import { ActivityFeed } from "@/components/feed/ActivityFeed";
@@ -185,7 +185,13 @@ export default function Dashboard() {
                 <th className="text-right px-2 font-medium">Price</th>
                 <th className="text-right px-2 font-medium">24h</th>
                 <th className="text-right px-2 font-medium">Mcap</th>
-                <th className="text-right px-2 font-medium">Whale 6h</th>
+                {/* Ten minutes of chain, not six hours — see whaleFlowCell. */}
+                <th
+                  className="text-right px-2 font-medium"
+                  title="Net movement by wallets that moved $20,000+ of this token, over a short chain scan — ten minutes, not six hours."
+                >
+                  Whale flow
+                </th>
                 <th className="text-right px-3 font-medium">Signal</th>
               </tr>
             </thead>
@@ -202,7 +208,12 @@ export default function Dashboard() {
                   <td className="text-right px-2">{fmtUsd(r.priceUsd)}</td>
                   <td className={`text-right px-2 ${r.h24 >= 0 ? "pos" : "neg"}`}>{fmtPct(r.h24)}</td>
                   <td className="text-right px-2 dim">{fmtUsd(r.marketCapUsd)}</td>
-                  <td className={`text-right px-2 ${r.whaleFlow6hUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(r.whaleFlow6hUsd)}</td>
+                  <td
+                    className={`text-right px-2 ${whaleFlowCell(r.whaleFlowUsd, r.flowMinutes).cls}`}
+                    title={whaleFlowCell(r.whaleFlowUsd, r.flowMinutes).title}
+                  >
+                    {fmtUsd(r.whaleFlowUsd)}
+                  </td>
                   <td className="text-right px-3">
                     <Score value={r.signalScore} width={44} scored={r.scored !== false} reason={r.unscoredReason} />
                   </td>

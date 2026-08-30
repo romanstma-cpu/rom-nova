@@ -31,6 +31,8 @@ import type { DemoStore } from "../demo/store";
 import { FLAGS, getProviders } from "../providers/registry";
 import { DexScreenerTokenProvider } from "../providers/dexscreener";
 import { JupiterTokenProvider } from "../providers/jupiter";
+import { JupiterChartProvider } from "../providers/jupiter-chart";
+import { noteOutcome } from "../providers/health-log";
 import { ChainWalletProvider, isPlausibleAddress, WSOL } from "../providers/wallet-chain";
 import { resolveRpcRoute, type RpcRuntime } from "../providers/rpc-endpoint";
 import { identifyAccount } from "../providers/account-kind";
@@ -59,6 +61,42 @@ export const DEMO: Provenance = {
   real: false,
   note: "deterministic synthetic universe",
 };
+
+/** What the last candle fetch did, so the nav chip can stop guessing from the
+ *  provider's name. Recorded in a leaf module the registry can also read. */
+const noteCandleOutcome = (ok: boolean, note?: string) => noteOutcome("candles", ok, note);
+
+/**
+ * The second history source, tried only when the first gives nothing.
+ *
+ * Ordered rather than replacing: GeckoTerminal serves ~1,000 hourly bars and
+ * works whenever it is not throttled, and swapping out a source that works is
+ * not a fix for a source that is throttled.
+ */
+async function tryChartFallback(
+  mint: string,
+  from?: number,
+  to?: number,
+): Promise<Sourced<Candle[]> | null> {
+  try {
+    const alt = new JupiterChartProvider();
+    const candles = await alt.getCandles(mint, from ?? 0, to ?? Date.now());
+    if (candles.length === 0) return null;
+    noteCandleOutcome(true);
+    return {
+      data: candles,
+      provenance: {
+        source: alt.name,
+        real: true,
+        note: "the primary history source returned nothing or was rate-limited; these bars are Jupiter's",
+      },
+    };
+  } catch {
+    // A failing fallback is not worth its own error surface — the caller
+    // already has the primary's reason, which is the one a reader can act on.
+    return null;
+  }
+}
 
 /**
  * Candles for a mint, from the best configured source.
@@ -93,8 +131,14 @@ export async function candlesFor(
     // than being passed through as undefined.
     const candles = await market.getCandles(mint, from ?? 0, to ?? Date.now());
     if (candles.length > 0) {
+      noteCandleOutcome(true);
       return { data: candles, provenance: { source: market.name, real: true } };
     }
+    // Empty is not necessarily "no such pool" — try the second source before
+    // deciding, for the same reason the throw path does.
+    const second = await tryChartFallback(mint, from, to);
+    if (second) return second;
+    noteCandleOutcome(false, `${market.name} returned no history`);
     return fallback(`${market.name} returned no history for this mint`);
   } catch (err) {
     // The reason is kept rather than swallowed. A provider failing silently
@@ -108,6 +152,23 @@ export async function candlesFor(
     // false and the fastest way to teach them to ignore the chip.
     const why = err instanceof Error ? err.message : String(err);
     const missing = /\b404\b/.test(why);
+    // The SECOND source, before the simulator. This is the branch that matters:
+    // a throttled GeckoTerminal answers 429 with no ACAO header, which a browser
+    // reports as `TypeError: Failed to fetch` — indistinguishable from an
+    // outage, and it took every chart in the app down with it.
+    if (!missing) {
+      const second = await tryChartFallback(mint, from, to);
+      if (second) {
+        return {
+          ...second,
+          provenance: {
+            ...second.provenance,
+            note: `${market.name} failed (${why}); these bars are Jupiter's`,
+          },
+        };
+      }
+    }
+    noteCandleOutcome(!missing ? false : true, missing ? undefined : why);
     return fallback(
       missing
         ? `not listed on ${market.name} — no on-chain history for this mint`
@@ -324,7 +385,7 @@ async function scoreRows(
       // whole time; nothing copied it across. A zero presented as a measurement
       // is the failure this codebase is built to prevent, and it was sitting in
       // the most prominent flow column in the app.
-      whaleFlow6hUsd: s.result.features.whaleNetFlowUsd,
+      whaleFlowUsd: s.result.features.whaleNetFlowUsd,
       smFlow6hUsd: s.result.features.smartMoneyNetFlowUsd,
       smWallets: s.result.features.smartMoneyWallets,
       flowMinutes: flow ? Math.round(flow.blocksCovered / 150) : undefined,

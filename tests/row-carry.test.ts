@@ -4,7 +4,7 @@
 // This file exists because of a bug that shipped and survived: `scoreRows`
 // assembled each live row from the base row plus the signal, and copied the
 // score, the confidence, the label and the flow WALLETS — but not the flow
-// NUMBER. So `whaleFlow6hUsd` kept the placeholder zero from
+// NUMBER. So `whaleFlowUsd` kept the placeholder zero from
 // `buildLiveTokenRows`, and the scanner rendered "whale 6h $0" beside a tooltip
 // listing a wallet that had just moved $249,426. The vector held the right
 // number the entire time.
@@ -106,7 +106,7 @@ describe("the flow-number carry", () => {
   // placeholder zero, and a spread that forgets to overwrite it.
   it("a spread that omits the field leaves the placeholder behind", () => {
     const [base] = buildLiveTokenRows([{ ...info, snapshot }], "jupiter");
-    expect(base.whaleFlow6hUsd).toBe(0);
+    expect(base.whaleFlowUsd).toBe(0);
 
     // What the buggy version did — everything except the number.
     const buggy: TokenRow = {
@@ -114,14 +114,14 @@ describe("the flow-number carry", () => {
       topWallets: [{ owner: "whale1", usd: -249_426 }],
       scored: true,
     };
-    expect(buggy.whaleFlow6hUsd).toBe(0);
+    expect(buggy.whaleFlowUsd).toBe(0);
     // And the contradiction it produced on screen: a $0 netflow beside a
     // quarter-million-dollar mover.
     expect(Math.abs(buggy.topWallets![0].usd)).toBeGreaterThan(200_000);
 
     // What it must do instead.
-    const fixed: TokenRow = { ...buggy, whaleFlow6hUsd: -209_569.5 };
-    expect(fixed.whaleFlow6hUsd).toBeCloseTo(-209_569.5, 1);
+    const fixed: TokenRow = { ...buggy, whaleFlowUsd: -209_569.5 };
+    expect(fixed.whaleFlowUsd).toBeCloseTo(-209_569.5, 1);
   });
 
   it("a row reporting movers must not also report a zero netflow", () => {
@@ -129,13 +129,13 @@ describe("the flow-number carry", () => {
     // the netflow cannot be exactly zero unless they cancelled — and a row that
     // claims both without cancelling is showing two answers to one question.
     const rows: TokenRow[] = [
-      { ...buildLiveTokenRows([{ ...info, snapshot }], "jupiter")[0], whaleFlow6hUsd: -209_569.5, topWallets: [{ owner: "w", usd: -249_426 }] },
+      { ...buildLiveTokenRows([{ ...info, snapshot }], "jupiter")[0], whaleFlowUsd: -209_569.5, topWallets: [{ owner: "w", usd: -249_426 }] },
     ];
     for (const r of rows) {
       const biggest = Math.max(0, ...(r.topWallets ?? []).map((w) => Math.abs(w.usd)));
       const measured = !(r.unmeasured ?? []).includes("whaleFlow" as never);
       if (measured && biggest > 20_000) {
-        expect(r.whaleFlow6hUsd, "a whale-sized mover with a zero netflow is the carry bug").not.toBe(0);
+        expect(r.whaleFlowUsd, "a whale-sized mover with a zero netflow is the carry bug").not.toBe(0);
       }
     }
   });

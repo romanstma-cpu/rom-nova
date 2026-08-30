@@ -40,7 +40,21 @@ export interface TokenRow {
   organicScore: number;
   socialScore: number;
   volumeAccel: number;
-  whaleFlow6hUsd: number;
+  /**
+   * Net whale movement over the window the flow read ACTUALLY covered.
+   *
+   * Called `whaleFlow6hUsd` until now, under a column header reading "Whale
+   * 6h", fed by a chain scan whose window is ten minutes. The token page
+   * said so in as many words — "the flow window is ten minutes, not the life of
+   * the chart" — while the scanner beside it promised six hours.
+   *
+   * Six hours is not available at any price this app pays: ten minutes of
+   * balance deltas costs ~0.3MB and the scan is byte-budgeted. So the NAME
+   * changed rather than the window, and `flowMinutes` below carries what was
+   * really covered, per row, because a truncated read covers less than it asked
+   * for.
+   */
+  whaleFlowUsd: number;
   smFlow6hUsd: number;
   smWallets: number;
   signalScore: number;
@@ -162,7 +176,7 @@ export function buildTokenRows(
       organicScore: snap.organicScore,
       socialScore: snap.socialScore,
       volumeAccel: f.volumeAccel,
-      whaleFlow6hUsd: f.whaleNetFlowUsd,
+      whaleFlowUsd: f.whaleNetFlowUsd,
       smFlow6hUsd: f.smartMoneyNetFlowUsd,
       smWallets: f.smartMoneyWallets,
       signalScore: s.score,
@@ -232,7 +246,7 @@ export function buildLiveTokenRows(
       organicScore: snap.organicScore,
       socialScore: snap.socialScore,
       // No keyless source sees wallet-level flow. Declared, not faked.
-      whaleFlow6hUsd: 0,
+      whaleFlowUsd: 0,
       smFlow6hUsd: 0,
       smWallets: 0,
       signalScore: 0,

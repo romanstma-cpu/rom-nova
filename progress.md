@@ -42,7 +42,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 | # | Stream | Reference to beat | State |
 |---|---|---|---|
 | W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | ✅ shipped in 1.4.0 · critic list open |
-| W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | 🔍 round 2 built · critic reviewing |
+| W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | 🟢 round 2 · 2 defects closed, re-review due |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | 🔨 round 3 · LP over-penalty |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ⏸ until W1–W3 pass |
 | W5 | Alerts that actually fire | Cielo alerts, Photon alerts | ⏸ until W1–W3 pass |
@@ -168,6 +168,40 @@ Its calibration comment was stale (median deployer 75 → **32**) and is now tru
 
 **Clock note:** this machine is 2.850s behind and *drifting* — 2.39s → 2.787s →
 2.850s across the session. Always the direction that flatters a latency claim.
+
+### Round-2 review: 8 of 9 fixed, verified — then two small defects
+
+The critic proved which build it was looking at by SHA256-matching the served
+bytes against the worktree, ran an 8-minute session with 187 tracked arrivals,
+and staged a **deliberate 79-second outage**. At 65s in: red `■` instead of the
+pulsing dot, `last pass failed` instead of `+N`, `mint lag —`, and a banner
+naming 65s / 17 attempts / `Failed to fetch`. Recovery in 10s. That closes
+round 1's critical item properly.
+
+**Graduation latency: p50 123.6s → 3.9s end-to-end, against a vendor floor of
+4.0s.** It is *at* the floor — the remaining gap to Axiom is the vendor's own
+indexing, not the app.
+
+Both remaining defects are now **fixed on main**, and both were one condition
+wide — and both contradicted something the page was already saying correctly one
+cell away:
+
+- **`near graduation` returned already-graduated tokens.** `mergeLaunch`
+  preserves `bondingCurvePct` through graduation, so a graduated row kept a
+  stale curve value and passed the `>= 0.8` test — while its own Curve cell read
+  *"n/a — graduated, the curve is gone"*. Two of three matches in review were
+  graduations. A sniper asking what is about to migrate got the one set they
+  cannot act on.
+- **The clock check watched the wrong pipeline.** Graduations cross zero FIRST —
+  they arrive in seconds, so a 2.88s offset is a large fraction of the figure,
+  while mints lag longer and stay positive. The UI printed **`grad lag -0s`** and
+  warned about nothing. The critic's second pass settled the cause: across **215
+  samples there were zero negative arrival lags at the vendors** — every row was
+  older than the `Date` header on its own response, so the negatives on screen
+  were this machine's skew and nothing else.
+
+397 tests. `tests/launch-filters.test.ts` covers the case that hid the second
+one: mints plausible while graduations are already negative.
 
 ### Why a critic on the merged build
 

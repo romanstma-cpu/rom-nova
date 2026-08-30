@@ -13,7 +13,6 @@ import { GeckoTerminalMarketProvider, GeckoTerminalTokenProvider } from "./gecko
 import { SolanaRpcSecurityProvider } from "./solana-rpc";
 import { SqdFlowProvider } from "./sqd";
 import { RugCheckRiskProvider } from "./rugcheck";
-import { ChainWalletProvider } from "./wallet-chain";
 import { JupiterHoldingsProvider } from "./holdings";
 import type {
   MarketDataProvider,
@@ -214,15 +213,17 @@ export function getProviders(): ProviderSet {
     mode: anyLive ? "live" : "demo",
     token,
     market,
-    // Helius first where a key exists — it reads a wallet's whole life, which
-    // the keyless path cannot. Below it the chain itself, for the last two
-    // days. Below that the simulator, which is now only reached by turning the
-    // keyless path off on purpose.
-    wallet: FLAGS.helius()
-      ? new HeliusWalletProvider()
-      : FLAGS.walletChain()
-        ? new ChainWalletProvider()
-        : new DemoWalletProvider(),
+    // Helius where a key exists. Below it the DEMO adapter, deliberately: the
+    // keyless chain reader does not implement `WalletDataProvider` at all.
+    //
+    // That interface promises `WalletTrade[]`, and a WalletTrade requires a
+    // price — but 46% of a real wallet's movements have none, and the adapter
+    // that satisfied the interface did so by silently dropping them and
+    // labelling every remaining fill `dex: "Raydium"` because the union has no
+    // honest member. Nothing called it. The real reader is reached through
+    // `walletProfile()` in api/source.ts, which returns a shape that can say
+    // "no price observed", and `dataMode()` reports it separately.
+    wallet: FLAGS.helius() ? new HeliusWalletProvider() : new DemoWalletProvider(),
     // Birdeye first: it is the only source here with holder distribution, and
     // concentration is the larger half of a security grade.
     //
@@ -298,13 +299,24 @@ export function dataMode(): DataMode {
   (p.market.name === "demo" ? simulated : live).push("prices & candles");
   (p.security.name === "demo" ? simulated : live).push("mint & freeze authority");
   (p.flow ? live : simulated).push("whale flow");
-  if (p.wallet.name === "demo") {
-    simulated.push("wallet activity");
-  } else if (p.wallet.name === "solana-rpc") {
+  // Wallet activity is real whenever the chain reader is on, whatever the
+  // `wallet` provider slot holds — that slot is the WalletTrade contract, which
+  // the chain reader deliberately does not implement. See getProviders().
+  if (FLAGS.walletChain() || p.wallet.name !== "demo") {
     live.push("wallet activity");
-    bounded.push("wallet trade history — last ~48h only (public RPC retention)");
+    if (FLAGS.walletChain() && !FLAGS.helius()) {
+      // Two depths, and one label over both would be false for one of them.
+      bounded.push(
+        "wallet FILLS & PnL — last ~2 days in every runtime (the only endpoint serving older " +
+          "transaction bodies allows ten getTransaction calls per window)",
+      );
+      bounded.push(
+        "wallet AGE & lifetime transaction count — full index in the desktop app and server " +
+          "mode; not readable from a browser tab, which cannot omit the Origin header",
+      );
+    }
   } else {
-    live.push("wallet activity");
+    simulated.push("wallet activity");
   }
   if (p.holdings) {
     live.push("wallet positions");

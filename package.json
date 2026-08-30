@@ -21,7 +21,8 @@
     "probe:jupiter": "npx --yes esbuild scripts/jupiter-probe.ts --bundle --platform=node --outfile=node_modules/.cache/jup.cjs --log-level=error && node --max-old-space-size=4096 node_modules/.cache/jup.cjs",
     "probe:whale": "npx --yes esbuild scripts/whale-probe.ts --bundle --platform=node --outfile=node_modules/.cache/whale.cjs --log-level=error && node --max-old-space-size=4096 node_modules/.cache/whale.cjs",
     "probe:label": "npx --yes esbuild scripts/label-probe.ts --bundle --platform=node --outfile=node_modules/.cache/label.cjs --log-level=error && node --max-old-space-size=4096 node_modules/.cache/label.cjs",
-    "probe:wallet": "npx --yes esbuild scripts/wallet-probe.ts --bundle --platform=node --outfile=node_modules/.cache/wallet.cjs --log-level=error && node --max-old-space-size=4096 node_modules/.cache/wallet.cjs"
+    "probe:wallet": "npx --yes esbuild scripts/wallet-probe.ts --bundle --platform=node --outfile=node_modules/.cache/wallet.cjs --log-level=error && node --max-old-space-size=4096 node_modules/.cache/wallet.cjs",
+    "probe:desktop-rpc": "node scripts/desktop-rpc-probe.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",

@@ -43,6 +43,7 @@ function fill(over: Partial<WalletFill>): WalletFill {
 
 const COVERAGE: WalletCoverage = {
   source: "solana-rpc",
+  runtime: "node",
   newestTs: T0 + 4 * H,
   oldestTs: T0,
   windowHours: 4,
@@ -50,9 +51,14 @@ const COVERAGE: WalletCoverage = {
   transactionsRead: 10,
   transactionsFailed: 0,
   transactionsRefused: 0,
+  transactionsUnavailable: 0,
   cappedByBudget: false,
   reachedEndpointLimit: true,
   lifetime: false,
+  indexArchival: false,
+  indexComplete: true,
+  firstSeenTs: T0,
+  historyDays: 0,
   note: "test window",
 };
 
@@ -271,6 +277,91 @@ describe("assembleProfile — what reaches the screen", () => {
     expect(p.holdings?.unpricedMints).toBe(1);
     expect(p.holdings?.valuedUsd).toBeCloseTo(30, 9);
     expect(p.positions.find((x) => x.mint === B)?.valueUsd).toBeUndefined();
+  });
+
+  // The 52% understatement. Binance's hot wallet showed $162.20M of tokens
+  // while holding 1,661,879 SOL — $174.9M more — that the headline omitted
+  // because native SOL is not a token account.
+  it("counts native SOL in the portfolio value", () => {
+    const p = assembleProfile({
+      address: W,
+      fills: [],
+      coverage: COVERAGE,
+      holdings: { source: "jupiter", solBalance: 1000, tokens: [{ mint: A, tokens: 10, decimals: 6, frozen: false, excludeFromNetWorth: false }] },
+      prices: new Map([[A, 5]]),
+      solPriceUsd: 100,
+    });
+    expect(p.holdings?.tokenValueUsd).toBeCloseTo(50, 9);
+    expect(p.holdings?.solValueUsd).toBeCloseTo(100_000, 9);
+    expect(p.holdings?.valuedUsd).toBeCloseTo(100_050, 9);
+  });
+
+  // No SOL price means no SOL value — it must stay OUT of the sum rather than
+  // joining it as zero, which would understate the wallet all over again while
+  // looking like a measurement.
+  it("leaves SOL out of the total when no SOL price is available", () => {
+    const p = assembleProfile({
+      address: W,
+      fills: [],
+      coverage: COVERAGE,
+      holdings: { source: "jupiter", solBalance: 1000, tokens: [{ mint: A, tokens: 10, decimals: 6, frozen: false, excludeFromNetWorth: false }] },
+      prices: new Map([[A, 5]]),
+    });
+    expect(p.holdings?.solValueUsd).toBeUndefined();
+    expect(p.holdings?.valuedUsd).toBeCloseTo(50, 9);
+    expect(p.holdings?.solBalance).toBe(1000);
+  });
+
+  // Realized PnL accumulates on every priced sell; a round trip is only
+  // recorded on a full close. The blind review saw −$4.24 above a table
+  // summing to −$0.45 and could not reconcile them.
+  it("separates partial exits from full closes so the two figures reconcile", () => {
+    const p = assembleProfile({
+      address: W,
+      fills: [
+        fill({ side: "buy", tokens: 100, priceUsd: 1, ts: T0 }),
+        // Trims half at a loss: booked, but closes nothing.
+        fill({ side: "sell", tokens: 50, priceUsd: 0.5, ts: T0 + H }),
+      ],
+      coverage: COVERAGE,
+      holdings: holdings([{ mint: A, tokens: 50 }]),
+      prices: new Map([[A, 0.5]]),
+    });
+    expect(p.stats.roundTrips).toBe(0);
+    expect(p.stats.partialExits).toBe(1);
+    expect(p.stats.partialExitPnlUsd).toBeCloseTo(-25, 9);
+    // Present despite no round trip closing — it is real money.
+    expect(p.stats.realizedPnlUsd).toBeCloseTo(-25, 9);
+    expect(p.provenance.join(" ")).toMatch(/PARTIAL exit/i);
+  });
+
+  it("reports a non-wallet address as unprofilable rather than as a trader", () => {
+    const p = assembleProfile({
+      address: W,
+      fills: [],
+      coverage: COVERAGE,
+      holdings: null,
+      prices: new Map(),
+      identity: { kind: "mint", detail: "this is a TOKEN MINT", profilable: false },
+    });
+    expect(p.identity.profilable).toBe(false);
+    expect(p.identity.kind).toBe("mint");
+  });
+
+  // The balances-only first paint. Its empty fill list means "not read yet",
+  // which is the opposite of "this wallet has never traded".
+  it("carries the stage so a first paint is not read as an empty wallet", () => {
+    const p = assembleProfile({
+      address: W,
+      fills: [],
+      coverage: COVERAGE,
+      holdings: holdings([{ mint: A, tokens: 10 }]),
+      prices: new Map([[A, 1]]),
+      stage: "balances",
+    });
+    expect(p.stage).toBe("balances");
+    expect(p.stats.realizedPnlUsd).toBeUndefined();
+    expect(p.stats.pricedFills).toBe(0);
   });
 
   it("names the window and the sources in its provenance", () => {

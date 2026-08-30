@@ -373,14 +373,32 @@ export interface WalletFill {
 export interface WalletCoverage {
   /** The adapter that answered — "solana-rpc", never "demo" for a real read. */
   source: string;
+  /**
+   * Which runtime read this, because the three see different depths.
+   *
+   * The archival RPC refuses any request carrying an Origin header, so a
+   * browser tab is capped at ~2 days while the server route and the desktop
+   * shell's main-process proxy reach the whole index. One label over all three
+   * would be false for two of them.
+   */
+  runtime: "node" | "desktop" | "browser";
   /** ms epoch of the newest and oldest transaction actually read. */
   newestTs: number;
   oldestTs: number;
-  /** The span the numbers below actually describe. */
+  /** The span the PRICED FILLS below describe. Not the wallet's age. */
   windowHours: number;
   signaturesListed: number;
   transactionsRead: number;
   transactionsFailed: number;
+  /**
+   * Transactions the fast endpoint no longer holds the body for.
+   *
+   * Not a failure and not counted as one: measured, publicnode returns null for
+   * every signature older than ~2 days while serving recent ones perfectly.
+   * The index still counts these, so a wallet can show 5,942 lifetime
+   * transactions and 112 priced ones without either number being wrong.
+   */
+  transactionsUnavailable: number;
   /**
    * How many of `transactionsFailed` were the endpoint's rate limit rather
    * than a genuine miss.
@@ -403,6 +421,27 @@ export interface WalletCoverage {
   reachedEndpointLimit: boolean;
   /** False on every keyless read. Present so a keyed source could set it true. */
   lifetime: boolean;
+  /**
+   * True when the SIGNATURE INDEX reached past the ~2-day public window.
+   *
+   * Deliberately separate from `lifetime`. The index being archival means the
+   * wallet's AGE and lifetime transaction COUNT are real; it does not mean the
+   * fills are, because the only endpoint serving old transaction bodies allows
+   * ten `getTransaction` calls per window.
+   */
+  indexArchival: boolean;
+  /** The index ran out naturally rather than hitting our page cap. */
+  indexComplete: boolean;
+  /**
+   * ms epoch of the OLDEST signature the index reached.
+   *
+   * With `indexArchival && indexComplete` this is the wallet's first ever
+   * transaction. Otherwise it is a lower bound: the wallet is AT LEAST this
+   * old. A reader must never be shown the second as though it were the first.
+   */
+  firstSeenTs: number;
+  /** Days since `firstSeenTs`, on the same "at least" caveat. */
+  historyDays: number;
   note: string;
 }
 
@@ -460,17 +499,62 @@ export interface WalletWindowStats {
   /** Tokens sold out of lots we never saw bought. Excluded from realized PnL. */
   unmatchedSellTokens: number;
   unmatchedSellMints: number;
+  /**
+   * Realized PnL from sells that did NOT close a position.
+   *
+   * `realizedPnlUsd` accumulates on every priced sell, but a round trip is only
+   * recorded when the position goes flat — so a wallet that trims twice and
+   * never exits has a headline PnL and an empty round-trips table. The blind
+   * review hit exactly that: −$4.24 above a table summing to −$0.45, both
+   * correct and irreconcilable on screen. This is the difference, named.
+   */
+  partialExitPnlUsd: number;
+  /** How many priced sells reduced a position without closing it. */
+  partialExits: number;
 }
 
 export interface WalletProfile {
   address: string;
+  /**
+   * How much of this wallet has been read.
+   *
+   * "balances" is the fast first paint — identity, holdings and prices, a few
+   * hundred milliseconds — with the fill history still outstanding. Every
+   * fill-derived figure is absent rather than zero at that point, and the UI
+   * must render "reading…" and not "no trades", which are opposite claims.
+   */
+  stage: "balances" | "full";
+  /**
+   * What the address turned out to be.
+   *
+   * A token mint owns token accounts and a program's authority holds balances,
+   * so both render as plausible "traders" if nobody checks. The blind review
+   * pasted a mint in and got "$520.8K portfolio, 144 positions" with no warning.
+   */
+  identity: {
+    kind: string;
+    detail: string;
+    profilable: boolean;
+  };
   coverage: WalletCoverage;
   holdings: {
     source: string;
     solBalance: number;
+    /**
+     * Native SOL valued at the current SOL price, when one was available.
+     *
+     * Its own field because omitting it was a 52% understatement on the one
+     * wallet where it was checked: Binance's hot wallet showed $162.20M of
+     * tokens while holding 1,661,879 SOL — $174.9M more — that the headline
+     * simply left out. Undefined when no SOL price could be read, which keeps
+     * it out of the total rather than adding zero to it.
+     */
+    solValueUsd?: number;
     /** Mints with a non-zero balance. */
     mints: number;
-    /** USD across the mints a price was found for. */
+    /** USD across the mints a price was found for, EXCLUDING native SOL. */
+    tokenValueUsd: number;
+    /** Tokens plus native SOL — what a reader means by "this wallet is worth". */
     valuedUsd: number;
     pricedMints: number;
     /** Mints held but not valued — the price budget ran out or Jupiter had none. */

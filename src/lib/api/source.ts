@@ -31,8 +31,12 @@ import type { DemoStore } from "../demo/store";
 import { FLAGS, getProviders } from "../providers/registry";
 import { DexScreenerTokenProvider } from "../providers/dexscreener";
 import { JupiterTokenProvider } from "../providers/jupiter";
-import { ChainWalletProvider, isPlausibleAddress } from "../providers/wallet-chain";
+import { ChainWalletProvider, isPlausibleAddress, WSOL } from "../providers/wallet-chain";
+import { resolveRpcRoute, type RpcRuntime } from "../providers/rpc-endpoint";
+import { identifyAccount } from "../providers/account-kind";
+import { getSolReference } from "../providers/reference";
 import { assembleProfile } from "../engine/wallet-profile";
+import type { WalletCoverage } from "../types";
 import { liveSignal } from "../engine/live-features";
 import { buildLiveTokenRows, riskLevelOf, type TokenRow } from "./rows";
 
@@ -383,45 +387,97 @@ const walletInFlight = new Map<string, Promise<Sourced<WalletProfile> | null>>()
  * the readable window is a real answer, and the coverage block says so more
  * usefully than a 404 would.
  */
-export async function walletProfile(address: string): Promise<Sourced<WalletProfile> | null> {
-  if (!isPlausibleAddress(address)) return null;
-  const providers = getProviders();
-  if (providers.wallet.name !== "solana-rpc") return null;
+/**
+ * How much of a wallet to read.
+ *
+ * Two stages rather than one, because they cost two orders of magnitude apart
+ * and the cheap one is what a reader looks at first. Identity and balances are
+ * three requests and a few hundred milliseconds; the fill history is up to four
+ * hundred and measured at 28.7 seconds in its worst case. Blocking the first on
+ * the second is what made the page feel broken.
+ */
+export type WalletStage =
+  /** Identity, balances, prices. No signatures, no transactions. */
+  | "balances"
+  /** Everything, including the fills and every figure derived from them. */
+  | "full";
 
-  const hit = walletCache.get(address);
+export async function walletProfile(
+  address: string,
+  stage: WalletStage = "full",
+): Promise<Sourced<WalletProfile> | null> {
+  if (!isPlausibleAddress(address)) return null;
+  // Gated on the FLAG, not on the `wallet` provider slot. The chain reader does
+  // not implement `WalletDataProvider` — it cannot, because that interface has
+  // no way to express "this movement had no price" — so it never occupies that
+  // slot, and keying off it here silently disabled the entire feature.
+  if (!FLAGS.walletChain()) return null;
+
+  const key = `${stage}:${address}`;
+  const hit = walletCache.get(key);
   if (hit && Date.now() - hit.at < WALLET_CACHE_MS) return hit.value;
-  const flying = walletInFlight.get(address);
+  const flying = walletInFlight.get(key);
   if (flying) return flying;
 
-  const job = buildWalletProfile(address).finally(() => walletInFlight.delete(address));
-  walletInFlight.set(address, job);
+  const job = buildWalletProfile(address, stage).finally(() => walletInFlight.delete(key));
+  walletInFlight.set(key, job);
   const fresh = await job;
-  if (fresh) walletCache.set(address, { at: Date.now(), value: fresh });
+  if (fresh) walletCache.set(key, { at: Date.now(), value: fresh });
   // A failed refresh serves the last good profile rather than dropping to the
   // simulator, on the same reasoning as the token list: stale real beats fresh
   // fake, and the coverage block already carries the timestamps.
   return fresh ?? hit?.value ?? null;
 }
 
-async function buildWalletProfile(address: string): Promise<Sourced<WalletProfile> | null> {
+async function buildWalletProfile(
+  address: string,
+  stage: WalletStage,
+): Promise<Sourced<WalletProfile> | null> {
   const providers = getProviders();
   const chain = new ChainWalletProvider();
+  const route = await resolveRpcRoute();
+
+  // What the address IS, before spending four hundred requests profiling a
+  // token mint as a trader. One `getAccountInfo`, and it runs concurrently with
+  // nothing else because everything else depends on the answer.
+  const identity = await identifyAccount(address, route.transactions);
+  if (!identity.profilable && identity.kind !== "unknown") {
+    // Still returns a profile rather than an error: the page renders the
+    // identity banner and a route to the right screen, which is more useful
+    // than "not tracked" and is what Solscan and GMGN do.
+    return {
+      data: assembleProfile({
+        address,
+        fills: [],
+        coverage: emptyCoverage(route.runtime, identity.detail),
+        holdings: null,
+        prices: new Map(),
+        identity,
+      }),
+      provenance: { source: "solana-rpc", real: true, note: identity.detail },
+    };
+  }
 
   // Both reads at once. They are independent measurements of the same wallet
   // and neither blocks the other; sequencing them would double the wait for no
   // benefit, and the balance read is the slower of the two.
   const [activity, holdings] = await Promise.all([
-    chain.getActivity(address).catch(() => null),
+    stage === "full"
+      ? chain.getActivity(address, { route, identity }).catch(() => null)
+      : Promise.resolve(null),
     providers.holdings?.getHoldings(address).catch(() => null) ?? Promise.resolve(null),
   ]);
-  if (!activity) return null;
+  // The full stage needs the chain read; the balances stage never asked for one
+  // and reports a coverage block that says exactly that, so nothing downstream
+  // reads its empty fill list as "this wallet has never traded".
+  if (stage === "full" && !activity) return null;
 
   // Price the traded mints first, then the rest of the bag. The price budget is
   // finite, and a reader asking about a wallet cares about what it just bought
   // before it cares about the dust it has been sitting on.
   const traded: string[] = [];
   const seen = new Set<string>();
-  for (const f of activity.fills) {
+  for (const f of activity?.fills ?? []) {
     if (seen.has(f.mint)) continue;
     seen.add(f.mint);
     traded.push(f.mint);
@@ -431,29 +487,73 @@ async function buildWalletProfile(address: string): Promise<Sourced<WalletProfil
     seen.add(t.mint);
     traded.push(t.mint);
   }
-  const prices = providers.holdings
-    ? await providers.holdings.priceMints(traded).catch(() => new Map<string, number>())
-    : new Map<string, number>();
+  // The SOL price comes with them: native SOL is not a token account, so it was
+  // missing from the portfolio total entirely — a 52% understatement on a
+  // wallet holding 1.66M SOL.
+  const [prices, solRef] = await Promise.all([
+    providers.holdings
+      ? providers.holdings.priceMints(traded).catch(() => new Map<string, number>())
+      : Promise.resolve(new Map<string, number>()),
+    getSolReference().catch(() => null),
+  ]);
 
   // Symbols are cosmetic and must never gate a figure, so one failed lookup is
   // an address on screen instead of a missing row.
   const symbols = new Map<string, string>();
   const profile = assembleProfile({
     address,
-    fills: activity.fills,
-    coverage: activity.coverage,
+    fills: activity?.fills ?? [],
+    coverage:
+      activity?.coverage ??
+      emptyCoverage(
+        route.runtime,
+        "balances only — the trade history has not been read yet, so no figure below is derived from fills",
+      ),
     holdings: holdings ? { source: holdings.source, solBalance: holdings.solBalance, tokens: holdings.tokens } : null,
     prices,
+    solPriceUsd: solRef?.priceUsd ?? prices.get(WSOL),
+    identity: activity?.identity ?? identity,
+    stage,
     symbols,
   });
 
   return {
     data: profile,
     provenance: {
-      source: activity.coverage.source,
+      source: activity?.coverage.source ?? holdings?.source ?? "solana-rpc",
       real: true,
-      note: activity.coverage.note,
+      note: profile.coverage.note,
     },
+  };
+}
+
+/**
+ * Coverage for an address that was never profiled.
+ *
+ * Zeros here are not measurements standing in for absences — they describe a
+ * read that deliberately did not happen, and `note` says which address type
+ * caused it. Every consumer keys off `identity.profilable` before touching them.
+ */
+function emptyCoverage(runtime: RpcRuntime, note: string): WalletCoverage {
+  return {
+    source: "solana-rpc",
+    runtime,
+    newestTs: 0,
+    oldestTs: 0,
+    windowHours: 0,
+    signaturesListed: 0,
+    transactionsRead: 0,
+    transactionsFailed: 0,
+    transactionsRefused: 0,
+    transactionsUnavailable: 0,
+    cappedByBudget: false,
+    reachedEndpointLimit: false,
+    lifetime: false,
+    indexArchival: false,
+    indexComplete: false,
+    firstSeenTs: 0,
+    historyDays: 0,
+    note,
   };
 }
 

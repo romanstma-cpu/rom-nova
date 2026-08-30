@@ -7,6 +7,7 @@ const { app, BrowserWindow, protocol, shell, net, Menu } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
+const { isRpcRequest, handleRpc } = require("./rpc-proxy");
 
 // The static export is built with basePath /nova (identical to the deployment
 // at romapps.xyz/nova) — the protocol handler strips the prefix.
@@ -84,6 +85,10 @@ app.whenReady().then(() => {
   protocol.handle("app", (request) => {
     const { host, pathname } = new URL(request.url);
     if (host !== ORIGIN_HOST) return new Response("not found", { status: 404 });
+    // Checked before the static resolver, which would otherwise 404 it: this
+    // path is not a file, it is the renderer reaching Solana through the main
+    // process so the request carries no Origin. See rpc-proxy.js.
+    if (isRpcRequest(pathname)) return handleRpc(request);
     const file = resolveStatic(pathname);
     if (!file) return new Response("not found", { status: 404 });
     return net.fetch(pathToFileURL(file).toString());

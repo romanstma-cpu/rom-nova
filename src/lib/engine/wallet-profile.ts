@@ -56,6 +56,16 @@ export interface FillReplay {
   derivedTokens: Map<string, number>;
   /** Mints where at least one movement had no price at all. */
   unpricedMints: Set<string>;
+  /**
+   * Realized PnL booked by sells that trimmed a position without closing it.
+   *
+   * Tracked because the headline and the round-trips table are computed from
+   * different sets and a reader cannot see why. A wallet that sold 89% of its
+   * loss in two partial exits shows that loss in `realizedPnlUsd` and in no
+   * row of the table. Naming the difference is cheaper than hiding it.
+   */
+  partialExitPnlUsd: number;
+  partialExits: number;
 }
 
 /** Floating-point dust after repeated lot splitting; not a real balance. */
@@ -82,6 +92,8 @@ export function replayFills(address: string, fills: readonly WalletFill[]): Fill
   const unpricedMints = new Set<string>();
   const roundTrips: RoundTrip[] = [];
   let realized = 0;
+  let partialExitPnlUsd = 0;
+  let partialExits = 0;
 
   const bump = (mint: string, by: number): void => {
     derivedTokens.set(mint, (derivedTokens.get(mint) ?? 0) + by);
@@ -134,6 +146,12 @@ export function replayFills(address: string, fills: readonly WalletFill[]): Fill
           holdHours: (f.ts - entryTs) / 3_600_000,
         });
         opened.delete(f.mint);
+      } else {
+        // Trimmed, not closed. Real realized profit that will never appear in
+        // the round-trips table, so it is counted here instead of vanishing
+        // into the gap between two numbers on the same screen.
+        partialExitPnlUsd += proceeds - cost;
+        partialExits++;
       }
     }
     if (arr.length === 0) lots.delete(f.mint);
@@ -158,6 +176,8 @@ export function replayFills(address: string, fills: readonly WalletFill[]): Fill
     unmatched,
     derivedTokens,
     unpricedMints,
+    partialExitPnlUsd,
+    partialExits,
   };
 }
 
@@ -220,6 +240,18 @@ export interface AssembleInput {
   coverage: WalletCoverage;
   holdings: { source: string; solBalance: number; tokens: HeldToken[] } | null;
   prices: Map<string, number>;
+  /**
+   * USD per SOL right now.
+   *
+   * Its own argument rather than a lookup in `prices`, because native SOL is
+   * not a token account and was therefore missing from the portfolio total
+   * entirely — a 52% understatement on a wallet holding 1.66M SOL.
+   */
+  solPriceUsd?: number;
+  /** What the address actually is. See `AccountIdentity`. */
+  identity?: { kind: string; detail: string; profilable: boolean };
+  /** Which read produced this. "balances" means the fills are still outstanding. */
+  stage?: "balances" | "full";
   /** Symbols where a token lookup supplied one. Purely cosmetic. */
   symbols?: Map<string, string>;
 }
@@ -236,14 +268,14 @@ export function assembleProfile(input: AssembleInput): WalletProfile {
   const positions: WalletHolding[] = [];
   let unrealized = 0;
   let anyCostUnknown = false;
-  let valuedUsd = 0;
+  let tokenValueUsd = 0;
   let pricedMints = 0;
 
   for (const held of holdings?.tokens ?? []) {
     const priceUsd = prices.get(held.mint);
     const valueUsd = priceUsd !== undefined ? held.tokens * priceUsd : undefined;
     if (valueUsd !== undefined) {
-      valuedUsd += valueUsd;
+      tokenValueUsd += valueUsd;
       pricedMints++;
     }
     const derived = derivedByMint.get(held.mint);
@@ -324,7 +356,16 @@ export function assembleProfile(input: AssembleInput): WalletProfile {
     distinctMints: new Set(fills.map((f) => f.mint)).size,
     unmatchedSellTokens: unmatchedTokens,
     unmatchedSellMints: replay.unmatched.size,
+    partialExitPnlUsd: replay.partialExitPnlUsd,
+    partialExits: replay.partialExits,
   };
+
+  // Realized PnL exists whenever a priced sell booked something, closed or not.
+  // Gating it on round trips alone hid the partial exits entirely; gating it on
+  // neither would print $0 for a wallet that has not sold. Both sets count.
+  if (replay.partialExits > 0 && stats.realizedPnlUsd === undefined) {
+    stats.realizedPnlUsd = replay.ledger.realizedPnlUsd;
+  }
 
   const unmeasured: UnmeasuredWalletField[] = [
     // Always. There is no keyless lifetime history; see `wallet-chain.ts`.
@@ -336,15 +377,31 @@ export function assembleProfile(input: AssembleInput): WalletProfile {
   if (replay.unmatched.size > 0) unmeasured.push("realizedPnl");
   if (stats.unpricedFills > 0) unmeasured.push("fillPrice");
 
+  // Native SOL, which is not a token account and was therefore missing from the
+  // portfolio total entirely. Undefined price means undefined value — it stays
+  // OUT of the sum rather than joining it as zero.
+  const solValueUsd =
+    holdings && input.solPriceUsd !== undefined && input.solPriceUsd > 0
+      ? holdings.solBalance * input.solPriceUsd
+      : undefined;
+
   return {
     address,
+    stage: input.stage ?? "full",
+    identity: input.identity ?? {
+      kind: "unknown",
+      detail: "the account type was not checked",
+      profilable: true,
+    },
     coverage,
     holdings: holdings
       ? {
           source: holdings.source,
           solBalance: holdings.solBalance,
+          solValueUsd,
           mints: holdings.tokens.length,
-          valuedUsd,
+          tokenValueUsd,
+          valuedUsd: tokenValueUsd + (solValueUsd ?? 0),
           pricedMints,
           unpricedMints: holdings.tokens.length - pricedMints,
         }
@@ -369,9 +426,32 @@ function provenanceLines(
   const out: string[] = [];
   const hours = coverage.windowHours;
   out.push(
-    `trades: ${coverage.source} — ${coverage.transactionsRead} transactions over ` +
+    `fills: ${coverage.source} — ${coverage.transactionsRead} transactions over ` +
       `${hours >= 1 ? `${hours.toFixed(1)}h` : `${Math.round(hours * 60)}min`}, ${coverage.note}`,
   );
+  // The index span, which is a different and much longer number wherever the
+  // archival endpoint is reachable. Stating both is the point: a wallet can be
+  // 116 days old and have 48 hours of readable fills, and one figure cannot say
+  // that.
+  if (coverage.indexArchival && coverage.firstSeenTs > 0) {
+    out.push(
+      `age: archival signature index — ${coverage.signaturesListed.toLocaleString()} transactions ` +
+        `${coverage.indexComplete ? "in total, first on" : "listed, active since at least"} ` +
+        `${new Date(coverage.firstSeenTs).toISOString().slice(0, 10)} ` +
+        `(${coverage.historyDays.toFixed(1)} days). The fills above cover only the recent part of that`,
+    );
+  } else if (coverage.runtime === "browser") {
+    out.push(
+      `age: NOT READABLE from a browser — the archival index refuses any request carrying an Origin ` +
+        `header, which a tab cannot omit. The desktop app reads it`,
+    );
+  }
+  if (coverage.transactionsUnavailable > 0) {
+    out.push(
+      `${coverage.transactionsUnavailable} listed transactions are older than the fast endpoint's ` +
+        `~2-day body retention — counted in the age above, absent from every price below`,
+    );
+  }
   if (coverage.transactionsRefused > 0) {
     out.push(
       `${coverage.transactionsRefused} transactions were REFUSED by the public RPC's rate limit ` +
@@ -399,6 +479,16 @@ function provenanceLines(
         `excluded from realized PnL rather than counted as pure profit`,
     );
   }
-  out.push("smart-money score: NOT COMPUTED — a two-day window is a sample, not a reputation");
+  // Why the headline and the table disagree. They are computed from different
+  // sets on purpose, and without this line a reader can only conclude one of
+  // them is broken.
+  if (stats.partialExits > 0) {
+    out.push(
+      `realized PnL includes ${stats.partialExits} PARTIAL exit${stats.partialExits === 1 ? "" : "s"} ` +
+        `(${stats.partialExitPnlUsd >= 0 ? "+" : ""}$${stats.partialExitPnlUsd.toFixed(2)}) that trimmed a position ` +
+        `without closing it — real, and absent from the round-trips table, which only lists full closes`,
+    );
+  }
+  out.push("smart-money score: NOT COMPUTED — a two-day fill window is a sample, not a reputation");
   return out;
 }

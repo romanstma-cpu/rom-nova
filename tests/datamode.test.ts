@@ -89,16 +89,21 @@ describe("dataMode — the chip cannot outlive the truth", () => {
     }
   });
 
-  // Real wallet history is the capability that needs a third column. It comes
-  // off the chain and it covers roughly forty-eight hours, and putting it in
-  // either of the other two columns tells the reader something false.
+  // Real wallet history is the capability that needs a third column, and it
+  // needs TWO entries in it: the fills reach ~2 days in every runtime, while
+  // the wallet's age reaches the whole index — but only where no Origin header
+  // is sent. One bound covering both would be false for one of them.
   it("qualifies wallet history rather than calling it flatly live", () => {
     const m = dataMode();
     if (!FLAGS.walletChain() || FLAGS.helius()) return;
     expect(m.live).toContain("wallet activity");
-    expect(m.bounded.join(" ")).toMatch(/wallet trade history/i);
-    // And the bound must name the limit, not merely gesture at one.
-    expect(m.bounded.join(" ")).toMatch(/48h|retention/i);
+    const joined = m.bounded.join(" ");
+    expect(joined).toMatch(/fills/i);
+    // The bound must name the limit, not merely gesture at one.
+    expect(joined).toMatch(/2 days|retention/i);
+    // And it must separate the two depths rather than averaging them.
+    expect(joined).toMatch(/age/i);
+    expect(joined).toMatch(/browser|Origin/i);
   });
 
   it("never lists the same claim as both live and bounded", () => {

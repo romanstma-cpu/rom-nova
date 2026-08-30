@@ -48,6 +48,76 @@ function TrackAny() {
   );
 }
 
+interface Mover {
+  owner: string;
+  netUsd: number;
+  grossUsd: number;
+  tokens: string[];
+}
+
+/**
+ * Ranked discovery, from data that exists.
+ *
+ * A PnL leaderboard is not feasible keylessly and this is not one: profiling
+ * one wallet costs ~400 RPC requests against a 2,400/minute budget, so ranking
+ * any meaningful universe by realized PnL would take days. Ranking by MEASURED
+ * FLOW costs nothing extra — the scanner already streams per-token wallet
+ * deltas from SQD and caches them — and answers the question a trader actually
+ * opens a whale page for: who is moving size right now.
+ *
+ * It is emphatically not a skill ranking, and the caption says so. The old
+ * caption on the simulated table below claimed its scores were "measured from
+ * each wallet's trade history", which was true of the generator and false on
+ * the screen.
+ */
+function LiveMovers() {
+  const { data, loading } = useApi<{ movers: Mover[]; real: boolean; note: string; source?: string }>(
+    "/api/wallets/movers",
+    30_000,
+  );
+  const movers = data?.movers ?? [];
+  return (
+    <div className="panel">
+      <div className="panel-title px-3 pt-2.5 pb-1 flex items-baseline gap-2 flex-wrap">
+        <span>Moving right now</span>
+        {data?.real && <span className="chip chip-accent">REAL · {data.source?.toUpperCase() ?? "SQD"}</span>}
+        <span className="faint normal-case">{data?.note}</span>
+      </div>
+      <div className="max-h-[320px] overflow-y-auto">
+        <table className="w-full text-[12px]">
+          <thead className="thead">
+            <tr>
+              <th className="text-left px-3 py-1.5 font-medium">Wallet</th>
+              <th className="text-right px-2 font-medium">Net moved</th>
+              <th className="text-right px-2 font-medium">Gross moved</th>
+              <th className="text-left px-3 font-medium">Tokens</th>
+            </tr>
+          </thead>
+          <tbody className="num">
+            {movers.map((m) => (
+              <tr key={m.owner} className="trow">
+                <td className="px-3 py-1.5">
+                  <Link href={`/whale?a=${m.owner}`} className="hover:text-[var(--accent)]">
+                    {shortAddr(m.owner)}
+                  </Link>
+                </td>
+                <td className={`text-right px-2 ${m.netUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(m.netUsd)}</td>
+                <td className="text-right px-2 dim">{fmtUsd(m.grossUsd)}</td>
+                <td className="px-3 faint" style={{ fontFamily: "var(--font-sans)" }}>
+                  {m.tokens.slice(0, 4).join(", ")}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {movers.length === 0 && (
+          <Empty>{loading ? "READING FLOW…" : "No wallet movement measured in the current window."}</Empty>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function WhalesPage() {
   const { data, loading, error } = useApi<{ rows: WalletRow[] }>("/api/wallets", 30_000);
   const [filter, setFilter] = useState<Filter>("all");
@@ -79,11 +149,13 @@ export default function WhalesPage() {
   return (
     <div className="p-3 flex flex-col gap-3">
       <TrackAny />
+      <LiveMovers />
       <div className="panel px-4 py-2 text-[11.5px]">
         <span className="chip chip-warn mr-2">SIMULATED LIST</span>
         The roster below is the deterministic demo universe — generated wallets, generated trades, generated
-        scores. Nothing keyless publishes a ranked list of real smart-money wallets, so rather than invent one
-        this page keeps the simulation clearly labelled and puts the real reader above it.
+        scores. A ranked leaderboard of real wallets by PnL is not reachable keylessly: profiling one wallet
+        costs around 400 RPC requests against a 2,400-per-minute budget, so ranking a meaningful universe would
+        take days. The real, measured alternative is above.
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         <h1 className="text-[15px] font-semibold tracking-wide mr-2">WHALE INTELLIGENCE</h1>
@@ -92,7 +164,12 @@ export default function WhalesPage() {
             {f.label}
           </button>
         ))}
-        <span className="faint text-[10.5px] ml-auto">smart-money scores are measured from each wallet&apos;s trade history — not asserted</span>
+        {/* This read "smart-money scores are MEASURED from each wallet's trade
+            history — not asserted", which was a claim about the generator
+            standing directly above generated rows. */}
+        <span className="faint text-[10.5px] ml-auto">
+          every row below is synthetic — scores are derived from simulated trades, not from Solana
+        </span>
       </div>
 
       <div className="panel overflow-x-auto">

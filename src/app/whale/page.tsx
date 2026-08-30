@@ -111,12 +111,42 @@ function WalletRouter() {
       } catch {
         // Not a synthetic wallet. Read the chain.
       }
+      // Two stages. Balances and identity are three requests and a few hundred
+      // milliseconds; the fill history is up to four hundred and was measured
+      // at 28.7 seconds in its worst case. Painting the first while the second
+      // runs is the difference between a fast page and one a trader assumes is
+      // broken — and the profile carries `stage`, so the panels that need fills
+      // say "reading…" rather than showing a zero.
+      try {
+        const quick = await apiGet<{ profile: WalletProfile }>(
+          `/api/wallets/${address}/profile?stage=balances`,
+        );
+        if (!dead) setAnswered({ address, res: { state: "real", profile: quick.profile } });
+        // A non-wallet is already fully answered; reading four hundred
+        // transactions for a token mint would be work nobody asked for.
+        if (!quick.profile.identity.profilable) return;
+      } catch (err) {
+        // The fast pass failing is not fatal — fall through to the full read,
+        // which may still succeed and is the one that carries the trades.
+        if (!dead && err instanceof Error && /not a Solana address/i.test(err.message)) {
+          setAnswered({ address, res: { state: "none", reason: err.message } });
+          return;
+        }
+      }
       try {
         const real = await apiGet<{ profile: WalletProfile }>(`/api/wallets/${address}/profile`);
         if (!dead) setAnswered({ address, res: { state: "real", profile: real.profile } });
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
-        if (!dead) setAnswered({ address, res: { state: "none", reason } });
+        // Keep whatever the fast pass already put on screen rather than
+        // replacing real balances with an error.
+        if (!dead) {
+          setAnswered((prev) =>
+            prev?.address === address && prev.res.state === "real"
+              ? prev
+              : { address, res: { state: "none", reason } },
+          );
+        }
       }
     })();
     return () => {

@@ -41,42 +41,149 @@ function Measured({
 
 const pnlClass = (x: number): string => (x >= 0 ? "pos" : "neg");
 
+/**
+ * The window, the age, and the difference between them.
+ *
+ * `new Date(0)` renders as "12/31/1969", which is what a zero-transaction
+ * wallet showed. A timestamp that was never measured is not a date and must
+ * not be formatted as one.
+ */
+const stamp = (ts: number): string => (ts > 0 ? new Date(ts).toLocaleString() : "—");
+
 function CoverageStrip({ p }: { p: WalletProfile }) {
   const c = p.coverage;
   const window =
     c.windowHours >= 1 ? `${c.windowHours.toFixed(1)} hours` : `${Math.round(c.windowHours * 60)} minutes`;
+  const noFills = c.transactionsRead === 0;
   return (
     <div className="panel px-4 py-3" style={{ borderColor: "var(--warn, #b8860b)" }}>
       <div className="flex items-baseline gap-2 flex-wrap">
-        <span className="chip chip-warn">WINDOW · NOT LIFETIME</span>
+        <span className="chip chip-warn">FILL WINDOW · NOT LIFETIME</span>
         <span className="text-[12.5px]">
-          Everything below covers <b className="num">{window}</b> — {c.transactionsRead} transactions
-          {c.signaturesListed > c.transactionsRead ? ` of ${c.signaturesListed} listed` : ""}, read from{" "}
-          {c.source}.
+          {p.stage === "balances" ? (
+            <>Balances are live. The trade history is still being read…</>
+          ) : noFills ? (
+            <>No transactions were readable for this address.</>
+          ) : (
+            <>
+              Prices and PnL below cover <b className="num">{window}</b> — {c.transactionsRead} transactions
+              {c.signaturesListed > c.transactionsRead ? ` of ${c.signaturesListed} listed` : ""}, read from{" "}
+              {c.source}.
+            </>
+          )}
         </span>
       </div>
-      <div className="text-[11.5px] dim mt-1.5 num">
-        {new Date(c.oldestTs).toLocaleString()} → {new Date(c.newestTs).toLocaleString()}
-      </div>
+      {!noFills && (
+        <div className="text-[11.5px] dim mt-1.5 num">
+          {stamp(c.oldestTs)} → {stamp(c.newestTs)}
+        </div>
+      )}
+
+      {/* The wallet's real AGE, which is a different and much longer number
+          wherever the archival index is reachable. Withholding it made a
+          two-year-old whale and a 33-minute-old wallet look identical. */}
+      {c.indexArchival && c.firstSeenTs > 0 && (
+        <div className="text-[11.5px] mt-1.5">
+          <span className="chip chip-accent mr-1.5">AGE</span>
+          {c.indexComplete ? (
+            <>
+              <b className="num">{c.signaturesListed.toLocaleString()}</b> transactions in total, first on{" "}
+              <span className="num">{new Date(c.firstSeenTs).toLocaleDateString()}</span> —{" "}
+              <b className="num">{c.historyDays.toFixed(0)} days</b> old.
+            </>
+          ) : (
+            <>
+              at least <b className="num">{c.signaturesListed.toLocaleString()}</b> transactions, active since at
+              least <span className="num">{new Date(c.firstSeenTs).toLocaleDateString()}</span> (index page cap
+              reached — it is older than this).
+            </>
+          )}
+        </div>
+      )}
+      {!c.indexArchival && c.runtime === "browser" && (
+        <div className="text-[11.5px] mt-1.5 faint">
+          Wallet age is not readable from a browser: the archival index refuses any request carrying an Origin
+          header, which a tab cannot omit. The desktop app reads it.
+        </div>
+      )}
+
       <div className="text-[11.5px] faint mt-1">{c.note}</div>
-      {c.transactionsFailed > 0 && (
+      {c.transactionsRefused > 0 && (
         <div className="text-[11.5px] mt-1 neg">
-          {c.transactionsRefused > 0
-            ? `${c.transactionsRefused} transactions were refused by the public RPC's rate limit — reload shortly for a complete read.`
-            : `${c.transactionsFailed} transactions could not be read; their fills are missing from every figure here.`}
+          {c.transactionsRefused} transactions were refused by the public RPC&apos;s rate limit — reload shortly
+          for a complete read.
+        </div>
+      )}
+      {c.transactionsFailed - c.transactionsRefused > 0 && (
+        <div className="text-[11.5px] mt-1 neg">
+          {c.transactionsFailed - c.transactionsRefused} transactions could not be read; their fills are missing
+          from every figure here.
         </div>
       )}
     </div>
   );
 }
 
+/**
+ * A refusal to profile, with somewhere useful to go.
+ *
+ * Pasting a token mint used to render "$520.8K portfolio, 144 positions" — the
+ * mint's own liquidity, presented as a trader's book.
+ */
+function NotAWallet({ p }: { p: WalletProfile }) {
+  return (
+    <div className="panel px-4 py-6 text-center">
+      <div className="flex items-center gap-2 justify-center flex-wrap">
+        <span className="chip chip-warn">{p.identity.kind.replace("-", " ").toUpperCase()}</span>
+        <span className="num text-[13px]">{shortAddr(p.address)}</span>
+      </div>
+      <div className="text-[12.5px] mt-2 max-w-[560px] mx-auto">{p.identity.detail}</div>
+      <div className="mt-3 flex gap-2 justify-center flex-wrap">
+        {p.identity.kind === "mint" && (
+          <Link href={`/token?m=${p.address}`} className="chip chip-accent">
+            open the token page instead →
+          </Link>
+        )}
+        <a
+          href={`https://solscan.io/account/${p.address}`}
+          target="_blank"
+          rel="noreferrer"
+          className="chip"
+        >
+          view on solscan ↗
+        </a>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The assets a swap is denominated IN, which are not positions.
+ *
+ * Wrapped SOL and the stablecoins are what a trader pays with, so listing them
+ * beside the tokens they bought reads as though the wallet were long its own
+ * cash. They stay in the table — the balance is real and worth seeing — under a
+ * label that says which they are.
+ */
+const QUOTE_ASSETS: Record<string, string> = {
+  So11111111111111111111111111111111111111112: "wSOL",
+  EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: "USDC",
+  Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: "USDT",
+};
+
 function PositionRow({ h }: { h: WalletHolding }) {
+  const quote = QUOTE_ASSETS[h.mint];
   return (
     <tr className="trow">
       <td className="px-3 py-1.5">
         <Link href={`/token?m=${h.mint}`} className="hover:text-[var(--accent)] num text-[11.5px]">
-          {h.symbol ?? shortAddr(h.mint)}
+          {h.symbol ?? quote ?? shortAddr(h.mint)}
         </Link>
+        {quote && (
+          <span className="chip ml-1.5 faint" title="a quote asset — what this wallet trades WITH, not a position it took">
+            cash
+          </span>
+        )}
       </td>
       <td className="text-right px-2 dim">
         {h.tokens.toLocaleString(undefined, { maximumFractionDigits: 2 })}
@@ -168,8 +275,12 @@ function FillRow({ f }: { f: WalletFill }) {
 
 const UNMEASURED_COPY: Record<string, string> = {
   lifetimeHistory:
-    "lifetime history — no keyless source has it; the only public RPC that answers retains about two days",
-  reputation: "wallet reputation — nothing keyless carries one, and two days of trades is a sample, not a record",
+    "lifetime PnL — the only endpoint that still serves transactions older than ~2 days allows ten of " +
+    "them per minute, so the fills here are a recent window however old the wallet is",
+  reputation:
+    "wallet reputation — nothing keyless publishes one. Entity labels are not available either: " +
+    "Solscan's account API needs a key, and the one free source returns .sol domains that anyone can " +
+    "point at anyone's address",
   costBasis: "cost basis on some positions — acquired outside the window or without an observable price",
   realizedPnl: "part of realized PnL — some sells had no observed buy and are excluded rather than counted as profit",
   fillPrice: "the price of some movements — tokens moved with no quote leg belonging to this wallet",
@@ -178,6 +289,10 @@ const UNMEASURED_COPY: Record<string, string> = {
 export function RealWalletProfile({ p }: { p: WalletProfile }) {
   const s = p.stats;
   const withValue = p.positions.filter((x) => (x.valueUsd ?? 0) > 0.01 || x.costBasisKnown);
+  const reading = p.stage === "balances";
+  const totalFills = s.pricedFills + s.unpricedFills;
+
+  if (!p.identity.profilable) return <NotAWallet p={p} />;
 
   return (
     <div className="flex flex-col gap-3">
@@ -186,11 +301,22 @@ export function RealWalletProfile({ p }: { p: WalletProfile }) {
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[15px] font-semibold num">{shortAddr(p.address)}</span>
             <span className="chip chip-accent">REAL · SOLANA</span>
-            {/* No labels. The demo universe minted "smart trader" and "insider"
-                tags; nothing keyless publishes wallet reputation, so a real
-                wallet wears none rather than an invented one. */}
-            <span className="chip faint" title="no keyless source publishes wallet labels or reputation">
-              no labels available
+            {/* Account TYPE is a chain fact and is shown. Entity IDENTITY is
+                somebody's database and there is no keyless one — measured:
+                Solscan 401/403, SolanaFM 502, Helius key-gated. The only free
+                source returns .sol domains that any third party can point at
+                any address, which would let an attacker label a drainer
+                "Binance" inside this app. */}
+            <span
+              className="chip faint cursor-help"
+              title={
+                "No entity labels: Solscan's account API returns 401 without a key and 403 to any origin " +
+                "but its own, SolanaFM is down, and Helius needs a key. The one free source (SNS reverse " +
+                "lookup) returns .sol domains that anyone can point at anyone's address — asked about " +
+                "Binance's hot wallet it answers 'cif', 'kiing'. Unusable as identity."
+              }
+            >
+              no entity label (none published keylessly)
             </span>
           </div>
           <button
@@ -201,17 +327,27 @@ export function RealWalletProfile({ p }: { p: WalletProfile }) {
           </button>
           {p.holdings && (
             <div className="text-[10.5px] faint num mt-0.5">
-              {p.holdings.solBalance.toFixed(3)} SOL · {p.holdings.mints} token positions ·{" "}
-              {p.holdings.pricedMints} priced
+              {p.holdings.solBalance.toLocaleString(undefined, { maximumFractionDigits: 3 })} SOL ·{" "}
+              {p.holdings.mints} token positions · {p.holdings.pricedMints} priced
               {p.holdings.unpricedMints > 0 && `, ${p.holdings.unpricedMints} without a published price`}
             </div>
           )}
         </div>
         <div className="ml-auto text-right">
-          <div className="panel-title">Portfolio value (priced positions)</div>
+          <div className="panel-title">Portfolio value</div>
           <div className="num text-[20px] mt-1">
             {p.holdings ? fmtUsd(p.holdings.valuedUsd) : <span className="faint text-[12px]">UNMEASURED</span>}
           </div>
+          {/* Split out because omitting native SOL understated one wallet by
+              52%: $162.20M of tokens beside 1,661,879 SOL worth $174.9M more. */}
+          {p.holdings && (
+            <div className="text-[10.5px] faint num">
+              {fmtUsd(p.holdings.tokenValueUsd)} tokens
+              {p.holdings.solValueUsd !== undefined
+                ? ` + ${fmtUsd(p.holdings.solValueUsd)} in SOL`
+                : " · SOL not valued (no price)"}
+            </div>
+          )}
           <a
             href={`https://solscan.io/account/${p.address}`}
             target="_blank"
@@ -225,52 +361,91 @@ export function RealWalletProfile({ p }: { p: WalletProfile }) {
 
       <CoverageStrip p={p} />
 
+      {reading && (
+        <div className="panel px-4 py-2.5 text-[12px]">
+          <span className="chip chip-accent mr-2">READING TRADES…</span>
+          Balances above are live. Every figure below needs the transaction history, which takes a few seconds —
+          they are blank because nothing has been measured yet, not because the answer is zero.
+        </div>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2">
-        <Stat label="Realized PnL" sub="over the window above">
+        <Stat
+          label="Realized PnL"
+          sub={
+            s.partialExits > 0
+              ? `${s.roundTrips} full closes + ${s.partialExits} partial exits`
+              : "over the fill window above"
+          }
+        >
           <Measured
-            value={s.realizedPnlUsd}
+            value={reading ? undefined : s.realizedPnlUsd}
             render={(v) => <span className={pnlClass(v)}>{fmtUsd(v)}</span>}
-            why="no round trip closed inside the readable window — a zero here would mean 'traded and broke even', which is not what happened"
+            why={
+              reading
+                ? "the trade history has not been read yet"
+                : "no priced sell landed inside the readable window — a zero here would mean 'traded and broke even', which is not what happened"
+            }
           />
         </Stat>
         <Stat label="Unrealized PnL" sub="reconciled positions only">
           <Measured
-            value={s.unrealizedPnlUsd}
+            value={reading ? undefined : s.unrealizedPnlUsd}
             render={(v) => <span className={pnlClass(v)}>{fmtUsd(v)}</span>}
-            why="no position's entry was fully observed, so no cost basis is knowable"
+            why={
+              reading
+                ? "the trade history has not been read yet"
+                : "no position's entry was fully observed, so no cost basis is knowable"
+            }
           />
         </Stat>
-        <Stat label="Win rate" sub={`${s.roundTrips} round trips`}>
+        {/* These three come from FULL CLOSES only, while realized PnL above
+            counts partial exits too. Same screen, different denominators —
+            labelled here rather than left for a reader to reconcile. */}
+        <Stat label="Win rate" sub={`${s.roundTrips} full closes only`}>
           <Measured
-            value={s.winRate}
+            value={reading ? undefined : s.winRate}
             render={(v) => <span>{(v * 100).toFixed(0)}%</span>}
-            why="no completed round trip in the window"
+            why={reading ? "the trade history has not been read yet" : "no position was fully closed in the window"}
           />
         </Stat>
-        <Stat label="Profit factor">
+        <Stat label="Profit factor" sub="full closes only">
           <Measured
-            value={s.profitFactor}
+            value={reading ? undefined : s.profitFactor}
             render={(v) => <span>{v >= 99 ? "∞" : v.toFixed(2)}</span>}
-            why="no completed round trip in the window"
+            why={reading ? "the trade history has not been read yet" : "no position was fully closed in the window"}
           />
         </Stat>
-        <Stat label="Median hold">
+        <Stat label="Median hold" sub="full closes only">
           <Measured
-            value={s.medianHoldHours}
+            value={reading ? undefined : s.medianHoldHours}
             render={(v) => <span>{v < 1 ? `${Math.round(v * 60)}m` : `${v.toFixed(1)}h`}</span>}
-            why="no completed round trip in the window"
+            why={reading ? "the trade history has not been read yet" : "no position was fully closed in the window"}
           />
         </Stat>
-        <Stat label="Fills" sub={`${s.buys} in · ${s.sells} out · ${s.distinctMints} tokens`}>
-          {s.pricedFills + s.unpricedFills}
+        <Stat label="Movements" sub={`${s.buys} in · ${s.sells} out · ${s.distinctMints} tokens`}>
+          {reading ? <span className="faint text-[12px]">READING…</span> : totalFills}
         </Stat>
+        {/* The zero case used to fall through to "every movement priced",
+            which is true of an empty set and reads as a clean bill of health.
+            Hit on three of eight wallets in the blind review. */}
         <Stat
           label="Priced"
-          sub={s.unpricedFills > 0 ? `${s.unpricedFills} without an observable price` : "every movement priced"}
+          sub={
+            reading
+              ? "the trade history has not been read yet"
+              : totalFills === 0
+                ? "nothing to price"
+                : s.unpricedFills > 0
+                  ? `${s.unpricedFills} without an observable price`
+                  : "every movement priced"
+          }
         >
-          {s.pricedFills + s.unpricedFills > 0
-            ? `${Math.round((s.pricedFills / (s.pricedFills + s.unpricedFills)) * 100)}%`
-            : "—"}
+          {reading || totalFills === 0 ? (
+            <span className="faint text-[12px]">{reading ? "READING…" : "N/A"}</span>
+          ) : (
+            `${Math.round((s.pricedFills / totalFills) * 100)}%`
+          )}
         </Stat>
       </div>
 
@@ -319,8 +494,19 @@ export function RealWalletProfile({ p }: { p: WalletProfile }) {
         <div className="panel">
           <div className="panel-title px-3 pt-2.5 pb-1">
             Closed round trips
-            <span className="faint"> — entry and exit both observed</span>
+            <span className="faint"> — full closes only</span>
           </div>
+          {/* Why this table does not add up to the headline. A sell that trims
+              a position books real PnL and never closes anything, so it belongs
+              in one figure and not the other. */}
+          {s.partialExits > 0 && (
+            <div className="px-3 pb-1.5 text-[11px] faint">
+              Realized PnL above also includes {s.partialExits} partial exit
+              {s.partialExits === 1 ? "" : "s"} worth{" "}
+              <span className={pnlClass(s.partialExitPnlUsd)}>{fmtUsd(s.partialExitPnlUsd)}</span>, which trimmed
+              positions without closing them and so appear in no row here.
+            </div>
+          )}
           <div className="max-h-[340px] overflow-y-auto">
             <table className="w-full text-[12px]">
               <tbody className="num">

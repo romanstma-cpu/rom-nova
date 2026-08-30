@@ -36,29 +36,29 @@
 // figure. Guessing a price for them — from the token's price now, say — would
 // fabricate 46% of every number on the page.
 //
-// WHY THE HISTORY IS A WINDOW AND NOT A LIFETIME
+// TWO DEPTHS, NOT ONE — SEE rpc-endpoint.ts FOR THE MEASUREMENTS
 //
-// Measured against every keyless Solana RPC that answers at all, with an
-// explicit `Origin: app://rom-nova`:
+// The first version of this file hardcoded one endpoint and reported one depth
+// for every runtime. Both halves of that were wrong.
 //
-//   solana-rpc.publicnode.com     getSignaturesForAddress OK, CORS *
-//   api.mainnet-beta.solana.com   403
-//   rpc.ankr.com/solana           403
-//   solana.drpc.org               400
-//   onfinality / solflare / blockpi / getblock / tatum   403, 429, 503, 401
+// The INDEX is archival wherever no Origin header reaches the server: from
+// Node and from the desktop shell's main-process proxy, `getSignaturesForAddress`
+// on mainnet-beta reaches 375+ days, against publicnode's 2.02. So a wallet's
+// real age and lifetime transaction count are free, and withholding them made
+// a two-year-old whale and a thirty-three-minute-old wallet look identical.
 //
-// One endpoint. And its retention is roughly two days: asked for signatures
-// on a quiet, long-lived address, its oldest was 2.02 days back, and paging
-// before that returned nothing at all. So a keyless lifetime PnL does not
-// exist, and this returns a WINDOW with the window stated. `WalletCoverage`
-// carries it and `UnmeasuredWalletField.lifetimeHistory` is set on every read.
+// The FILLS are not. Handed signatures from 3, 10, 30 and 60 days ago,
+// publicnode returns null for every one, and mainnet-beta — which serves them
+// all — allows exactly TEN `getTransaction` calls per window whatever the
+// concurrency or pacing (measured three ways: 10 of 80 each time). Four
+// hundred transactions through it would take minutes. So the priced window
+// stays at ~2 days in every runtime, and this file says which of the two
+// numbers a reader is looking at.
 
-import type { WalletCoverage, WalletFill, WalletTrade } from "../types";
-import type { WalletDataProvider } from "./types";
+import type { WalletCoverage, WalletFill } from "../types";
 import { getSolBars, solUsdAt, type SolBar } from "./sol-history";
-
-/** Only publicnode answers `getSignaturesForAddress` keylessly. See header. */
-export const HISTORY_RPC = "https://solana-rpc.publicnode.com";
+import { resolveRpcRoute, TX_RETENTION_DAYS, type RpcRoute } from "./rpc-endpoint";
+import { identifyAccount, type AccountIdentity } from "./account-kind";
 
 export const WSOL = "So11111111111111111111111111111111111111112";
 
@@ -220,6 +220,7 @@ export class RateLimitedError extends Error {
 export const RATE_LIMIT_RETRIES = 2;
 
 async function rpcOnce<T>(
+  endpoint: string,
   method: string,
   params: unknown[],
   opts: { timeoutMs?: number; signal?: AbortSignal },
@@ -229,7 +230,7 @@ async function rpcOnce<T>(
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 15_000);
   opts.signal?.addEventListener("abort", () => ctl.abort(), { once: true });
   try {
-    const res = await fetch(HISTORY_RPC, {
+    const res = await fetch(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
@@ -257,6 +258,7 @@ async function rpcOnce<T>(
 }
 
 async function rpc<T>(
+  endpoint: string,
   method: string,
   params: unknown[],
   opts: { timeoutMs?: number; signal?: AbortSignal } = {},
@@ -264,7 +266,7 @@ async function rpc<T>(
   let last: unknown;
   for (let attempt = 0; attempt <= RATE_LIMIT_RETRIES; attempt++) {
     try {
-      return await rpcOnce<T>(method, params, opts);
+      return await rpcOnce<T>(endpoint, method, params, opts);
     } catch (err) {
       // Only refusals are retried. A malformed request or a dead transaction
       // will fail identically every time, and hammering it spends budget the
@@ -517,11 +519,16 @@ export interface ActivityOptions {
   concurrency?: number;
   /** Wall-clock ceiling on the transaction fetch. See `DEFAULT_DEADLINE_MS`. */
   deadlineMs?: number;
+  /** Pre-resolved route, so a caller reading several wallets detects once. */
+  route?: RpcRoute;
+  /** Pre-resolved identity, so the caller can refuse a mint before paying for it. */
+  identity?: AccountIdentity;
   signal?: AbortSignal;
 }
 
 export interface WalletActivity {
   address: string;
+  identity: AccountIdentity;
   fills: WalletFill[];
   coverage: WalletCoverage;
 }
@@ -558,40 +565,51 @@ export const DEFAULT_CONCURRENCY = 12;
  * to forty seconds, and forty seconds of a spinner is a page a user assumes is
  * broken.
  *
- * So the read stops at twenty-five and reports a smaller window. Cutting the
- * data is recoverable; the user reloads and the cache-warmed second attempt
- * completes. Cutting the honesty is not, which is why the transactions this
- * skips are counted rather than dropped.
+ * So the read stops and reports a smaller window. Cutting the data is
+ * recoverable; the user reloads and the cache-warmed second attempt completes.
+ * Cutting the honesty is not, which is why the transactions this skips are
+ * counted rather than dropped.
+ *
+ * Twelve seconds, down from twenty-five. The blind review measured a 28.7s
+ * worst case against GMGN's one to two, and a page that takes half a minute is
+ * one a trader assumes is broken — the two-stage load in `walletProfile` puts
+ * the balances on screen in a few hundred milliseconds, so this ceiling now
+ * only bounds how much TRADE history arrives behind them.
  */
-export const DEFAULT_DEADLINE_MS = 25_000;
+export const DEFAULT_DEADLINE_MS = 12_000;
 
 /** Solana addresses are base58 and 32 bytes; nothing else is worth a request. */
 export function isPlausibleAddress(address: string): boolean {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
 }
 
-export class ChainWalletProvider implements WalletDataProvider {
+export class ChainWalletProvider {
   readonly name = "solana-rpc";
 
   /**
-   * Signatures, newest first, paging until the cap or the endpoint's edge.
+   * Signatures, newest first, paging until the cap or the index runs out.
    *
-   * Returns whether the endpoint ran out, because that is the difference
-   * between "we chose to stop" and "there is no more to read" — and on a public
-   * RPC the second one means a retention edge rather than the wallet's birth.
+   * Two things come back rather than one. `exhausted` says the index had
+   * nothing older — which on the archival endpoint is the wallet's genuine
+   * first transaction, and on publicnode is a two-day retention edge. Keeping
+   * them apart is the whole reason `RpcRoute.archivalIndex` exists.
    */
   private async listSignatures(
     address: string,
     max: number,
+    route: RpcRoute,
+    signal?: AbortSignal,
   ): Promise<{ rows: SignatureRow[]; exhausted: boolean }> {
     const rows: SignatureRow[] = [];
     let before: string | undefined;
     let exhausted = false;
     while (rows.length < max) {
-      const page = await rpc<SignatureRow[]>("getSignaturesForAddress", [
-        address,
-        before ? { limit: 1000, before } : { limit: 1000 },
-      ]);
+      const page = await rpc<SignatureRow[]>(
+        route.signatures,
+        "getSignaturesForAddress",
+        [address, before ? { limit: 1000, before } : { limit: 1000 }],
+        { signal, timeoutMs: 20_000 },
+      );
       if (!Array.isArray(page) || page.length === 0) {
         exhausted = true;
         break;
@@ -611,10 +629,16 @@ export class ChainWalletProvider implements WalletDataProvider {
     const maxSignatures = opts.maxSignatures ?? DEFAULT_MAX_SIGNATURES;
     const maxTransactions = opts.maxTransactions ?? DEFAULT_MAX_TRANSACTIONS;
     const concurrency = opts.concurrency ?? DEFAULT_CONCURRENCY;
+    const route = opts.route ?? (await resolveRpcRoute());
+
+    // What kind of address this even is, before spending four hundred requests
+    // profiling a token mint as though it were a trader.
+    const identity =
+      opts.identity ?? (await identifyAccount(address, route.transactions, opts.signal));
 
     let listed: { rows: SignatureRow[]; exhausted: boolean };
     try {
-      listed = await this.listSignatures(address, maxSignatures);
+      listed = await this.listSignatures(address, maxSignatures, route, opts.signal);
     } catch {
       return null;
     }
@@ -633,31 +657,55 @@ export class ChainWalletProvider implements WalletDataProvider {
     let read = 0;
     let failed = 0;
     let refused = 0;
+    let unavailable = 0;
     let skipped = 0;
     let cursor = 0;
+    // Timestamps of transactions actually READ. The window must be timed off
+    // these and not off what was attempted: with an archival index the newest
+    // 400 signatures can span five days while only the newest two days still
+    // have bodies, and timing off attempts claimed a 123-hour fill window
+    // holding two days of fills.
+    const readTimes: number[] = [];
+    // Signatures come back newest-first, so a RUN of nulls means the read has
+    // crossed the body-retention edge and everything beyond it is gone too.
+    // Detecting that saved 256 pointless requests on one measured wallet and
+    // took it from a 15-second deadline overrun to a clean finish.
+    let nullStreak = 0;
+    let pastRetention = false;
     await Promise.all(
       Array.from({ length: Math.min(concurrency, wanted.length) }, async () => {
         while (cursor < wanted.length) {
           if (opts.signal?.aborted) return;
-          if (Date.now() > deadline) {
+          if (pastRetention || Date.now() > deadline) {
             // Whoever notices first claims the rest, so the count is right and
             // the other workers fall straight out of their loops.
-            skipped += wanted.length - cursor;
+            const rest = wanted.length - cursor;
+            if (pastRetention) unavailable += rest;
+            else skipped += rest;
             cursor = wanted.length;
             return;
           }
           const row = wanted[cursor++];
           try {
             const tx = await rpc<ParsedTx | null>(
+              route.transactions,
               "getTransaction",
               [row.signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0 }],
               { signal: opts.signal },
             );
             if (!tx) {
-              failed++;
+              // Null is not an error. The endpoint no longer holds the body:
+              // measured, publicnode returns null for every signature older
+              // than about two days while serving recent ones perfectly. Filing
+              // that under "failed" would report an outage where there is a
+              // documented retention edge.
+              unavailable++;
+              if (++nullStreak >= RETENTION_RUN) pastRetention = true;
               continue;
             }
+            nullStreak = 0;
             read++;
+            if (row.blockTime) readTimes.push(row.blockTime * 1000);
             fills.push(...fillsFromTx(tx, address, solBars));
           } catch (err) {
             // Counted separately because they mean different things. A refusal
@@ -674,20 +722,27 @@ export class ChainWalletProvider implements WalletDataProvider {
 
     fills.sort((a, b) => a.ts - b.ts || a.slot - b.slot);
 
-    // The window is what was actually READ, not what was listed. Timing the
-    // window off `wanted` would claim coverage of transactions the deadline
-    // skipped — the one figure a partial read must never overstate.
-    const attempted = wanted.slice(0, wanted.length - skipped);
-    const times = attempted.map((r) => (r.blockTime ?? 0) * 1000).filter((t) => t > 0);
-    const newestTs = times.length ? Math.max(...times) : 0;
-    const oldestTs = times.length ? Math.min(...times) : 0;
+    // The PRICED window is what was actually read — not what was listed, not
+    // what was attempted, and not what the index reached. Four different spans,
+    // and conflating any two of them is how a two-day fill history gets
+    // presented as a career.
+    const newestTs = readTimes.length ? Math.max(...readTimes) : 0;
+    const oldestTs = readTimes.length ? Math.min(...readTimes) : 0;
     const cappedByBudget = !listed.exhausted || usable.length > wanted.length || skipped > 0;
+
+    // The index span: how long this address has been active at all. Free on the
+    // archival endpoints, and the single most misleading omission in the first
+    // version — every wallet reported "2.0 days" whatever its real age.
+    const indexTimes = listed.rows.map((r) => (r.blockTime ?? 0) * 1000).filter((t) => t > 0);
+    const firstSeenTs = indexTimes.length ? Math.min(...indexTimes) : 0;
 
     return {
       address,
+      identity,
       fills,
       coverage: {
         source: this.name,
+        runtime: route.runtime,
         newestTs,
         oldestTs,
         windowHours: newestTs && oldestTs ? (newestTs - oldestTs) / 3_600_000 : 0,
@@ -695,108 +750,92 @@ export class ChainWalletProvider implements WalletDataProvider {
         transactionsRead: read,
         transactionsFailed: failed + refused,
         transactionsRefused: refused,
+        transactionsUnavailable: unavailable,
         cappedByBudget,
         reachedEndpointLimit: listed.exhausted && !cappedByBudget,
         lifetime: false,
-        note: coverageNote(listed.exhausted, cappedByBudget, oldestTs, refused, skipped),
+        indexArchival: route.archivalIndex,
+        indexComplete: listed.exhausted,
+        firstSeenTs,
+        historyDays: firstSeenTs ? (Date.now() - firstSeenTs) / 86_400_000 : 0,
+        note: coverageNote({
+          exhausted: listed.exhausted,
+          capped: cappedByBudget,
+          oldestTs,
+          refused,
+          skipped,
+          unavailable,
+          archival: route.archivalIndex,
+          hasSignatures: listed.rows.length > 0,
+        }),
       },
     };
   }
-
-  /**
-   * The `WalletDataProvider` half of the contract: PRICED fills only.
-   *
-   * `WalletTrade` requires a `priceUsd`, so a movement without one cannot be
-   * expressed in it truthfully and is left out rather than shipped at zero.
-   * Callers that need the whole picture — which is most of them, since the
-   * unpriced movements are what make a cost basis unknowable — take
-   * `getActivity` instead.
-   */
-  async getWalletTrades(address: string, limit: number): Promise<WalletTrade[]> {
-    const activity = await this.getActivity(address, {
-      maxTransactions: Math.max(60, Math.min(limit * 4, DEFAULT_MAX_TRANSACTIONS)),
-    });
-    if (!activity) return [];
-    return activity.fills
-      .filter((f): f is WalletFill & { priceUsd: number; valueUsd: number } =>
-        f.priceUsd !== undefined && f.valueUsd !== undefined)
-      .slice(-limit)
-      .map((f) => ({
-        id: `${f.signature}:${f.mint}`,
-        signature: f.signature,
-        wallet: f.wallet,
-        mint: f.mint,
-        ts: f.ts,
-        side: f.side,
-        amountUsd: f.valueUsd,
-        amountTokens: f.tokens,
-        priceUsd: f.priceUsd,
-        // The chain records which program ran, not which brand routed the
-        // order, and the app's `Dex` union is a closed list of five. Naming one
-        // would be a guess dressed as a field, so every real fill says Raydium
-        // nowhere and this stays on the least specific member available.
-        dex: "Raydium",
-        classification: f.classification,
-        // Attribution is exact — the owner is in the balance row — while the
-        // swap interpretation is inferred from balance movement alone.
-        confidence: 0.9,
-      }));
-  }
-
-  /**
-   * Nothing. Deliberately.
-   *
-   * Labels like "smart trader" and "insider" are the demo universe's invention.
-   * No keyless source publishes wallet reputation, and an empty list is the
-   * true answer — where a fabricated "whale" tag would be read as a finding.
-   */
-  async getWalletLabels(): Promise<string[]> {
-    return [];
-  }
 }
 
-function coverageNote(
-  exhausted: boolean,
-  capped: boolean,
-  oldestTs: number,
-  refused: number,
-  skipped: number,
-): string {
-  const days = oldestTs ? (Date.now() - oldestTs) / 86_400_000 : 0;
-  if (skipped > 0) {
+interface NoteInput {
+  exhausted: boolean;
+  capped: boolean;
+  oldestTs: number;
+  refused: number;
+  skipped: number;
+  unavailable: number;
+  archival: boolean;
+  hasSignatures: boolean;
+}
+
+function coverageNote(n: NoteInput): string {
+  const days = n.oldestTs ? (Date.now() - n.oldestTs) / 86_400_000 : 0;
+  // An address with no signatures at all has no window, and the old wording
+  // told one "your first activity was 0.0 days ago" — a sentence about activity
+  // that never happened. Said first because every clause below assumes a read.
+  if (!n.hasSignatures) {
+    return n.archival
+      ? "this address has never transacted — the archival index returned nothing for it at any depth"
+      : "no transactions in the last ~2 days; older activity is not readable from a browser";
+  }
+  if (n.skipped > 0) {
     return (
-      `the read ran out of time with ${skipped} transactions still unfetched — the window below is ` +
+      `the read ran out of time with ${n.skipped} transactions still unfetched — the window below is ` +
       `what was actually read, and a reload will get further`
     );
   }
-  if (refused > 0) {
+  if (n.refused > 0) {
     return (
-      `${refused} transactions were REFUSED by the public RPC's rate limit and are missing from ` +
+      `${n.refused} transactions were REFUSED by the public RPC's rate limit and are missing from ` +
       `every figure here — reload in a minute for a complete read`
     );
   }
-  if (capped) {
+  // The retention edge on the BODIES, which is what actually bounds the fills.
+  // Distinct from the index edge, and the two now differ by months.
+  if (n.unavailable > 0) {
+    return (
+      `${n.unavailable} older transactions are no longer served by the fast endpoint (~${TX_RETENTION_DAYS}-day ` +
+      `body retention) — their fills are not in any figure here, though the index still counts them`
+    );
+  }
+  if (n.capped) {
     return (
       `read budget reached — this is the most recent slice of a busier history, ` +
       `not the whole of it`
     );
   }
-  if (exhausted) {
-    // Two very different situations wearing the same shape, and the old wording
-    // asserted the wrong one on new wallets: it told a fourteen-minute-old
-    // address that the RPC's two-day retention was hiding its past. Retention
-    // can only be the explanation when the oldest signature is actually AT the
-    // edge. Below that, the endpoint had room to return more and returned
-    // nothing, so nothing more happened inside the retained window.
+  if (n.exhausted) {
+    // Two very different situations wearing the same shape, and the first
+    // version asserted the wrong one on new wallets: it told a fourteen-minute-
+    // old address that a two-day retention was hiding its past.
+    if (n.archival) {
+      return `every transaction this address has ever made was listed, and the readable ones are priced below`;
+    }
     if (days >= RETENTION_EDGE_DAYS) {
       return (
-        `no signatures older than ${days.toFixed(1)} days. Public Solana RPC retains roughly two ` +
-        `days, so this is where the ENDPOINT stops, not where the wallet started`
+        `no signatures older than ${days.toFixed(1)} days. The browser build is limited to the ~2-day ` +
+        `public window, so this is where the ENDPOINT stops, not where the wallet started`
       );
     }
     return (
-      `this wallet's first activity inside the endpoint's ~2-day retention was ${days.toFixed(1)} ` +
-      `days ago. It may well be older — nothing before that is readable keylessly`
+      `this wallet's first activity inside the ~2-day browser window was ${days.toFixed(1)} ` +
+      `days ago. It may well be older — the desktop app reads the full index`
     );
   }
   return "window read in full";
@@ -805,8 +844,19 @@ function coverageNote(
 /**
  * Where the retention explanation starts being the likely one.
  *
- * Measured at 2.02 and 2.03 days on a quiet, years-old address across two
- * runs. 1.5 leaves room for the edge drifting with the endpoint's pruning
+ * Measured at 2.02, 2.03 and 2.04 days on a quiet, years-old address across
+ * three runs. 1.5 leaves room for the edge drifting with the endpoint's pruning
  * schedule without claiming retention for a wallet that is simply new.
  */
 export const RETENTION_EDGE_DAYS = 1.5;
+
+/**
+ * How many consecutive missing bodies mean the retention edge, not a gap.
+ *
+ * Signatures arrive newest-first, so one null could be a pruned oddity but a
+ * run of them is the endpoint's horizon. Twelve is one full concurrency wave —
+ * long enough that a single flaky response cannot end the read, short enough
+ * that crossing the edge costs a dozen requests rather than the 256 it cost
+ * before this existed.
+ */
+export const RETENTION_RUN = 12;

@@ -67,7 +67,19 @@ export async function handleTokens(store: DemoStore, q: TokensQuery) {
     const live = await trendingRows();
     if (live) {
       return {
-        rows: live.data.slice(0, Math.min(limit, 500)),
+        // Sorted, because the page says it is.
+        //
+        // This path returned here, ABOVE the sort block below, from the day the
+        // live list was added. Live rows came out in the vendor's trending
+        // order while the scanner's own caption read "Ranked by the signal
+        // score" and the table carried a rank column, per-row rank-change
+        // flashes and a "freeze ranking" button. Measured on production: scores
+        // ran 75, 33, 86, 77, 82, 50, 64, 93, 60, 28, 45, 67 — a 93 in eighth
+        // place under a heading promising the opposite.
+        //
+        // The demo path was sorted the whole time, which is why nothing looked
+        // wrong in the simulator.
+        rows: sortRows(live.data, sort, dir).slice(0, Math.min(limit, 500)),
         asOf: Date.now(),
         provenance: live.provenance,
         demo: false,
@@ -75,19 +87,41 @@ export async function handleTokens(store: DemoStore, q: TokensQuery) {
     }
   }
 
-  let rows = buildTokenRows(store, asOf, profile);
-  const key = sort as keyof (typeof rows)[0];
-  if (rows[0] && key in rows[0] && typeof rows[0][key] === "number") {
-    rows = rows.sort((a, b) =>
-      dir === "asc" ? (a[key] as number) - (b[key] as number) : (b[key] as number) - (a[key] as number),
-    );
-  }
   return {
-    rows: rows.slice(0, Math.min(limit, 500)),
+    rows: sortRows(buildTokenRows(store, asOf, profile), sort, dir).slice(0, Math.min(limit, 500)),
     asOf: asOf ?? store.simulatedUntil,
     provenance: DEMO,
     demo: true,
   };
+}
+
+/**
+ * Order rows by a numeric column, live and simulated alike.
+ *
+ * Shared so the two paths cannot drift again — one being sorted and the other
+ * not is precisely the bug this replaced, and it survived because the two
+ * orderings lived in different branches of one function.
+ *
+ * Unscored rows sink regardless of direction. Their `signalScore` is 0 because
+ * the field is not optional, not because the token scored zero, so letting an
+ * ascending sort float them to the top would rank "we could not measure this"
+ * above every measured token.
+ */
+function sortRows<T extends { signalScore: number; scored: boolean }>(
+  rows: T[],
+  sort: string,
+  dir: "asc" | "desc",
+): T[] {
+  const first = rows[0];
+  if (!first) return rows;
+  const key = sort as keyof T;
+  if (!(key in first) || typeof first[key] !== "number") return rows;
+  return [...rows].sort((a, b) => {
+    if (a.scored !== b.scored) return a.scored ? -1 : 1;
+    const av = a[key] as number;
+    const bv = b[key] as number;
+    return dir === "asc" ? av - bv : bv - av;
+  });
 }
 
 /**

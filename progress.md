@@ -41,11 +41,110 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 
 | # | Stream | Reference to beat | State |
 |---|---|---|---|
-| W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | 🟡 round 2 complete · awaiting critic |
-| W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | 🟡 round 2 partial · critical item done |
-| W3 | Token deep-dive | Photon token page, GMGN, DexScreener | 🟡 round 3 repaired · awaiting critic |
-| W4 | UI/UX + performance craft | Axiom & Photon density and latency | ⏸ after W1–W3 |
-| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | ⏸ after W1–W3 |
+| W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | ✅ shipped in 1.4.0 · critic list open |
+| W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | 🔨 round 2 · graduation latency |
+| W3 | Token deep-dive | Photon token page, GMGN, DexScreener | 🔨 round 3 · LP over-penalty |
+| W4 | UI/UX + performance craft | Axiom & Photon density and latency | ⏸ until W1–W3 pass |
+| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | ⏸ until W1–W3 pass |
+| — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
+
+## Merged-build review — the one nobody had done
+
+It reviewed the live site *and* a local build and confirmed they behave
+identically. It rated the reasoning layer as beating the commercial field —
+signed factor contributions, the source-disagreement panel, `FILL WINDOW · NOT
+LIFETIME`, the abstention gate, `/track` — *"no commercial tool ships epistemics
+this good"*. Then it failed the data layer underneath, and it was right.
+
+### Fixed by me on main
+
+**The scanner was never sorted.** `handleTokens` had two exits and the live one
+returned *above* the sort block — so the demo universe was ranked and Solana was
+not. Measured on production: `75, 33, 86, 77, 82, 50, 64, 93, 60, 28, 45, 67`. A
+**93 in eighth place**, under a caption reading "Ranked by the signal score",
+beside a rank column, rank-change flashes and a freeze-ranking button. Four
+pieces of UI decorating an order that never responded to them. It survived three
+reviews because every existing test drove the demo store — the path that worked.
+`tests/token-sort.test.ts` now guards it.
+
+**`/status` gave every provider a clean bill of health before asking it
+anything** — `requests === 0` produced `● ok / 0ms / 0% errors`, which is the
+state of *every* provider on a cold load of the page you open to find out what's
+working. "Not asked yet" is now its own state and the rates dash.
+
+**`/track` announced `baseline +0.00%` with nothing resolved** — the guard
+existed three lines below for every band and was missing for the baseline.
+
+**Simulator toasts asserted dollar figures over live pages** — "SMART MONEY SELL
+$436.1K … confidence 76%" for wallets that don't exist, floating over the launch
+feed, while `/status` called smart-money SIMULATED and the wallet page called it
+NOT COMPUTED. Three answers to one question. They carry a SIMULATED chip now.
+
+**The first-run banner still said "nothing here is a live feed"** ten inches
+above the footer I fixed this morning saying "most of what you see is live
+Solana", with real token rows between them.
+
+### The chart: the critic's finding was real, the diagnosis wasn't
+
+It reported the chart dead everywhere via CORS. **I could not reproduce that** —
+BONK's chart renders on production right now and GeckoTerminal returned 200 to
+`romapps.xyz`. But the failure is real and the cause is worse than an outage:
+
+**GeckoTerminal returns 429 with no `access-control-allow-origin` header at
+all** (verified across five origins). A browser receiving no ACAO reports
+`TypeError: Failed to fetch` — indistinguishable from a network failure. So under
+throttle the app says "coingecko unavailable" and the nav chip keeps calling
+candles live, because it tests the provider *name*, not whether it works.
+
+The proposed replacement `datapi.jup.ag/v2/charts` has **perfect CORS on all
+three runtimes** (`romapps.xyz`, `app://rom-nova`, `localhost`) — but returned
+`{"candles":[]}` with the parameters quoted. Routed to W3 to measure rather than
+swap on trust.
+
+### Routed to the running builders
+
+**W3:** `liquidityUsd: m.liquidity ?? 0` — the same field has two behaviours in
+one file, and the launch-feed path already handles it correctly. A 1-minute-old
+mint scored **−16.4 "Liquidity Quality: $0 pooled"** while Jupiter's API
+reported $3,160 for it. **Every newly-minted token is depressed ~16 points by an
+absence rendered as a confident zero** — on precisely the population a sniper
+terminal exists for. Also: "WHALE 6H" is a ten-minute window, in the column
+header, the field name and the invalidation copy alike.
+
+**W2:** triage fails **45 of 74 rows (61%)**, against its own comment warning
+that failing half the feed "would teach a reader to ignore the verdict inside an
+hour". And pool accounts are offered as traders — the scanner's Buyers column
+links to accounts `/whale` then refuses to profile, and `/whales` ranks the Pump
+Fun AMM pool and the **burn address** as movers.
+
+### Why a critic on the merged build
+
+Every prior review looked at ONE stream in its own worktree. Eleven files were
+touched by more than one stream and eight conflicts were resolved by hand —
+**nobody has reviewed the result.** Cross-stream regressions are the one class no
+existing review could have caught: a shared engine change breaking another
+stream's assumption, a hand-resolved conflict dropping a line, two pages
+disagreeing about the same field.
+
+### Open, by stream
+
+**W2 — the biggest measurable gap in the app.** Graduations arrive at p50
+**123.6s** against Axiom's seconds. Free to fix: pump.fun's own `/coins` is
+keyless and measured **2.0s fresh** where GeckoTerminal is 89s stale. Also: the
+lag stat structurally excludes graduations, and three overclaims in copy
+including a rate-limit headroom comment that measurement contradicts (150 calls
+at 1/s → **93 × 429**).
+
+**W3 — the same trap, a third time.** LP lock charges PUMP its largest single
+penalty over **43 independent LP providers**, under a red line reading "the pool
+can be withdrawn" that is simply false at that provider count. Round 2 demoted
+the flag and left the penalty at maximum. Plus a vendor zero (`totalLpProviders:
+0` on 30 of 30 fresh mints) that is the identical bug class to one already fixed
+on a sibling field in the same panel.
+
+**W1 — open but shipped.** Electron main-process RPC proxy for 30+ day wallet
+age, factual labels (exchange/program identification, which Solscan publishes
+free), and `/whales` discovery still simulated.
 
 Wave 1 (W1–W3) is running in parallel, each in its own git worktree. Blind
 critics are dispatched as each artifact lands.

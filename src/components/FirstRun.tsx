@@ -89,11 +89,20 @@ export function FirstRun() {
           <h2 id="firstrun-h" className="text-[13px] font-semibold tracking-wide">
             New here? This is a scoring engine you can argue with.
           </h2>
+          {/* This said "everything below runs on a deterministic simulated
+              market … nothing here is a live feed" while the footer ten inches
+              down said "most of what you see is live Solana", with real token
+              rows between them. The footer was corrected and this was missed —
+              which is the failure DataModeChip's own header warns about: two
+              copies of a claim about honesty is how one of them ends up stale.
+              There is now one copy of the specifics, in the chip, computed from
+              the provider resolution rather than written by hand. */}
           <p className="text-[12px] dim mt-1 max-w-[68ch]">
-            Everything below runs on a deterministic simulated market, labelled as such on every
-            screen — nothing here is a live feed, a recommendation, or a prediction. What is real is
-            the reasoning: how the signals are built, what they refuse, and how often they turn out
-            to be right.
+            Most of what you see is live Solana, read keylessly in your own browser. Some of it —
+            wallet reputation, parts of the desk — is still a labelled simulation, and the
+            data-source chip in the sidebar names which is which on every screen. Nothing here is a
+            recommendation or a prediction. What the app is really offering is the reasoning: how
+            each signal is built, what it refuses to score, and how often it turns out to be right.
           </p>
         </div>
         <button

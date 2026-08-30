@@ -124,9 +124,19 @@ export default function TrackPage() {
               <span className="text-[10.5px] dim num">
                 {h.n.toLocaleString()} resolved over {h.passes.toLocaleString()} passes
               </span>
+              {/* Dashes at n=0, exactly as every band below already does. The
+                  bands were guarded and this line was not, so all three horizon
+                  panels announced "baseline +0.00%" with nothing resolved — a
+                  mean over an empty set rendered as a flat market. */}
               <span className="text-[10.5px] num ml-auto">
                 baseline (all listed tokens){" "}
-                <b className={h.baselineMeanPct >= 0 ? "pos" : "neg"}>{pct(h.baselineMeanPct)}</b>
+                {h.n === 0 ? (
+                  <b className="faint" title="nothing has resolved at this horizon yet">
+                    —
+                  </b>
+                ) : (
+                  <b className={h.baselineMeanPct >= 0 ? "pos" : "neg"}>{pct(h.baselineMeanPct)}</b>
+                )}
               </span>
             </div>
             <table className="w-full text-[12px] min-w-[720px]">

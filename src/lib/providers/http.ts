@@ -63,16 +63,40 @@ export async function providerFetch<T>(
   }
 }
 
+/**
+ * A provider's health, or an honest admission that nothing has been asked of it.
+ *
+ * `requests === 0` used to produce `● ok / 0ms / 0% errors` — a clean bill of
+ * health for a provider that had never been called. That is the state of EVERY
+ * provider on a cold load of /status, which is the load a bookmark or a refresh
+ * produces, so the page a reader opens to find out what is working answered
+ * "everything" before anything had happened.
+ *
+ * It is the zeros bug wearing a status chip: 0ms is not a fast provider and 0%
+ * is not a reliable one when the denominator is zero. Unasked is now its own
+ * state, and latency and error rate go undefined so the table dashes them the
+ * way it already dashes `lastDataTs`.
+ */
 export function healthOf(name: string, mode: ProviderHealth["mode"]): ProviderHealth {
   const s = state(name);
-  const avgLatency = s.latencies.length ? s.latencies.reduce((a, b) => a + b, 0) / s.latencies.length : 0;
-  const errorRate = s.requests > 0 ? (s.errors / s.requests) * 100 : 0;
+  const asked = s.requests > 0;
+  const avgLatency = s.latencies.length ? s.latencies.reduce((a, b) => a + b, 0) / s.latencies.length : undefined;
+  const errorRate = asked ? (s.errors / s.requests) * 100 : undefined;
   return {
     name,
     mode,
-    status: mode === "disabled" ? "down" : errorRate > 30 ? "down" : errorRate > 8 ? "degraded" : "ok",
-    latencyMs: Math.round(avgLatency),
-    errorRatePct: Number(errorRate.toFixed(1)),
+    status:
+      mode === "disabled"
+        ? "down"
+        : !asked
+          ? "unknown"
+          : errorRate! > 30
+            ? "down"
+            : errorRate! > 8
+              ? "degraded"
+              : "ok",
+    latencyMs: avgLatency === undefined ? undefined : Math.round(avgLatency),
+    errorRatePct: errorRate === undefined ? undefined : Number(errorRate.toFixed(1)),
     lastSuccessTs: s.lastSuccessTs,
     lastDataTs: s.lastDataTs,
   };

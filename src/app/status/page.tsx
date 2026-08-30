@@ -109,13 +109,42 @@ export default function StatusPage() {
                 <td className="px-2">
                   <span className={`chip ${p.mode === "live" ? "chip-pos" : p.mode === "demo" ? "chip-accent" : ""}`}>{p.mode}</span>
                 </td>
+                {/* "not asked yet" is its own state and reads as such. A
+                    provider that has answered nothing is not healthy, and it is
+                    not offline either — the table used to call it "● ok" with
+                    0ms and 0% errors, which is every enabled provider on a cold
+                    load of this very page. */}
                 <td className="px-2">
-                  <span className={p.status === "ok" ? "pos" : p.status === "degraded" ? "warn" : "faint"}>
-                    {p.status === "ok" ? "● ok" : p.status === "degraded" ? "● degraded" : "○ offline"}
+                  <span
+                    className={
+                      p.status === "ok"
+                        ? "pos"
+                        : p.status === "degraded"
+                          ? "warn"
+                          : p.status === "unknown"
+                            ? "dim"
+                            : "faint"
+                    }
+                    title={p.status === "unknown" ? "enabled, but nothing has been requested from it yet this session" : undefined}
+                  >
+                    {p.status === "ok"
+                      ? "● ok"
+                      : p.status === "degraded"
+                        ? "● degraded"
+                        : p.status === "unknown"
+                          ? "◌ not asked yet"
+                          : "○ offline"}
                   </span>
                 </td>
-                <td className="text-right px-2 dim">{p.latencyMs}ms</td>
-                <td className={`text-right px-2 ${p.errorRatePct > 5 ? "neg" : "dim"}`}>{p.errorRatePct}%</td>
+                <td className="text-right px-2 dim" title={p.latencyMs === undefined ? "no request has completed" : undefined}>
+                  {p.latencyMs === undefined ? "—" : `${p.latencyMs}ms`}
+                </td>
+                <td
+                  className={`text-right px-2 ${p.errorRatePct !== undefined && p.errorRatePct > 5 ? "neg" : "dim"}`}
+                  title={p.errorRatePct === undefined ? "no requests to compute a rate over" : undefined}
+                >
+                  {p.errorRatePct === undefined ? "—" : `${p.errorRatePct}%`}
+                </td>
                 <td className="text-right px-2 faint">{p.lastDataTs ? fmtAgo(p.lastDataTs) : "—"}</td>
                 <td className="px-3 text-[11px] dim" style={{ fontFamily: "var(--font-sans)" }}>{p.note ?? ""}</td>
               </tr>

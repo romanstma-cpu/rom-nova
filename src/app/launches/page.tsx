@@ -157,28 +157,44 @@ const NEAR_GRADUATION = 0.8;
  * means our "now" reads EARLIER than the source's.
  */
 export function clockSkewHint(feed: LaunchFeed | null | undefined): { label: string; title: string } | null {
-  if (!feed || feed.lagMinMs === null || feed.lagSamples < 3) return null;
+  if (!feed) return null;
+  // Both pipelines, not just mints.
+  //
+  // Graduations cross zero FIRST — they arrive within a few seconds, so a
+  // constant clock offset is a large fraction of the figure, while mints lag
+  // longer and absorb the same offset without ever going negative. Reading only
+  // the mint minimum, this hint stayed silent while the row above it displayed
+  // "grad lag -0s": a negative latency shown as a measurement, which is the
+  // precise thing the mint-side check was written to prevent.
+  //
+  // The more negative of the two wins, because the worse impossibility is the
+  // better estimate of the offset.
+  const candidates: number[] = [];
+  if (feed.lagMinMs !== null && feed.lagSamples >= 3) candidates.push(feed.lagMinMs);
+  if (feed.gradLagMinMs !== null && feed.gradLagSamples >= 3) candidates.push(feed.gradLagMinMs);
+  if (candidates.length === 0) return null;
+  const observed = Math.min(...candidates);
   const tail =
     "\n\nThe opposite direction — a clock running ahead — inflates these figures instead, and cannot be " +
     "detected here at all: it never produces an impossible reading, only a pessimistic one.\n\n" +
     "`npm run probe:launches` brackets the offset off the HTTP Date header against three independent " +
     "servers and reports every figure both raw and corrected.";
-  if (feed.lagMinMs < 0) {
+  if (observed < 0) {
     return {
       label: "clock behind",
       title:
-        `The fastest row on this page was seen ${(Math.abs(feed.lagMinMs) / 1000).toFixed(1)}s BEFORE the source ` +
+        `The fastest row on this page was seen ${(Math.abs(observed) / 1000).toFixed(1)}s BEFORE the source ` +
         "says its pool was created, which is impossible — so this machine's clock reads earlier than the " +
         "source's. That difference is SUBTRACTED from every lag figure above, making the feed look faster " +
         "than it is by however far the clock is off." +
         tail,
     };
   }
-  if (feed.lagMinMs < SOURCE_FLOOR_MS) {
+  if (observed < SOURCE_FLOOR_MS) {
     return {
       label: "clock may be behind",
       title:
-        `The fastest row on this page was seen ${(feed.lagMinMs / 1000).toFixed(1)}s after its pool was created, ` +
+        `The fastest row on this page was seen ${(observed / 1000).toFixed(1)}s after its pool was created, ` +
         `which is under the ${(SOURCE_FLOOR_MS / 1000).toFixed(1)}s floor this source was measured at over a ` +
         "sustained run. It cannot publish a pool it has not indexed yet, so the likeliest explanation is a " +
         "local clock running behind the source's — which subtracts itself from every figure above." +
@@ -330,6 +346,15 @@ export default function LaunchesPage() {
       // filter drops it rather than judging it. Same rule as min-liquidity
       // above: an absent measurement must not be filtered as though it were a
       // low one.
+      // A token that HAS graduated is not near graduating, and the row already
+      // knows it: its own Curve cell renders "n/a — graduated, the curve is
+      // gone". `mergeLaunch` deliberately preserves `bondingCurvePct` through
+      // graduation, so the stale value sailed past this threshold and the filter
+      // contradicted the column beside it on the same row — two of three matches
+      // in review were graduations. A sniper asking "what is about to migrate"
+      // was handed tokens where migration had already happened, which is the one
+      // set they cannot act on.
+      if (nearGrad && l.event === "graduation") return false;
       if (nearGrad && !(l.bondingCurvePct !== undefined && l.bondingCurvePct >= NEAR_GRADUATION)) return false;
       if (venue !== "all" && (l.launchpad ?? l.venue) !== venue) return false;
       return true;

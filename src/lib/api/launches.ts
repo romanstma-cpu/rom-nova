@@ -185,6 +185,18 @@ export interface LaunchFeed {
   gradLagP90Ms: number | null;
   gradLagSamples: number;
   /**
+   * The fastest graduation seen, for the same clock check `lagMinMs` serves.
+   *
+   * It needs its own field because it goes NEGATIVE FIRST. Graduations arrive
+   * within a few seconds of the event, so the machine's clock offset is a large
+   * fraction of the figure; mints lag longer and absorb the same offset without
+   * crossing zero. Watching only the mint minimum, the UI printed "grad lag -0s"
+   * for its first three graduations while raising no warning at all — an
+   * impossible measurement rendered as a fact, which is the exact defect the
+   * mint-side check exists to catch.
+   */
+  gradLagMinMs: number | null;
+  /**
    * Seconds of Solana the last primary page actually spanned. The safety margin
    * against the thirty-row ceiling: if this approaches the poll interval,
    * launches are being missed.
@@ -783,6 +795,7 @@ export async function launchFeed(): Promise<LaunchFeed | null> {
     gradLagP50Ms: percentile(gradLags, 0.5),
     gradLagP90Ms: percentile(gradLags, 0.9),
     gradLagSamples: gradLags.length,
+    gradLagMinMs: gradLags[0] ?? null,
     windowSeconds: state.lastWindowSeconds,
     addedLastPass: state.addedLastPass,
     lastSuccessAt: state.lastSuccessAt,

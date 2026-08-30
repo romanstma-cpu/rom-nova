@@ -42,7 +42,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 | # | Stream | Reference to beat | State |
 |---|---|---|---|
 | W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | ✅ shipped in 1.4.0 · critic list open |
-| W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | 🔨 round 2 · graduation latency |
+| W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | 🔍 round 2 built · critic reviewing |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | 🔨 round 3 · LP over-penalty |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ⏸ until W1–W3 pass |
 | W5 | Alerts that actually fire | Cielo alerts, Photon alerts | ⏸ until W1–W3 pass |
@@ -116,6 +116,58 @@ that failing half the feed "would teach a reader to ignore the verdict inside an
 hour". And pool accounts are offered as traders — the scanner's Buyers column
 links to accounts `/whale` then refuses to profile, and `/whales` ranks the Pump
 Fun AMM pool and the **burn address** as movers.
+
+---
+
+## W2 round 2 — and a correction I owe
+
+**I relayed a bad premise and the builder caught it.** I passed on the critic's
+"pump.fun `/coins` is keyless and 2.0s fresh, swap the graduation path to it" as
+a free fix. It isn't: that endpoint **allowlists its own origin**, and `Origin`
+is a header a page cannot set. From `app://rom-nova` it 403s. The 2.0s
+measurement was a bare GET from Node — true, and useless to a browser.
+
+I re-checked and confirmed the correction: no `access-control-allow-origin` on
+any origin. Both the critic and I were wrong; the existing code comment was
+right. **That's twice now a bare GET has produced a misleading CORS reading** —
+once making a working API look dead, once making a dead route look usable.
+
+The real fix was a vendor already in the stack. I verified it independently:
+`POST datapi.jup.ag/v1/pools/gems` preflights **204** with correct ACAO and
+POSTs **200** with a 64KB payload, from **both** `app://rom-nova` and
+`https://romapps.xyz`.
+
+| source | n | min | p50 | p90 |
+|---|---|---|---|---|
+| datapi gems.graduated | 11 | 1.0s | **3.0s** | 4.0s |
+| geckoterminal new_pools | 14 | 11.0s | **40.0s** | 72.0s |
+
+Gems led on all 6 graduations both saw, by a median of 50s. End to end:
+**123.6s → 1–3s.**
+
+### Three bugs it caught in its own work, by measuring
+
+- `mergeLaunch`'s `Math.min` dating meant a mint that graduated kept its *curve*
+  timestamp — a 3s feed reporting **1,478s**.
+- `bondingCurve` is a percentage, not a fraction. Would have shipped 100× —
+  caught rendering `3538%` against live data.
+- Its own clock-skew hint had the **sign inverted**, printing "clock ahead" on a
+  machine bracketed at 2.85s behind.
+
+### The triage answer is better than the question
+
+Asked to justify a 61% AVOID rate, it reproduced **70%** — then measured the
+thing the check never sees: the creator rule fails **33% of new mints but only
+3% of mints that went on to graduate.** It discriminates, so the thresholds
+stayed on that evidence rather than being tuned to look friendlier. It also
+*rejected* the cheap fix of excluding graduations structurally, because freshly
+graduated pools have a **median liquidity of $0** — there, "low liquidity" is
+real rather than an artifact. The base rate is now disclosed instead of hidden.
+
+Its calibration comment was stale (median deployer 75 → **32**) and is now true.
+
+**Clock note:** this machine is 2.850s behind and *drifting* — 2.39s → 2.787s →
+2.850s across the session. Always the direction that flatters a latency claim.
 
 ### Why a critic on the merged build
 

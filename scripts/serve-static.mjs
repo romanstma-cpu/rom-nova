@@ -7,7 +7,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "out");
-const PORT = 8788;
+// Overridable because several worktrees of this repo get served at once, and a
+// silent bind failure means you spend twenty minutes measuring somebody else's
+// build. `PORT=8797 node scripts/serve-static.mjs`.
+const PORT = Number(process.env.PORT) || 8788;
 
 const MIME = {
   ".html": "text/html; charset=utf-8",

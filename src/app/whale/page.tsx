@@ -1,11 +1,26 @@
 "use client";
 
-import { Suspense } from "react";
+// The wallet page, which now has two completely different jobs.
+//
+// It was written for the synthetic universe, where every address is known and
+// complete: a smart-money score, a behavioural profile, a funding source, a
+// cluster. Paste a real Solana address into that page and it answered "wallet
+// not tracked" — honest, and the whole problem. This is a Solana intelligence
+// terminal that could not tell you anything about a Solana wallet.
+//
+// So the page routes. An address the simulator knows renders the synthetic view
+// under a SIMULATED banner; anything else is read off the chain. The demo
+// lookup goes first because it answers from memory, and because the two address
+// spaces are shaped identically — the generator emits 44-character base58 too —
+// so there is no way to tell them apart by looking at one.
+
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { useApi, fmtUsd, fmtPct, fmtAgo, shortAddr } from "@/lib/client";
+import { useRouter, useSearchParams } from "next/navigation";
+import { apiGet, useApi, fmtUsd, fmtPct, fmtAgo, shortAddr } from "@/lib/client";
 import { Score, Stat, Empty } from "@/components/ui/bits";
-import type { WalletInfo, WalletPerformance, WalletTrade, WalletCluster } from "@/lib/types";
+import { RealWalletProfile } from "@/components/wallet/RealWalletProfile";
+import type { WalletInfo, WalletPerformance, WalletProfile, WalletTrade, WalletCluster } from "@/lib/types";
 
 interface WalletDetail {
   info: WalletInfo;
@@ -28,24 +43,163 @@ interface WalletDetail {
 export default function WalletPage() {
   return (
     <Suspense fallback={<Empty>PROFILING WALLET…</Empty>}>
-      <WalletInner />
+      <WalletRouter />
     </Suspense>
   );
 }
 
-function WalletInner() {
+/** Solana addresses are base58 and 32 bytes. Anything else is a typo. */
+const PLAUSIBLE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/**
+ * Rendered with `key={current}` by every caller, so navigating to a new address
+ * remounts it and the box picks the new value up from its initial state. An
+ * effect syncing prop into state would do the same thing one render later and
+ * cascade, which is the pattern React now flags outright.
+ */
+function AddressBar({ current }: { current: string }) {
+  const router = useRouter();
+  const [value, setValue] = useState(current);
+  const ok = PLAUSIBLE.test(value.trim());
+  return (
+    <form
+      className="panel px-3 py-2.5 flex items-center gap-2 flex-wrap"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (ok) router.push(`/whale?a=${value.trim()}`);
+      }}
+    >
+      <span className="panel-title shrink-0">TRACK ANY SOLANA WALLET</span>
+      <input
+        className="flex-1 min-w-[280px] num text-[12px] px-2 py-1.5 rounded bg-transparent border"
+        style={{ borderColor: "var(--border)" }}
+        placeholder="paste a wallet address…"
+        value={value}
+        spellCheck={false}
+        onChange={(e) => setValue(e.target.value)}
+      />
+      <button type="submit" className={`chip ${ok ? "chip-accent" : ""} cursor-pointer`} disabled={!ok}>
+        {ok ? "PROFILE" : "not a Solana address"}
+      </button>
+    </form>
+  );
+}
+
+type Resolution =
+  | { state: "loading" }
+  | { state: "demo"; data: WalletDetail }
+  | { state: "real"; profile: WalletProfile }
+  | { state: "none"; reason: string };
+
+function WalletRouter() {
   const address = useSearchParams().get("a") ?? "";
-  const { data, error } = useApi<WalletDetail>(address ? `/api/wallets/${address}` : null, 20_000);
+  // Tagged with the address it describes, so "still loading" is derived from a
+  // mismatch rather than from a setState fired synchronously inside the effect.
+  // Every write below happens after an await, in a promise continuation.
+  const [answered, setAnswered] = useState<{ address: string; res: Resolution } | null>(null);
 
-  if (!address || error)
-    return <Empty>Wallet not tracked. <Link href="/whales" className="link">Back to whale intelligence.</Link></Empty>;
-  if (!data) return <Empty>PROFILING WALLET…</Empty>;
+  useEffect(() => {
+    if (!address) return;
+    let dead = false;
+    void (async () => {
+      // Simulator first. It answers from memory, and a hit means the address
+      // belongs to the demo universe rather than to Solana.
+      try {
+        const demo = await apiGet<WalletDetail>(`/api/wallets/${address}`);
+        if (!dead) setAnswered({ address, res: { state: "demo", data: demo } });
+        return;
+      } catch {
+        // Not a synthetic wallet. Read the chain.
+      }
+      // Two stages. Balances and identity are three requests and a few hundred
+      // milliseconds; the fill history is up to four hundred and was measured
+      // at 28.7 seconds in its worst case. Painting the first while the second
+      // runs is the difference between a fast page and one a trader assumes is
+      // broken — and the profile carries `stage`, so the panels that need fills
+      // say "reading…" rather than showing a zero.
+      try {
+        const quick = await apiGet<{ profile: WalletProfile }>(
+          `/api/wallets/${address}/profile?stage=balances`,
+        );
+        if (!dead) setAnswered({ address, res: { state: "real", profile: quick.profile } });
+        // A non-wallet is already fully answered; reading four hundred
+        // transactions for a token mint would be work nobody asked for.
+        if (!quick.profile.identity.profilable) return;
+      } catch (err) {
+        // The fast pass failing is not fatal — fall through to the full read,
+        // which may still succeed and is the one that carries the trades.
+        if (!dead && err instanceof Error && /not a Solana address/i.test(err.message)) {
+          setAnswered({ address, res: { state: "none", reason: err.message } });
+          return;
+        }
+      }
+      try {
+        const real = await apiGet<{ profile: WalletProfile }>(`/api/wallets/${address}/profile`);
+        if (!dead) setAnswered({ address, res: { state: "real", profile: real.profile } });
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        // Keep whatever the fast pass already put on screen rather than
+        // replacing real balances with an error.
+        if (!dead) {
+          setAnswered((prev) =>
+            prev?.address === address && prev.res.state === "real"
+              ? prev
+              : { address, res: { state: "none", reason } },
+          );
+        }
+      }
+    })();
+    return () => {
+      dead = true;
+    };
+  }, [address]);
 
-  const { info, perf } = data;
+  const res: Resolution = !address
+    ? { state: "none", reason: "Paste a Solana wallet address to profile it." }
+    : answered?.address === address
+      ? answered.res
+      : { state: "loading" };
+
+  const frame = (body: React.ReactNode) => (
+    <div className="p-3 flex flex-col gap-3">
+      <AddressBar key={address} current={address} />
+      {body}
+    </div>
+  );
+
+  if (res.state === "loading") {
+    return frame(<Empty>READING THE CHAIN… signatures, then transactions, then balances.</Empty>);
+  }
+  if (res.state === "none") {
+    return frame(
+      <Empty>
+        {res.reason}{" "}
+        <Link href="/whales" className="link">
+          Back to whale intelligence.
+        </Link>
+      </Empty>,
+    );
+  }
+  if (res.state === "real") return frame(<RealWalletProfile p={res.profile} />);
+  return <DemoWallet address={address} initial={res.data} />;
+}
+
+function DemoWallet({ address, initial }: { address: string; initial: WalletDetail }) {
+  // Starts from the copy the router already fetched, so the synthetic view does
+  // not flash empty on the way in, and keeps polling from there.
+  const { data } = useApi<WalletDetail>(`/api/wallets/${address}`, 20_000);
+  const detail = data ?? initial;
+  const { info, perf } = detail;
   const sm = info.smartMoney;
 
   return (
     <div className="p-3 flex flex-col gap-3">
+      <AddressBar key={address} current={address} />
+      <div className="panel px-4 py-2 text-[11.5px]">
+        <span className="chip chip-warn mr-2">SIMULATED WALLET</span>
+        This address belongs to the deterministic demo universe — its trades, score and behavioural profile
+        were generated, not observed. Paste a real Solana address above to read one off the chain.
+      </div>
       <div className="panel px-4 py-3 flex items-center gap-4 flex-wrap">
         <div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -53,9 +207,9 @@ function WalletInner() {
             {info.labels.map((l) => (
               <span key={l} className={`chip ${l === "smart_trader" ? "chip-accent" : ""}`}>{l.replace("_", " ")}</span>
             ))}
-            {data.cluster && (
-              <span className="chip chip-warn" title={data.cluster.evidence.join(" · ")}>
-                COORDINATED: {data.cluster.name}
+            {detail.cluster && (
+              <span className="chip chip-warn" title={detail.cluster.evidence.join(" · ")}>
+                COORDINATED: {detail.cluster.name}
               </span>
             )}
           </div>
@@ -120,7 +274,7 @@ function WalletInner() {
               </tr>
             </thead>
             <tbody className="num">
-              {data.positions.sort((a, b) => b.valueUsd - a.valueUsd).map((p) => (
+              {detail.positions.sort((a, b) => b.valueUsd - a.valueUsd).map((p) => (
                 <tr key={p.mint} className="trow">
                   <td className="px-3 py-1.5">
                     <Link href={`/token?m=${p.mint}`} className="hover:text-[var(--accent)]" style={{ fontFamily: "var(--font-sans)" }}>{p.symbol}</Link>
@@ -133,7 +287,7 @@ function WalletInner() {
               ))}
             </tbody>
           </table>
-          {data.positions.length === 0 && <Empty>Flat — no open positions.</Empty>}
+          {detail.positions.length === 0 && <Empty>Flat — no open positions.</Empty>}
         </div>
 
         {/* closed round trips */}
@@ -142,7 +296,7 @@ function WalletInner() {
           <div className="max-h-[300px] overflow-y-auto">
             <table className="w-full text-[12px]">
               <tbody className="num">
-                {data.roundTrips.map((r, i) => (
+                {detail.roundTrips.map((r, i) => (
                   <tr key={i} className="trow">
                     <td className="px-3 py-1.5">
                       <Link href={`/token?m=${r.mint}`} className="hover:text-[var(--accent)]" style={{ fontFamily: "var(--font-sans)" }}>{r.symbol}</Link>
@@ -155,7 +309,7 @@ function WalletInner() {
                 ))}
               </tbody>
             </table>
-            {data.roundTrips.length === 0 && <Empty>No completed trades yet.</Empty>}
+            {detail.roundTrips.length === 0 && <Empty>No completed trades yet.</Empty>}
           </div>
         </div>
       </div>
@@ -188,7 +342,7 @@ function WalletInner() {
           <div className="max-h-[340px] overflow-y-auto">
             <table className="w-full text-[11.5px]">
               <tbody className="num">
-                {data.trades.map((t) => (
+                {detail.trades.map((t) => (
                   <tr key={t.id} className="trow">
                     <td className="px-3 py-1 faint">{new Date(t.ts).toLocaleString()}</td>
                     <td className={`px-2 ${t.side === "buy" ? "pos" : "neg"}`}>{t.side.toUpperCase()}</td>

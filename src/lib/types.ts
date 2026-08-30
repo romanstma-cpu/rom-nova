@@ -335,6 +335,321 @@ export interface WalletTrade {
   confidence: number;
 }
 
+// ------------------------------------------------- real wallets, read on-chain
+//
+// Everything above this line describes a wallet the simulator invented and
+// therefore knows completely. The types below describe a wallet that exists,
+// which is a different epistemic situation: the chain answers some questions
+// exactly, refuses others, and — the part that gets people hurt — looks
+// identical either way once a number reaches a table cell.
+//
+// So a measured value and an absent one are DIFFERENT TYPES here. `priceUsd?:
+// number` on a fill is not laziness; it is the difference between "this trade
+// went off at four cents" and "we watched tokens move and never saw what was
+// paid for them". A zero in that slot reads as free.
+
+/**
+ * What a wallet read could not establish.
+ *
+ * Kept separate from `UnmeasuredField`, which names inputs to the TOKEN scorer
+ * and is consumed by factor `needs`. Mixing them would let a wallet-shaped gap
+ * silently stand down a token factor that never depended on it.
+ */
+export type UnmeasuredWalletField =
+  /**
+   * Entry prices for some or all held tokens were never observed, so the
+   * position's cost — and therefore its unrealized PnL — is not knowable.
+   * Caused by acquisition before the readable window, or by a transfer in.
+   */
+  | "costBasis"
+  /**
+   * Sells landed whose matching buys were outside the window. Their proceeds
+   * are real and their PROFIT is not computable, so they are excluded from
+   * realized PnL rather than being credited at a cost of zero — which would
+   * book the entire proceeds as gain.
+   */
+  | "realizedPnl"
+  /**
+   * The wallet's full trading life. No keyless source publishes it: the only
+   * public Solana RPC that answers `getSignaturesForAddress` at all retains
+   * roughly two days. Everything here is a WINDOW, and this field is set on
+   * every real wallet read, always, so nothing downstream can mistake a
+   * two-day figure for a lifetime one.
+   */
+  | "lifetimeHistory"
+  /**
+   * Whether this wallet is any good in a way that generalises. Win rate over
+   * two days is a sample, not a reputation, and no keyless source carries one.
+   */
+  | "reputation"
+  /**
+   * The price of at least one observed movement. Tokens moved, no SOL or
+   * stablecoin leg belonged to this wallet in that transaction, so there is
+   * nothing to divide by.
+   */
+  | "fillPrice";
+
+/** How a fill's price was established, or why it could not be. */
+export type FillPricing =
+  /** Paid or received in wrapped SOL, converted at the SOL/USD bar for that hour. */
+  | "wsol"
+  /** Paid or received in a stablecoin, taken at one dollar. */
+  | "stable"
+  /** Tokens moved; nothing this wallet owned moved against them. */
+  | "unpriced";
+
+/**
+ * One observed change in a wallet's holding of one token.
+ *
+ * Deliberately not `WalletTrade`. A trade has a price by definition and this
+ * frequently does not — 46% of the token movements measured across five real
+ * wallets had no quote leg belonging to the wallet at all, because they were
+ * transfers, claims, or token-for-token rotations routed entirely through
+ * pools. Those are real events a reader should see; they are not fills at a
+ * price, and the type says so.
+ */
+export interface WalletFill {
+  signature: string;
+  slot: number;
+  /** ms epoch, from the block. */
+  ts: number;
+  wallet: string;
+  /** The non-quote token that moved. */
+  mint: string;
+  decimals: number;
+  side: "buy" | "sell";
+  /** Base tokens moved. Always positive; `side` carries the direction. */
+  tokens: number;
+  /** wSOL or a stablecoin, when one leg of the swap was the wallet's own. */
+  quoteMint?: string;
+  /** Quote units paid or received. Always positive. */
+  quoteAmount?: number;
+  /** USD per base token AT THE FILL. Undefined means nobody saw it. */
+  priceUsd?: number;
+  /** USD notional of the fill, undefined for the same reason as `priceUsd`. */
+  valueUsd?: number;
+  pricing: FillPricing;
+  /** One short clause the UI can print in place of a dollar figure. */
+  unpricedReason?: string;
+  classification: TradeClassification;
+}
+
+/**
+ * Exactly how much of a wallet's life was read, in the read's own terms.
+ *
+ * The most dangerous number this app can render is a realized-PnL figure over
+ * a window presented as a wallet's performance. Every field here exists to
+ * make that impossible to do by accident: a caller cannot format the PnL
+ * without having the window sitting next to it in the same object.
+ */
+export interface WalletCoverage {
+  /** The adapter that answered — "solana-rpc", never "demo" for a real read. */
+  source: string;
+  /**
+   * Which runtime read this, because the three see different depths.
+   *
+   * The archival RPC refuses any request carrying an Origin header, so a
+   * browser tab is capped at ~2 days while the server route and the desktop
+   * shell's main-process proxy reach the whole index. One label over all three
+   * would be false for two of them.
+   */
+  runtime: "node" | "desktop" | "browser";
+  /** ms epoch of the newest and oldest transaction actually read. */
+  newestTs: number;
+  oldestTs: number;
+  /** The span the PRICED FILLS below describe. Not the wallet's age. */
+  windowHours: number;
+  signaturesListed: number;
+  transactionsRead: number;
+  transactionsFailed: number;
+  /**
+   * Transactions the fast endpoint no longer holds the body for.
+   *
+   * Not a failure and not counted as one: measured, publicnode returns null for
+   * every signature older than ~2 days while serving recent ones perfectly.
+   * The index still counts these, so a wallet can show 5,942 lifetime
+   * transactions and 112 priced ones without either number being wrong.
+   */
+  transactionsUnavailable: number;
+  /**
+   * How many of `transactionsFailed` were the endpoint's rate limit rather
+   * than a genuine miss.
+   *
+   * Worth its own field because the two have opposite remedies. A refusal is
+   * temporary and a reload fixes it; a failure is a transaction this read will
+   * never see, and no amount of waiting brings it back.
+   */
+  transactionsRefused: number;
+  /** Our own budget stopped the read before the endpoint ran out of history. */
+  cappedByBudget: boolean;
+  /**
+   * The endpoint returned no signatures older than `oldestTs`.
+   *
+   * NOT the same as "this wallet has no older history". Measured against a
+   * quiet, years-old address, publicnode's oldest signature was 2.02 days back
+   * and paging before it returned nothing — a retention edge, not a birth
+   * certificate.
+   */
+  reachedEndpointLimit: boolean;
+  /** False on every keyless read. Present so a keyed source could set it true. */
+  lifetime: boolean;
+  /**
+   * True when the SIGNATURE INDEX reached past the ~2-day public window.
+   *
+   * Deliberately separate from `lifetime`. The index being archival means the
+   * wallet's AGE and lifetime transaction COUNT are real; it does not mean the
+   * fills are, because the only endpoint serving old transaction bodies allows
+   * ten `getTransaction` calls per window.
+   */
+  indexArchival: boolean;
+  /** The index ran out naturally rather than hitting our page cap. */
+  indexComplete: boolean;
+  /**
+   * ms epoch of the OLDEST signature the index reached.
+   *
+   * With `indexArchival && indexComplete` this is the wallet's first ever
+   * transaction. Otherwise it is a lower bound: the wallet is AT LEAST this
+   * old. A reader must never be shown the second as though it were the first.
+   */
+  firstSeenTs: number;
+  /** Days since `firstSeenTs`, on the same "at least" caveat. */
+  historyDays: number;
+  note: string;
+}
+
+/** One token the wallet holds right now, with cost basis only if it was seen. */
+export interface WalletHolding {
+  mint: string;
+  symbol?: string;
+  decimals: number;
+  /** The real balance, read from the chain rather than derived from fills. */
+  tokens: number;
+  priceUsd?: number;
+  valueUsd?: number;
+  /** FIFO cost over observed fills. Undefined when the entry was not observed. */
+  costBasisUsd?: number;
+  unrealizedPnlUsd?: number;
+  unrealizedPnlPct?: number;
+  /**
+   * How many tokens the observed fills account for.
+   *
+   * The reconciliation that makes the rest trustworthy: when this disagrees
+   * with `tokens`, the wallet acquired part of the position where we could not
+   * see it, and no cost basis for the position is honest. Most trackers assume
+   * instead, which is how a bag bought before their window shows up as pure
+   * profit.
+   */
+  observedTokens: number;
+  costBasisKnown: boolean;
+  /** Why the cost is unknown, when it is. */
+  reason?: string;
+  /** Jupiter's own flag for dust and spam airdrops. */
+  excludeFromNetWorth?: boolean;
+}
+
+/**
+ * Performance over the observed window, and nothing beyond it.
+ *
+ * Every optional field is optional because it genuinely may not exist: a
+ * wallet with no completed round trip inside the window has no win rate, and
+ * rendering 0% would say it loses every trade.
+ */
+export interface WalletWindowStats {
+  realizedPnlUsd?: number;
+  unrealizedPnlUsd?: number;
+  winRate?: number;
+  profitFactor?: number;
+  avgWinUsd?: number;
+  avgLossUsd?: number;
+  medianHoldHours?: number;
+  roundTrips: number;
+  buys: number;
+  sells: number;
+  pricedFills: number;
+  unpricedFills: number;
+  distinctMints: number;
+  /** Tokens sold out of lots we never saw bought. Excluded from realized PnL. */
+  unmatchedSellTokens: number;
+  unmatchedSellMints: number;
+  /**
+   * Realized PnL from sells that did NOT close a position.
+   *
+   * `realizedPnlUsd` accumulates on every priced sell, but a round trip is only
+   * recorded when the position goes flat — so a wallet that trims twice and
+   * never exits has a headline PnL and an empty round-trips table. The blind
+   * review hit exactly that: −$4.24 above a table summing to −$0.45, both
+   * correct and irreconcilable on screen. This is the difference, named.
+   */
+  partialExitPnlUsd: number;
+  /** How many priced sells reduced a position without closing it. */
+  partialExits: number;
+}
+
+export interface WalletProfile {
+  address: string;
+  /**
+   * How much of this wallet has been read.
+   *
+   * "balances" is the fast first paint — identity, holdings and prices, a few
+   * hundred milliseconds — with the fill history still outstanding. Every
+   * fill-derived figure is absent rather than zero at that point, and the UI
+   * must render "reading…" and not "no trades", which are opposite claims.
+   */
+  stage: "balances" | "full";
+  /**
+   * What the address turned out to be.
+   *
+   * A token mint owns token accounts and a program's authority holds balances,
+   * so both render as plausible "traders" if nobody checks. The blind review
+   * pasted a mint in and got "$520.8K portfolio, 144 positions" with no warning.
+   */
+  identity: {
+    kind: string;
+    detail: string;
+    profilable: boolean;
+  };
+  coverage: WalletCoverage;
+  holdings: {
+    source: string;
+    solBalance: number;
+    /**
+     * Native SOL valued at the current SOL price, when one was available.
+     *
+     * Its own field because omitting it was a 52% understatement on the one
+     * wallet where it was checked: Binance's hot wallet showed $162.20M of
+     * tokens while holding 1,661,879 SOL — $174.9M more — that the headline
+     * simply left out. Undefined when no SOL price could be read, which keeps
+     * it out of the total rather than adding zero to it.
+     */
+    solValueUsd?: number;
+    /** Mints with a non-zero balance. */
+    mints: number;
+    /** USD across the mints a price was found for, EXCLUDING native SOL. */
+    tokenValueUsd: number;
+    /** Tokens plus native SOL — what a reader means by "this wallet is worth". */
+    valuedUsd: number;
+    pricedMints: number;
+    /** Mints held but not valued — the price budget ran out or Jupiter had none. */
+    unpricedMints: number;
+  } | null;
+  positions: WalletHolding[];
+  roundTrips: {
+    mint: string;
+    symbol?: string;
+    entryTs: number;
+    exitTs: number;
+    costUsd: number;
+    proceedsUsd: number;
+    pnlUsd: number;
+    holdHours: number;
+  }[];
+  fills: WalletFill[];
+  stats: WalletWindowStats;
+  unmeasured: readonly UnmeasuredWalletField[];
+  /** One sentence per claim, naming who answered it. */
+  provenance: string[];
+}
+
 export interface WalletPosition {
   wallet: string;
   mint: string;

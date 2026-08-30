@@ -17,7 +17,13 @@ interface Status {
     genesis: number;
     seed: number;
   };
-  dataMode?: { overall: "live" | "mixed" | "demo"; live: string[]; simulated: string[] };
+  dataMode?: {
+    overall: "live" | "mixed" | "demo";
+    live: string[];
+    simulated: string[];
+    /** Real, and narrower than "live" would let a reader assume. */
+    bounded?: string[];
+  };
 }
 
 export default function StatusPage() {
@@ -46,6 +52,21 @@ export default function StatusPage() {
               </span>
             ))}
           </div>
+          {/* The third column, spelled out rather than chipped. These are real
+              measurements with a limit attached, and the limit is a sentence —
+              "last ~48h only (public RPC retention)" does not fit in a chip and
+              is the entire point of listing it. A capability that is real and
+              narrow is the easiest kind to over-read. */}
+          {data.dataMode.bounded && data.dataMode.bounded.length > 0 && (
+            <div className="mt-2">
+              <div className="panel-title pb-1">Real, with a limit worth knowing</div>
+              <ul className="text-[11.5px] dim space-y-1">
+                {data.dataMode.bounded.map((b) => (
+                  <li key={b}>· {b}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="hint mt-2">
             {data.dataMode.overall === "mixed"
               ? "Mixed. Live panels carry the vendor's name; anything unlabelled is the deterministic simulator, " +

@@ -348,9 +348,16 @@ export default function ScannerPage() {
                           .map((w) => `${w.owner}  ${w.usd >= 0 ? "+" : ""}${fmtUsd(w.usd)}`)
                           .join("\n")}
                       >
-                        <span className={r.topWallets[0].usd >= 0 ? "pos" : "neg"}>
+                        {/* Linked now that a real address leads somewhere. These
+                            are addresses SQD watched move a moment ago, and
+                            until wallet reads were real, clicking one would have
+                            reached the simulator and found nothing. */}
+                        <Link
+                          href={`/whale?a=${r.topWallets[0].owner}`}
+                          className={`hover:underline ${r.topWallets[0].usd >= 0 ? "pos" : "neg"}`}
+                        >
                           {r.topWallets[0].owner.slice(0, 4)}…{r.topWallets[0].owner.slice(-3)}
-                        </span>{" "}
+                        </Link>{" "}
                         {r.topWallets.length > 1 && `+${r.topWallets.length - 1}`}
                       </span>
                     ) : (

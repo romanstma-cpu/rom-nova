@@ -17,6 +17,7 @@ import {
   handleClusters,
   handleEvents,
   handleFlow,
+  handleLiveMovers,
   handleMarket,
   handleNetwork,
   handlePaperGet,
@@ -31,6 +32,7 @@ import {
   handleTokenDetail,
   handleTokens,
   handleWalletDetail,
+  handleWalletProfile,
   handleWallets,
   handleWatchlistOp,
   handleWatchlists,
@@ -98,6 +100,20 @@ export async function localGet(url: string): Promise<LocalResponse> {
         };
     }
     if (p === "/api/wallets") return { status: 200, body: handleWallets(store) };
+    // Before the /:address route, which would otherwise match "movers".
+    if (p === "/api/wallets/movers") return { status: 200, body: await handleLiveMovers(num(q.get("limit")) ?? 25) };
+    {
+      // Ordered before the bare-address route on purpose: `[^/]+` would
+      // otherwise swallow "<address>/profile" and hand the simulator an
+      // address it has never heard of.
+      const m = p.match(/^\/api\/wallets\/([^/]+)\/profile$/);
+      // Awaited: in the static build this is the visitor's own browser reading
+      // Solana directly. Nothing is uploaded and no server is involved.
+      if (m) {
+        const stage = q.get("stage") === "balances" ? "balances" : "full";
+        return { status: 200, body: await handleWalletProfile(m[1], stage) };
+      }
+    }
     {
       const m = p.match(/^\/api\/wallets\/([^/]+)$/);
       if (m) return { status: 200, body: handleWalletDetail(store, m[1]) };

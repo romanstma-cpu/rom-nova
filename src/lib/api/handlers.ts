@@ -18,8 +18,9 @@ const MAX_EDGES = 420;
  *  and static positions must not be able to crowd them out. */
 const MAX_TRADE_EDGES = 160;
 import { buildFlowSeries, buildTokenRows, buildWalletRows } from "./rows";
-import { DEMO, candlesFor, trendingRows } from "./source";
+import { DEMO, candlesFor, trendingRows, walletProfile } from "./source";
 import { liveTokenDetail } from "./detail";
+import { isPlausibleAddress } from "../providers/wallet-chain";
 import { dataMode, providerHealth } from "../providers/registry";
 import type { AlertCondition, BacktestConfig, StrategyProfileId } from "../types";
 
@@ -221,6 +222,96 @@ export async function handleCandles(store: DemoStore, mint: string, from?: numbe
 
 export function handleWallets(store: DemoStore) {
   return { rows: buildWalletRows(store), demo: true };
+}
+
+/**
+ * Real wallets, ranked by money they actually moved in the last few minutes.
+ *
+ * The `/whales` roster is the simulator and its caption claimed the scores were
+ * "measured from each wallet's trade history" — true of the generator, false in
+ * context, and the blind review called it out. Ranked discovery from real data
+ * is the feature traders open GMGN for, so this is the honest version of it.
+ *
+ * A ranked leaderboard by PnL is NOT feasible keylessly and this does not
+ * pretend to be one: profiling a wallet costs ~400 requests against a
+ * 2,400/minute budget, so four to six wallets a minute, and ranking any
+ * meaningful universe by realized PnL would take days.
+ *
+ * Ranking by MEASURED FLOW costs nothing extra. The scanner already streams
+ * per-token wallet deltas from SQD and caches them for thirty seconds; this
+ * aggregates the movers across the trending list. It answers "who is trading
+ * real size right now", which is a different question from "who is good" — and
+ * the one this stack can actually answer.
+ */
+export async function handleLiveMovers(limit = 25) {
+  const rows = await trendingRows();
+  if (!rows) return { movers: [], real: false, note: "no live token source configured", demo: true };
+
+  const byOwner = new Map<string, { owner: string; netUsd: number; grossUsd: number; tokens: Set<string> }>();
+  for (const row of rows.data) {
+    for (const w of row.topWallets ?? []) {
+      let e = byOwner.get(w.owner);
+      if (!e) byOwner.set(w.owner, (e = { owner: w.owner, netUsd: 0, grossUsd: 0, tokens: new Set() }));
+      e.netUsd += w.usd;
+      e.grossUsd += Math.abs(w.usd);
+      e.tokens.add(row.symbol || row.mint);
+    }
+  }
+
+  const movers = [...byOwner.values()]
+    .sort((a, b) => b.grossUsd - a.grossUsd)
+    .slice(0, limit)
+    .map((m) => ({
+      owner: m.owner,
+      netUsd: m.netUsd,
+      grossUsd: m.grossUsd,
+      tokens: [...m.tokens],
+    }));
+
+  return {
+    movers,
+    real: true,
+    source: rows.provenance.source,
+    // The window belongs to the number. These are minutes of flow, not a record.
+    note:
+      "ranked by USD moved in the last few minutes of SQD flow across the trending list — " +
+      "this is size traded right now, NOT a measure of skill, and no PnL is implied",
+    demo: false,
+  };
+}
+
+/**
+ * A real Solana address, profiled from the chain.
+ *
+ * Kept apart from `handleWalletDetail` rather than folded into it, because the
+ * two return genuinely different objects and merging them would mean inventing
+ * the simulator's fields — smart-money score, behavioural profile, known
+ * entity, cluster membership — for a wallet that has none of them. The page
+ * renders whichever it gets and says which.
+ *
+ * A 404 here means "no keyless wallet source is configured", not "no such
+ * wallet": an address with nothing in the readable window still returns a
+ * profile, with a coverage block that explains the emptiness.
+ */
+export async function handleWalletProfile(address: string, stage: "balances" | "full" = "full") {
+  // Two failures wearing one message, which the blind review flagged as both
+  // developer-facing and wrong: it told a trader to "set ENABLE_WALLET_CHAIN"
+  // when the source was working perfectly and they had simply mistyped an
+  // address. Separated, and phrased for the person reading it.
+  if (!isPlausibleAddress(address)) {
+    throw new ApiError(
+      400,
+      "That is not a Solana address. They are 32-44 characters of base58 — no 0, O, I or l.",
+    );
+  }
+  const sourced = await walletProfile(address, stage);
+  if (!sourced) {
+    throw new ApiError(
+      503,
+      "Solana could not be reached to read this wallet. The public RPC may be rate-limiting; try again shortly.",
+    );
+  }
+  return { profile: sourced.data, provenance: sourced.provenance, demo: false };
 }
 
 export function handleWalletDetail(store: DemoStore, address: string) {

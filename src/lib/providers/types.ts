@@ -30,6 +30,32 @@ export interface WalletDataProvider {
   getWalletLabels(address: string): Promise<string[]>;
 }
 
+/**
+ * A wallet's CURRENT token balances, read rather than replayed.
+ *
+ * Separate from `WalletDataProvider` because the two questions turned out to
+ * be answered by different vendors and neither can answer the other. Solana's
+ * public RPC hands out a wallet's transactions for free and returns 403 to
+ * `getTokenAccountsByOwner`; Jupiter returns the balances in one call and
+ * knows nothing about how they were acquired.
+ *
+ * Keeping them apart is also what makes the reconciliation in
+ * `engine/wallet-profile.ts` possible: a position derived from trades and a
+ * position read from the chain are independent measurements, and their
+ * DISAGREEMENT is the signal that a cost basis is not knowable.
+ */
+export interface WalletHoldingsProvider {
+  readonly name: string;
+  getHoldings(address: string): Promise<{
+    source: string;
+    address: string;
+    solBalance: number;
+    tokens: { mint: string; tokens: number; decimals: number; frozen: boolean; excludeFromNetWorth: boolean }[];
+  } | null>;
+  /** USD prices for as many of these mints as the budget reaches, in order. */
+  priceMints(mints: string[]): Promise<Map<string, number>>;
+}
+
 export interface SecurityDataProvider {
   readonly name: string;
   getTokenSecurity(mint: string): Promise<{
@@ -246,5 +272,11 @@ export interface ProviderSet {
    * which a caller must render as silence rather than as a clean bill.
    */
   risk?: TokenRiskProvider;
+  /**
+   * Optional balance reader. Absent means positions can only be DERIVED from
+   * the trade window, which makes them as incomplete as the window is — and a
+   * caller must say so rather than presenting a partial position as a holding.
+   */
+  holdings?: WalletHoldingsProvider;
   health(): ProviderHealth[];
 }

@@ -438,6 +438,57 @@ web, firing on wallet buys, score crossings and launch matches.
 
 ## Deploy log
 
+**1.4.0 — LIVE, verified 2026-08-30.** All three wave-1 streams merged.
+
+| check | result |
+|---|---|
+| merge | W3 + W1 + W2 into one branch; 11 overlapping files, 8 conflicts resolved by hand |
+| tests | **365 passed** (was 192 before the campaign) |
+| release | `v1.4.0`, 83,121,683 bytes |
+| SHA256 vs GitHub digest | **match** — `9897a045…07506b` |
+| feed | `latest.yml` at 1.4.0 |
+| site | v1.4.0 live; `/launches`, `/whale`, `/track`, `/token` all 200 |
+| other apps untouched | Trader 1.15.1, Convert 1.0.0, Polybot 1.1.0, Scribe 1.2.0 |
+
+### The live bug is dead
+
+```
+https://romapps.xyz/nova/token/?m=DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263
+→ Bonk · VERIFIED · 1206D OLD · JUPITER
+  PRICE $0.000002967 · 5m −0.1% · 1h +0.1% · 6h −0.6% · 24h −0.7% · MCAP $261.06M
+```
+
+Verified against production, not a local build. Every scanner row now leads
+somewhere.
+
+### Verified in the browser before shipping
+
+- **Token page** — resolves real mints with the full 5m/1h/6h/24h change strip.
+- **Launch feed** — 40 rows at **0s, 0s, 1s, 2s** old, every one triaged AVOID
+  6–7/9, and one row reading **"MOGGED ×6 SAME NAME"** — the duplicate-name
+  impersonation check, firing on live data.
+- **Wallet page** — **$297.73M = $123.68M tokens + $174.05M in SOL**, the 52%
+  understatement fixed and the split shown. "FILL WINDOW · NOT LIFETIME" above
+  every figure. No 1969 timestamps.
+
+### A verification trap worth remembering
+
+The launch feed looked broken — zero rows for 25 seconds, zero fetches. It was
+not. The page correctly refuses to poll a hidden tab (a launch feed left in a
+background tab would hammer Jupiter every 3s on someone's battery), and **the
+in-app browser pane reports `visibilityState: "hidden"`**. Forcing visibility
+produced 40 rows immediately. The measurement was broken, not the app — the same
+class of false alarm as the pane refusing to composite WebGL.
+
+### Also fixed while shipping
+
+The dashboard footer still read *"running on a deterministic synthetic universe
+(demo mode) … connect provider API keys to prepare live mode."* Both halves false,
+and in the direction that teaches a reader to discount a real number. That is the
+third place this same stale claim has been found and killed.
+
+---
+
 **1.3.0 — LIVE, verified 2026-08-29.**
 
 | check | result |

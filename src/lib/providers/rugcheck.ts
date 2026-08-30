@@ -32,6 +32,29 @@
 // travels with them. The reader gets to see that four of twenty are named. A
 // single number would have hidden that, and hidden numbers built on partial
 // coverage are the failure this codebase keeps having to unlearn.
+//
+// Re-measured across ten trending tokens while building the detail page, and it
+// is WORSE than the note above: 12 of 200 top-holder rows carried a label, 6%.
+// Two tokens got zero. Whatever CARDS was, it is not typical.
+//
+// A second labelling route was tried and rejected in the same pass. The report
+// carries a `markets[]` array whose `liquidityA`/`liquidityB`/`pubkey` fields
+// ARE, on some tokens, exactly the accounts topping the holder list — SKHY's
+// largest holder is verbatim its Meteora pool vault. Matching against that map
+// moved coverage from 12 rows to 13. Half a percentage point does not pay for a
+// second labelling path, so the code below still asks knownAccounts and only
+// knownAccounts, and the UI prints the coverage count beside the table.
+//
+// ONE THING THE FULL REPORT DOES NOT CARRY
+//
+// `lpLockedPct`. It is on the SUMMARY endpoint and absent from the report, so
+// asking for more detail returned less: `detailed: true` — the token detail
+// page's own path — silently lost the single risk this provider exists for.
+// Measured on four trending mints, all four. The per-market `lp.lpLockedPct`
+// figures in the report do not reconstruct the summary's aggregate either (PUMP:
+// summary 0.042%, its pump_fun_amm pool 0.0000021%, every other pool 0), so the
+// detailed path now fetches the ~300B summary alongside the report and takes the
+// vendor's own aggregate rather than deriving a second, unexplainable one.
 
 import { providerFetch } from "./http";
 import type { TokenRisk, TokenRiskProvider } from "./types";
@@ -67,6 +90,20 @@ interface RcReport extends RcSummary {
   rugged?: boolean;
   graphInsidersDetected?: number;
   insiderNetworks?: unknown[] | null;
+  creator?: string;
+  creatorBalance?: number;
+  token?: {
+    mintAuthority?: string | null;
+    freezeAuthority?: string | null;
+    supply?: number;
+    decimals?: number;
+  };
+  token_extensions?: { permanentDelegate?: { delegate?: string } | null } | null;
+  transferFee?: { pct?: number };
+  markets?: unknown[];
+  totalMarketLiquidity?: number;
+  totalLPProviders?: number;
+  launchpad?: { name?: string } | null;
 }
 
 /** RugCheck's level vocabulary, narrowed. Anything unrecognised is info. */
@@ -89,6 +126,31 @@ export function lpFraction(raw: number | undefined): number | undefined {
   return Math.max(0, Math.min(1, raw / 100));
 }
 
+/**
+ * A vendor COUNT, or undefined when the vendor has not computed it yet.
+ *
+ * This endpoint returns 0 for "not indexed" on several independent fields, and
+ * fixing them one at a time is how the same bug shipped twice. Round one:
+ * `totalHolders: 0` printed as "0 holders in total" above twenty populated
+ * rows. Round two, one field over in the same panel: `totalLPProviders: 0`
+ * printed as "22 pools · 0 LP providers · $2.43M across them" — impossible on
+ * its face, and measured on 30 of 30 freshly-listed mints sampled.
+ *
+ * So the rule lives here once and every count goes through it. A count of zero
+ * alongside a priced, pooled, actively-traded token is a silence, and silence
+ * must not render as a measurement.
+ *
+ * DELIBERATELY NOT swept, because zero is a real and important answer:
+ *
+ *   lpLockedPct      0% locked is the worst case, not a missing one
+ *   creatorBalance   a deployer who has sold out really does hold nothing
+ *   score            a normalised 0 is the vendor's cleanest grade
+ *   graphInsiders    0 found is a result once the graph has run
+ */
+export function counted(n: number | undefined): number | undefined {
+  return n !== undefined && Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 function mapRisks(risks: RcRisk[] | undefined) {
   return (risks ?? []).map((r) => ({
     name: r.name ?? "unnamed risk",
@@ -102,24 +164,29 @@ export class RugCheckRiskProvider implements TokenRiskProvider {
   readonly name = "rugcheck";
 
   async getTokenRisk(mint: string, detailed = false): Promise<TokenRisk | null> {
-    const path = detailed ? `${BASE}/${mint}/report` : `${BASE}/${mint}/report/summary`;
-    const body = await providerFetch<RcSummary | RcReport>(this.name, path);
+    if (!detailed) {
+      const body = await providerFetch<RcSummary>(this.name, `${BASE}/${mint}/report/summary`);
+      return body && typeof body === "object" ? this.base(mint, body, false) : null;
+    }
+
+    // Both endpoints, together. The report is the 80KB-1.6MB one and carries
+    // everything EXCEPT the LP lock; the summary is ~300B and carries only the
+    // LP lock that matters. Requested in parallel because they are independent,
+    // and the summary is allowed to fail on its own — losing the lock figure is
+    // survivable, losing the report is not.
+    const [body, summary] = await Promise.all([
+      providerFetch<RcReport>(this.name, `${BASE}/${mint}/report`),
+      providerFetch<RcSummary>(this.name, `${BASE}/${mint}/report/summary`).catch(() => null),
+    ]);
     if (!body || typeof body !== "object") return null;
 
-    const base: TokenRisk = {
-      mint,
-      source: this.name,
-      // A report with no normalised score is not a clean token; it is a token
-      // whose score we do not have. Fall back to the raw score only when the
-      // normalised one is genuinely absent, and never to zero.
-      score: body.score_normalised ?? body.score ?? 0,
-      risks: mapRisks(body.risks),
-      lpLockedPct: lpFraction(body.lpLockedPct),
-      detailed,
-    };
-    if (!detailed) return base;
+    const base = this.base(mint, body, true);
+    // The report's own lpLockedPct is undefined in every response measured, so
+    // this is effectively the summary's figure. Written as a fallback chain
+    // rather than a straight read in case the field ever appears there.
+    base.lpLockedPct = lpFraction(body.lpLockedPct ?? summary?.lpLockedPct);
 
-    const full = body as RcReport;
+    const full = body;
     const known = full.knownAccounts ?? {};
     const holders = Array.isArray(full.topHolders) ? full.topHolders : [];
     let labelled = 0;
@@ -129,11 +196,18 @@ export class RugCheckRiskProvider implements TokenRiskProvider {
       // the other. Checking one would silently halve the coverage.
       const k = (h.address ? known[h.address] : undefined) ?? (h.owner ? known[h.owner] : undefined);
       if (k?.name) labelled++;
+      // The deployer's own row, named from the report's own `creator` field
+      // rather than from the label map that misses 94% of rows. On today's
+      // trending list the creator was in the top twenty of two tokens in ten,
+      // which is exactly the fact a holder table exists to surface.
+      const isCreator = Boolean(full.creator) && (h.owner === full.creator || h.address === full.creator);
       return {
         owner: h.owner ?? h.address ?? "",
+        account: h.address,
         pct: (h.pct ?? 0) / 100,
         label: k?.name,
         insider: h.insider === true,
+        isCreator,
       };
     });
 
@@ -152,10 +226,66 @@ export class RugCheckRiskProvider implements TokenRiskProvider {
       topHolders,
       labelledHolders: labelled,
       insiderPct,
-      totalHolders: full.totalHolders,
+      totalHolders: counted(full.totalHolders),
       rugged: full.rugged,
+      creator: full.creator || undefined,
+      creatorHoldsPct: creatorShare(full),
+      // `token` present means the vendor read the mint account. Absent leaves
+      // these undefined, which a caller must not read as "revoked" — the
+      // difference between a null authority and a missing report is the whole
+      // point of the field.
+      mintAuthority: full.token ? (full.token.mintAuthority ?? null) : undefined,
+      freezeAuthority: full.token ? (full.token.freezeAuthority ?? null) : undefined,
+      permanentDelegate: full.token_extensions
+        ? (full.token_extensions.permanentDelegate?.delegate ?? null)
+        : undefined,
+      transferFeePct:
+        full.transferFee?.pct !== undefined && Number.isFinite(full.transferFee.pct)
+          ? full.transferFee.pct / 100
+          : undefined,
+      markets: counted(Array.isArray(full.markets) ? full.markets.length : undefined),
+      totalMarketLiquidityUsd: counted(full.totalMarketLiquidity),
+      totalLpProviders: counted(full.totalLPProviders),
+      launchpad: full.launchpad?.name,
+      insiderNetworks: Array.isArray(full.insiderNetworks) ? full.insiderNetworks.length : undefined,
+      graphInsiders: full.graphInsidersDetected,
     };
   }
+
+  /** The fields both endpoints answer, shaped identically. */
+  private base(mint: string, body: RcSummary, detailed: boolean): TokenRisk {
+    return {
+      mint,
+      source: this.name,
+      // A report with no normalised score is not a clean token; it is a token
+      // whose score we do not have. Fall back to the raw score only when the
+      // normalised one is genuinely absent, and never to zero.
+      score: body.score_normalised ?? body.score ?? 0,
+      risks: mapRisks(body.risks),
+      lpLockedPct: lpFraction(body.lpLockedPct),
+      detailed,
+    };
+  }
+}
+
+/**
+ * What the deployer still holds, as a share of supply.
+ *
+ * Both halves come from the vendor's own report — `creatorBalance` in base
+ * units against `token.supply` in the same units — so this is arithmetic on one
+ * source rather than a figure stitched across two. A zero supply returns
+ * undefined instead of dividing: an unreadable supply is not a dev holding
+ * nothing.
+ */
+export function creatorShare(r: {
+  creatorBalance?: number;
+  token?: { supply?: number };
+}): number | undefined {
+  const bal = r.creatorBalance;
+  const supply = r.token?.supply;
+  if (bal === undefined || !Number.isFinite(bal)) return undefined;
+  if (supply === undefined || !Number.isFinite(supply) || supply <= 0) return undefined;
+  return Math.max(0, Math.min(1, bal / supply));
 }
 
 /**

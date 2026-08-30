@@ -48,6 +48,16 @@ export interface TokenInfo {
    */
   devMints?: number;
   devMigrations?: number;
+  /**
+   * Where the project says it lives, when the source carries it.
+   *
+   * Not a safety signal — anybody can put a link in token metadata — but a
+   * memecoin with no site, no X account and no group is a different object from
+   * one with all three, and every reference terminal shows them.
+   */
+  links?: { twitter?: string; telegram?: string; website?: string };
+  /** Hosted logo, when the source has one. Absent falls back to `hue`. */
+  icon?: string;
 }
 
 /**
@@ -98,7 +108,63 @@ export type UnmeasuredField =
    * knowing who moved is not knowing whether they are any good, and no source
    * here carries wallet reputation.
    */
-  | "smartMoney";
+  | "smartMoney"
+  /**
+   * Mint and freeze authority, together, because one source reads the mint
+   * account and gets both or neither.
+   *
+   * These reached the UI for a long time and never reached the SCORE. The
+   * scorer had no field to read them from, so a token whose deployer could
+   * still mint at will was graded on liquidity and momentum like any other,
+   * and could render POSITIVE inches from a security panel saying the supply
+   * was not fixed.
+   *
+   * Declaring them makes the three states distinct, which is the whole point:
+   * REVOKED is a measured good result, LIVE is a measured bad one, and
+   * UNVERIFIED is neither — the factor stands down and the engine abstains
+   * rather than treating an unexamined mint as a safe one.
+   */
+  | "authorities"
+  /**
+   * A permanent delegate — an SPL-2022 extension whose holder can move any
+   * balance without permission. Only the risk vendor reports it; every token
+   * adapter hardcodes `permanentDelegate: false`, which is a default and not
+   * a reading.
+   */
+  | "permanentDelegate"
+  /**
+   * Share of the liquidity pool that is locked or burned.
+   *
+   * The actual rug mechanic. Nothing else in this stack sees it, and the
+   * simulator does not model it at all, so a demo vector declares it here
+   * rather than inventing a lock.
+   */
+  | "lpLocked"
+  /**
+   * How many independent parties provide that liquidity.
+   *
+   * Without it an unlocked pool reads as "the deployer can withdraw it", which
+   * is only true when one party holds the LP. The vendor returns 0 for "not
+   * computed" on most mints, so this is unmeasured far more often than not.
+   */
+  | "lpProviders"
+  /**
+   * Whether the deployer has been SELLING, as opposed to how much it holds.
+   *
+   * The simulator knows; nothing live does. It was hardcoded `false` on every
+   * live token, which quietly disabled the high-severity "Dev selling" flag,
+   * the rug-escalation branch, and half of the dev risk factor — while the
+   * invalidation copy promised the reader that flag would appear.
+   */
+  | "devSold"
+  /**
+   * How many tokens this deployer has minted, and how many reached a pool.
+   *
+   * Displayed prominently on the page ("this wallet has issued 19,042 mints…
+   * a serial deployer is a warning") and, until it was declared here, invisible
+   * to the scorer — the same failure as the authorities, one card over.
+   */
+  | "devHistory";
 
 /** Point-in-time market state for a token. `ts` is when it was observed. */
 export interface TokenSnapshot {
@@ -149,6 +215,12 @@ export interface TokenSnapshot {
   momentum1h?: number;
   momentum24h?: number;
   momentum5m?: number;
+  /**
+   * The 6h window, carried because every reference terminal leads with
+   * 5m/1h/6h/24h and this was the one of the four nothing here published.
+   * `rows.ts` was filling its 6h column with the 24h figure.
+   */
+  momentum6h?: number;
   /** 6h volume over its trailing baseline; 1.0 is "running at its usual rate". */
   volumeAccel?: number;
   /** 24h change in holder count, percent. */
@@ -263,6 +335,321 @@ export interface WalletTrade {
   confidence: number;
 }
 
+// ------------------------------------------------- real wallets, read on-chain
+//
+// Everything above this line describes a wallet the simulator invented and
+// therefore knows completely. The types below describe a wallet that exists,
+// which is a different epistemic situation: the chain answers some questions
+// exactly, refuses others, and — the part that gets people hurt — looks
+// identical either way once a number reaches a table cell.
+//
+// So a measured value and an absent one are DIFFERENT TYPES here. `priceUsd?:
+// number` on a fill is not laziness; it is the difference between "this trade
+// went off at four cents" and "we watched tokens move and never saw what was
+// paid for them". A zero in that slot reads as free.
+
+/**
+ * What a wallet read could not establish.
+ *
+ * Kept separate from `UnmeasuredField`, which names inputs to the TOKEN scorer
+ * and is consumed by factor `needs`. Mixing them would let a wallet-shaped gap
+ * silently stand down a token factor that never depended on it.
+ */
+export type UnmeasuredWalletField =
+  /**
+   * Entry prices for some or all held tokens were never observed, so the
+   * position's cost — and therefore its unrealized PnL — is not knowable.
+   * Caused by acquisition before the readable window, or by a transfer in.
+   */
+  | "costBasis"
+  /**
+   * Sells landed whose matching buys were outside the window. Their proceeds
+   * are real and their PROFIT is not computable, so they are excluded from
+   * realized PnL rather than being credited at a cost of zero — which would
+   * book the entire proceeds as gain.
+   */
+  | "realizedPnl"
+  /**
+   * The wallet's full trading life. No keyless source publishes it: the only
+   * public Solana RPC that answers `getSignaturesForAddress` at all retains
+   * roughly two days. Everything here is a WINDOW, and this field is set on
+   * every real wallet read, always, so nothing downstream can mistake a
+   * two-day figure for a lifetime one.
+   */
+  | "lifetimeHistory"
+  /**
+   * Whether this wallet is any good in a way that generalises. Win rate over
+   * two days is a sample, not a reputation, and no keyless source carries one.
+   */
+  | "reputation"
+  /**
+   * The price of at least one observed movement. Tokens moved, no SOL or
+   * stablecoin leg belonged to this wallet in that transaction, so there is
+   * nothing to divide by.
+   */
+  | "fillPrice";
+
+/** How a fill's price was established, or why it could not be. */
+export type FillPricing =
+  /** Paid or received in wrapped SOL, converted at the SOL/USD bar for that hour. */
+  | "wsol"
+  /** Paid or received in a stablecoin, taken at one dollar. */
+  | "stable"
+  /** Tokens moved; nothing this wallet owned moved against them. */
+  | "unpriced";
+
+/**
+ * One observed change in a wallet's holding of one token.
+ *
+ * Deliberately not `WalletTrade`. A trade has a price by definition and this
+ * frequently does not — 46% of the token movements measured across five real
+ * wallets had no quote leg belonging to the wallet at all, because they were
+ * transfers, claims, or token-for-token rotations routed entirely through
+ * pools. Those are real events a reader should see; they are not fills at a
+ * price, and the type says so.
+ */
+export interface WalletFill {
+  signature: string;
+  slot: number;
+  /** ms epoch, from the block. */
+  ts: number;
+  wallet: string;
+  /** The non-quote token that moved. */
+  mint: string;
+  decimals: number;
+  side: "buy" | "sell";
+  /** Base tokens moved. Always positive; `side` carries the direction. */
+  tokens: number;
+  /** wSOL or a stablecoin, when one leg of the swap was the wallet's own. */
+  quoteMint?: string;
+  /** Quote units paid or received. Always positive. */
+  quoteAmount?: number;
+  /** USD per base token AT THE FILL. Undefined means nobody saw it. */
+  priceUsd?: number;
+  /** USD notional of the fill, undefined for the same reason as `priceUsd`. */
+  valueUsd?: number;
+  pricing: FillPricing;
+  /** One short clause the UI can print in place of a dollar figure. */
+  unpricedReason?: string;
+  classification: TradeClassification;
+}
+
+/**
+ * Exactly how much of a wallet's life was read, in the read's own terms.
+ *
+ * The most dangerous number this app can render is a realized-PnL figure over
+ * a window presented as a wallet's performance. Every field here exists to
+ * make that impossible to do by accident: a caller cannot format the PnL
+ * without having the window sitting next to it in the same object.
+ */
+export interface WalletCoverage {
+  /** The adapter that answered — "solana-rpc", never "demo" for a real read. */
+  source: string;
+  /**
+   * Which runtime read this, because the three see different depths.
+   *
+   * The archival RPC refuses any request carrying an Origin header, so a
+   * browser tab is capped at ~2 days while the server route and the desktop
+   * shell's main-process proxy reach the whole index. One label over all three
+   * would be false for two of them.
+   */
+  runtime: "node" | "desktop" | "browser";
+  /** ms epoch of the newest and oldest transaction actually read. */
+  newestTs: number;
+  oldestTs: number;
+  /** The span the PRICED FILLS below describe. Not the wallet's age. */
+  windowHours: number;
+  signaturesListed: number;
+  transactionsRead: number;
+  transactionsFailed: number;
+  /**
+   * Transactions the fast endpoint no longer holds the body for.
+   *
+   * Not a failure and not counted as one: measured, publicnode returns null for
+   * every signature older than ~2 days while serving recent ones perfectly.
+   * The index still counts these, so a wallet can show 5,942 lifetime
+   * transactions and 112 priced ones without either number being wrong.
+   */
+  transactionsUnavailable: number;
+  /**
+   * How many of `transactionsFailed` were the endpoint's rate limit rather
+   * than a genuine miss.
+   *
+   * Worth its own field because the two have opposite remedies. A refusal is
+   * temporary and a reload fixes it; a failure is a transaction this read will
+   * never see, and no amount of waiting brings it back.
+   */
+  transactionsRefused: number;
+  /** Our own budget stopped the read before the endpoint ran out of history. */
+  cappedByBudget: boolean;
+  /**
+   * The endpoint returned no signatures older than `oldestTs`.
+   *
+   * NOT the same as "this wallet has no older history". Measured against a
+   * quiet, years-old address, publicnode's oldest signature was 2.02 days back
+   * and paging before it returned nothing — a retention edge, not a birth
+   * certificate.
+   */
+  reachedEndpointLimit: boolean;
+  /** False on every keyless read. Present so a keyed source could set it true. */
+  lifetime: boolean;
+  /**
+   * True when the SIGNATURE INDEX reached past the ~2-day public window.
+   *
+   * Deliberately separate from `lifetime`. The index being archival means the
+   * wallet's AGE and lifetime transaction COUNT are real; it does not mean the
+   * fills are, because the only endpoint serving old transaction bodies allows
+   * ten `getTransaction` calls per window.
+   */
+  indexArchival: boolean;
+  /** The index ran out naturally rather than hitting our page cap. */
+  indexComplete: boolean;
+  /**
+   * ms epoch of the OLDEST signature the index reached.
+   *
+   * With `indexArchival && indexComplete` this is the wallet's first ever
+   * transaction. Otherwise it is a lower bound: the wallet is AT LEAST this
+   * old. A reader must never be shown the second as though it were the first.
+   */
+  firstSeenTs: number;
+  /** Days since `firstSeenTs`, on the same "at least" caveat. */
+  historyDays: number;
+  note: string;
+}
+
+/** One token the wallet holds right now, with cost basis only if it was seen. */
+export interface WalletHolding {
+  mint: string;
+  symbol?: string;
+  decimals: number;
+  /** The real balance, read from the chain rather than derived from fills. */
+  tokens: number;
+  priceUsd?: number;
+  valueUsd?: number;
+  /** FIFO cost over observed fills. Undefined when the entry was not observed. */
+  costBasisUsd?: number;
+  unrealizedPnlUsd?: number;
+  unrealizedPnlPct?: number;
+  /**
+   * How many tokens the observed fills account for.
+   *
+   * The reconciliation that makes the rest trustworthy: when this disagrees
+   * with `tokens`, the wallet acquired part of the position where we could not
+   * see it, and no cost basis for the position is honest. Most trackers assume
+   * instead, which is how a bag bought before their window shows up as pure
+   * profit.
+   */
+  observedTokens: number;
+  costBasisKnown: boolean;
+  /** Why the cost is unknown, when it is. */
+  reason?: string;
+  /** Jupiter's own flag for dust and spam airdrops. */
+  excludeFromNetWorth?: boolean;
+}
+
+/**
+ * Performance over the observed window, and nothing beyond it.
+ *
+ * Every optional field is optional because it genuinely may not exist: a
+ * wallet with no completed round trip inside the window has no win rate, and
+ * rendering 0% would say it loses every trade.
+ */
+export interface WalletWindowStats {
+  realizedPnlUsd?: number;
+  unrealizedPnlUsd?: number;
+  winRate?: number;
+  profitFactor?: number;
+  avgWinUsd?: number;
+  avgLossUsd?: number;
+  medianHoldHours?: number;
+  roundTrips: number;
+  buys: number;
+  sells: number;
+  pricedFills: number;
+  unpricedFills: number;
+  distinctMints: number;
+  /** Tokens sold out of lots we never saw bought. Excluded from realized PnL. */
+  unmatchedSellTokens: number;
+  unmatchedSellMints: number;
+  /**
+   * Realized PnL from sells that did NOT close a position.
+   *
+   * `realizedPnlUsd` accumulates on every priced sell, but a round trip is only
+   * recorded when the position goes flat — so a wallet that trims twice and
+   * never exits has a headline PnL and an empty round-trips table. The blind
+   * review hit exactly that: −$4.24 above a table summing to −$0.45, both
+   * correct and irreconcilable on screen. This is the difference, named.
+   */
+  partialExitPnlUsd: number;
+  /** How many priced sells reduced a position without closing it. */
+  partialExits: number;
+}
+
+export interface WalletProfile {
+  address: string;
+  /**
+   * How much of this wallet has been read.
+   *
+   * "balances" is the fast first paint — identity, holdings and prices, a few
+   * hundred milliseconds — with the fill history still outstanding. Every
+   * fill-derived figure is absent rather than zero at that point, and the UI
+   * must render "reading…" and not "no trades", which are opposite claims.
+   */
+  stage: "balances" | "full";
+  /**
+   * What the address turned out to be.
+   *
+   * A token mint owns token accounts and a program's authority holds balances,
+   * so both render as plausible "traders" if nobody checks. The blind review
+   * pasted a mint in and got "$520.8K portfolio, 144 positions" with no warning.
+   */
+  identity: {
+    kind: string;
+    detail: string;
+    profilable: boolean;
+  };
+  coverage: WalletCoverage;
+  holdings: {
+    source: string;
+    solBalance: number;
+    /**
+     * Native SOL valued at the current SOL price, when one was available.
+     *
+     * Its own field because omitting it was a 52% understatement on the one
+     * wallet where it was checked: Binance's hot wallet showed $162.20M of
+     * tokens while holding 1,661,879 SOL — $174.9M more — that the headline
+     * simply left out. Undefined when no SOL price could be read, which keeps
+     * it out of the total rather than adding zero to it.
+     */
+    solValueUsd?: number;
+    /** Mints with a non-zero balance. */
+    mints: number;
+    /** USD across the mints a price was found for, EXCLUDING native SOL. */
+    tokenValueUsd: number;
+    /** Tokens plus native SOL — what a reader means by "this wallet is worth". */
+    valuedUsd: number;
+    pricedMints: number;
+    /** Mints held but not valued — the price budget ran out or Jupiter had none. */
+    unpricedMints: number;
+  } | null;
+  positions: WalletHolding[];
+  roundTrips: {
+    mint: string;
+    symbol?: string;
+    entryTs: number;
+    exitTs: number;
+    costUsd: number;
+    proceedsUsd: number;
+    pnlUsd: number;
+    holdHours: number;
+  }[];
+  fills: WalletFill[];
+  stats: WalletWindowStats;
+  unmeasured: readonly UnmeasuredWalletField[];
+  /** One sentence per claim, naming who answered it. */
+  provenance: string[];
+}
+
 export interface WalletPosition {
   wallet: string;
   mint: string;
@@ -349,11 +736,44 @@ export interface FeatureVector {
   socialAccel: number;
   ageHours: number;
   buySellImbalance: number; // -1..1
+  /**
+   * Share of supply held by insider-flagged wallets AMONG THE TOP HOLDERS the
+   * source published — not of the whole cap table.
+   *
+   * Named carefully because the two readings contradict each other on screen.
+   * RugCheck's graph analysis found three insider networks of twelve wallets on
+   * a token whose top-twenty rows carried no insider flag at all, and the
+   * factor built on this field said "insider-linked wallets hold ~0% of supply"
+   * directly beside it. Zero here means "none of the top holders examined was
+   * flagged", never "there are no insiders".
+   */
   insiderPct: number;
   bundlerPct: number;
   sniperPct: number;
   devHoldsPct: number;
   devSold: boolean;
+  /**
+   * Whether a source actually READ the mint account and found the authority
+   * null. False means live — the key holder can still inflate supply or freeze
+   * balances — and `unmeasured` carrying "authorities" means nobody looked.
+   */
+  mintAuthorityRevoked: boolean;
+  freezeAuthorityRevoked: boolean;
+  /** True when a permanent delegate is SET. */
+  permanentDelegate: boolean;
+  /** Share of LP locked or burned, 0..1. */
+  lpLockedPct: number;
+  /**
+   * Independent liquidity providers behind that pool.
+   *
+   * Carried because the lock percentage alone is not the risk. "0.04% locked"
+   * across 43 independent providers and "0.04% locked" held by the deployer
+   * alone are the same number describing opposite situations.
+   */
+  lpProviders: number;
+  /** Mints this deployer has issued, and how many reached a real pool. */
+  devMints: number;
+  devMigrations: number;
   exitDepthUsd: number; // how much can exit within 5% impact
   regime: MarketRegime;
   /** count of independent data points behind this vector */
@@ -385,6 +805,159 @@ export interface RiskFlag {
   severity: "low" | "medium" | "high";
   detail: string;
 }
+
+// ---------------------------------------------------------------- launches
+
+/**
+ * The outcome of one triage check on a brand-new launch.
+ *
+ * Six states rather than a boolean, because a launch feed is the place where
+ * "we looked and it is fine" and "nobody has looked yet" are hardest to tell
+ * apart and most expensive to confuse. A token forty seconds old has had no
+ * time to accumulate findings, so an empty risk list is almost always silence
+ * rather than a clean bill.
+ *
+ *   pass       measured, and the measurement is good
+ *   warn       measured, and the measurement is soft-bad
+ *   fail       measured, and the measurement is bad
+ *   unchecked  nobody ran this check — renders as a dash, never as a pass
+ *   n/a        the check cannot apply to this token's structure yet, which is
+ *              its own answer and not a gap. A pre-graduation bonding-curve
+ *              token has no withdrawable LP, so "is the LP locked" has no
+ *              meaning for it and must not be answered either way.
+ */
+export type LaunchCheckState = "pass" | "warn" | "fail" | "unchecked" | "n/a";
+
+export interface LaunchCheck {
+  key: string;
+  name: string;
+  state: LaunchCheckState;
+  detail: string;
+  /**
+   * What a `pass` actually rests on.
+   *
+   * "reading" — somebody looked at a value and it was good. The mint authority
+   * is null; the deployer holds 0.5%.
+   *
+   * "absence" — nobody found anything, which on a token this young is mostly a
+   * statement about how little has had time to happen. A vendor reporting no
+   * rug history for a wallet it has never seen produces the identical output to
+   * one clearing a wallet it knows well.
+   *
+   * These were rendered with the same green tick, so a strip reading
+   * `✓✓✓✓—··✓` claimed eight findings where two were measurements. The UI now
+   * draws them differently, because the difference is the entire subject of
+   * this file.
+   */
+  basis?: "reading" | "absence";
+  /**
+   * True when the state came from a fail-safe DEFAULT rather than a reading.
+   *
+   * House rule: absent mint-authority data is graded as not-revoked. That
+   * produces a `fail` which is correct to act on and wrong to describe as a
+   * measurement, and a reader deciding in ten seconds deserves to know which
+   * of the two they are looking at.
+   */
+  assumed?: boolean;
+}
+
+/**
+ * The feed's verdict on a launch.
+ *
+ * There is deliberately NO positive verdict. The best a token seconds old can
+ * earn is `unverified` — every check that could run, ran, and none of them
+ * found anything, which on a token this young mostly means the evidence does
+ * not exist yet. A green "SAFE" here would be the single most dangerous string
+ * this app could render.
+ */
+export type LaunchVerdict = "avoid" | "caution" | "unverified";
+
+export interface LaunchTriage {
+  verdict: LaunchVerdict;
+  checks: LaunchCheck[];
+  /** Checks that produced a real measurement, and how many there were. */
+  measured: number;
+  /**
+   * Of the passes, how many rest on somebody having LOOKED at a value rather
+   * than on nobody having found anything. See `LaunchCheck.basis`.
+   *
+   * On a typical fresh launchpad mint this is two — the mint and freeze
+   * authority reads — out of six or seven ticks.
+   */
+  readings: number;
+  total: number;
+  /** Checks nobody ran. The honesty number: the headline is meaningless without it. */
+  unchecked: number;
+  /** Third-party grade, when one arrived. HIGHER IS RISKIER. */
+  riskScore?: number;
+  riskSource?: string;
+  /**
+   * ms from `firstSeenAt` to the moment triage finished, or undefined while it
+   * is still running. This is the number that says whether the feed is a filter
+   * or a firehose: a verdict that lands ninety seconds after the launch is not
+   * triage, it is a post-mortem.
+   */
+  completedInMs?: number;
+}
+
+/**
+ * One new pool or graduation, as observed.
+ *
+ * `poolCreatedAt` is the source's claim about the chain; `firstSeenAt` is when
+ * this process actually laid eyes on it. Their difference is the feed's real
+ * latency, and it is stored per-row rather than asserted once in a doc comment
+ * so the page can show its own measured lag instead of a marketing number.
+ */
+export interface LaunchObservation {
+  mint: string;
+  name: string;
+  symbol: string;
+  hue: number;
+  decimals: number;
+  poolCreatedAt: number;
+  firstSeenAt: number;
+  /** "pool" for a fresh mint, "graduation" when a launchpad curve completed. */
+  event: "pool" | "graduation";
+  /** The AMM or launchpad that hosts the pool, when the source names it. */
+  venue?: string;
+  launchpad?: string;
+  graduatedAt?: number;
+  dev?: string;
+  devMints?: number;
+  devMigrations?: number;
+  priceUsd?: number;
+  liquidityUsd?: number;
+  marketCapUsd?: number;
+  holders?: number;
+  top10Pct?: number;
+  devHoldsPct?: number;
+  organicScore?: number;
+  buys5m?: number;
+  sells5m?: number;
+  traders5m?: number;
+  /** Jupiter's own "this mint looks suspicious" flag, when it sets one. */
+  sus?: boolean;
+  mintAuthorityRevoked: boolean;
+  freezeAuthorityRevoked: boolean;
+  /** Whether the authority fields above were actually read, or defaulted. */
+  authorityKnown: boolean;
+  /** Which adapter saw it first. */
+  source: string;
+}
+
+export type TokenLaunch = LaunchObservation & {
+  triage: LaunchTriage;
+  /**
+   * Other mints in the feed launched under the same name or symbol.
+   *
+   * Not a property of the token — a property of the FEED, which is why it lives
+   * here rather than on the observation. Two different mints both called
+   * CASHCOW landing twelve seconds apart is the textbook impersonation play,
+   * and it is invisible in any per-token view however carefully audited: each
+   * one is individually unremarkable.
+   */
+  twins?: string[];
+};
 
 export type SignalLifecycleState =
   | "created"
@@ -429,6 +1002,21 @@ export interface Signal {
    * reason was computed, used to pick a label, and thrown away.
    */
   noTradeReason?: string;
+  /**
+   * A measured, disqualifying security fact — set only when a source actually
+   * READ it and the answer was bad.
+   *
+   * A weight cannot express this. A live mint authority means the supply can be
+   * inflated out from under a holder at any moment, and no amount of liquidity,
+   * momentum or organic activity trades that away — but a risk factor worth
+   * nine points cannot stop a strong token from rendering POSITIVE. So it is a
+   * veto on the LABEL rather than a subtraction from the score, and the score
+   * stays an honest weighted mean of what was measured.
+   *
+   * Absent when the authorities are merely unverified. That is a different
+   * state and it routes to abstention, not to a verdict.
+   */
+  securityVeto?: string;
   profile: StrategyProfileId;
   factors: SignalFactor[];
   risks: RiskFlag[];

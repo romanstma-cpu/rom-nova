@@ -43,6 +43,13 @@ const GT_UNMEASURED: readonly UnmeasuredField[] = [
   "holders",
   "uniqueBuyers1h",
   "uniqueSellers1h",
+  // Nor the security facts. This API returns no authority state at any depth,
+  // and the adapter's hardcoded `mintAuthorityRevoked: false` below is a
+  // fail-safe default rather than a reading — declared so the scorer drops the
+  // authority factors instead of penalising a token nobody examined.
+  "authorities",
+  "permanentDelegate",
+  "lpLocked",
 ];
 
 // ---------------------------------------------------------------- rate limit
@@ -123,13 +130,70 @@ interface GtPools {
       volume_usd?: { h24?: string };
       transactions?: Record<string, { buys?: number; sells?: number }>;
     };
-    relationships?: { base_token?: { data?: { id?: string } } };
+    relationships?: { base_token?: { data?: { id?: string } }; dex?: { data?: { id?: string } } };
   }[];
 }
+
+/**
+ * A pool that did not exist a minute ago.
+ *
+ * Deliberately not a TokenSnapshot. A snapshot describes a token's market; this
+ * describes a POOL COMING INTO EXISTENCE, and the pool's own address, its DEX
+ * and its creation time are the whole point. On Solana the dex field is what
+ * separates the two kinds of launch this feed cares about: `pump-fun` is a new
+ * bonding curve, and `pumpswap` / `meteora-*` / `raydium-*` is a pool that had
+ * to be funded — which for a pump.fun token means the curve completed and it
+ * GRADUATED.
+ */
+export interface NewPool {
+  poolAddress: string;
+  /** Base token of the pair. The quote is nearly always wSOL. */
+  mint: string;
+  /** GeckoTerminal's own pair label, e.g. "JAMU / SOL". */
+  pairName: string;
+  dex: string;
+  createdAt: number;
+  /**
+   * OPTIONAL, and that is the whole point of not reusing `num()` here.
+   *
+   * `num()` coerces a missing field to 0, which is right for `fromPools` — its
+   * snapshots declare an unmeasured set that covers the lie. Nothing covers it
+   * on this path: a pool GeckoTerminal has not priced yet would reach the launch
+   * feed as `$0` liquidity and `0/0` trades, which reads as a dead pool rather
+   * than an unmeasured one, and would sail through a "min liquidity" filter as
+   * genuinely worthless. Undefined renders as a dash.
+   */
+  priceUsd?: number;
+  liquidityUsd?: number;
+  buys5m?: number;
+  sells5m?: number;
+}
+
+/**
+ * DEX ids that mean "this pool had to be funded by somebody".
+ *
+ * Measured on one page of `new_pools`: 13 `pump-fun`, 3 `pumpswap`, 2
+ * `meteora-damm-v2`, 2 `meteora-dbc`. The pump-fun rows duplicate what Jupiter
+ * already delivers two seconds sooner, so they are not what this source is for.
+ * The rest are the ones Jupiter's launchpad-shaped `recent` feed never shows.
+ */
+export const GRADUATION_DEXES = /^(pumpswap|raydium|meteora|orca|whirlpool|lifinity|fluxbeam)/;
 
 const num = (v: unknown): number => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+};
+
+/**
+ * The same parse, without the zero.
+ *
+ * For callers that have no `unmeasured` set to declare the absence into, so a
+ * defaulted zero would be an unlabelled measurement rather than a covered one.
+ */
+const numOrNone = (v: unknown): number | undefined => {
+  if (v === undefined || v === null || v === "") return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
 };
 
 /** GeckoTerminal ids look like "solana_<address>". */
@@ -256,6 +320,45 @@ export class GeckoTerminalTokenProvider implements TokenDataProvider {
 
   async getRecentTokens(limit: number): Promise<TokenSnapshot[]> {
     return this.fromPools(`/networks/${NETWORK}/new_pools`, limit);
+  }
+
+  /**
+   * Pool creations, as pool creations rather than as token snapshots.
+   *
+   * This is the second launch source, and it exists for one thing Jupiter's
+   * `recent` cannot do: Jupiter indexes MINTS on a launchpad, so a pump.fun
+   * token that completes its curve months after minting never reappears there.
+   * GeckoTerminal indexes POOLS, and a graduation is a new PumpSwap pool.
+   *
+   * MEASURED, and it dictates the cadence: this endpoint returns 20 rows per
+   * page spanning about 55 seconds, and it is 32-55 seconds behind the chain —
+   * an order of magnitude slower than Jupiter, which is why it is the secondary
+   * source and never the primary. Four requests with no gap returned 200, 200,
+   * 200, 200 and then four straight 429s, so it goes through the same
+   * serialised 2.1s queue as everything else in this file.
+   */
+  async getNewPools(page = 1): Promise<NewPool[]> {
+    const res = await gtFetch<GtPools>(`/networks/${NETWORK}/new_pools?page=${page}`);
+    const out: NewPool[] = [];
+    for (const row of res.data ?? []) {
+      const a = row.attributes;
+      const mint = addressOf(row.relationships?.base_token?.data?.id);
+      const created = Date.parse(a?.pool_created_at ?? "");
+      if (!a || !mint || !Number.isFinite(created)) continue;
+      const m5 = a.transactions?.m5 ?? {};
+      out.push({
+        poolAddress: a.address ?? addressOf(row.id),
+        mint,
+        pairName: a.name ?? "",
+        dex: row.relationships?.dex?.data?.id ?? "",
+        createdAt: created,
+        priceUsd: numOrNone(a.base_token_price_usd),
+        liquidityUsd: numOrNone(a.reserve_in_usd),
+        buys5m: m5.buys,
+        sells5m: m5.sells,
+      });
+    }
+    return out;
   }
 
   /**

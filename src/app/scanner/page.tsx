@@ -241,10 +241,18 @@ export default function ScannerPage() {
       {/* What this list is, and — more importantly — what it is not. A ranked
           screen invites the reading "these are the good ones", and nothing here
           predicts a return. */}
+      {/* This paragraph used to claim the score weighed "chain-read mint &
+          freeze authority". It did not — those flags were never fields on the
+          feature vector, so the scorer could not read them even in principle.
+          They are now, along with the LP lock and the permanent delegate, and
+          a token whose authorities are LIVE cannot carry a positive label. */}
       <div className="hint px-1 pb-1">
         Ranked by the signal score, which weighs liquidity, buy/sell imbalance, momentum, holder
-        concentration and growth, organic activity, token age, chain-read mint &amp; freeze authority
-        and observed wallet flow. <b>A high score is not a prediction of profit</b> — it means more of
+        concentration and growth, organic activity, token age, observed wallet flow, and the
+        security facts: mint and freeze authority, any permanent delegate, and how much of the
+        liquidity pool is locked. <b>A live mint or freeze authority vetoes the verdict outright</b>{" "}
+        — no amount of momentum outranks a supply that can be inflated at will.{" "}
+        <b>A high score is not a prediction of profit</b> — it means more of
         the evidence this terminal can see points the same way, and{" "}
         <Link href="/track" className="text-[var(--accent)] hover:underline">
           Track Record
@@ -340,9 +348,16 @@ export default function ScannerPage() {
                           .map((w) => `${w.owner}  ${w.usd >= 0 ? "+" : ""}${fmtUsd(w.usd)}`)
                           .join("\n")}
                       >
-                        <span className={r.topWallets[0].usd >= 0 ? "pos" : "neg"}>
+                        {/* Linked now that a real address leads somewhere. These
+                            are addresses SQD watched move a moment ago, and
+                            until wallet reads were real, clicking one would have
+                            reached the simulator and found nothing. */}
+                        <Link
+                          href={`/whale?a=${r.topWallets[0].owner}`}
+                          className={`hover:underline ${r.topWallets[0].usd >= 0 ? "pos" : "neg"}`}
+                        >
                           {r.topWallets[0].owner.slice(0, 4)}…{r.topWallets[0].owner.slice(-3)}
-                        </span>{" "}
+                        </Link>{" "}
                         {r.topWallets.length > 1 && `+${r.topWallets.length - 1}`}
                       </span>
                     ) : (

@@ -223,8 +223,15 @@ export default function Dashboard() {
       </div>
 
       <p className="text-[10px] faint px-1 pb-2 leading-relaxed">
-        ROM Nova is an analytics and decision-support tool running on a deterministic synthetic universe (demo mode). Signals are
-        ranked evidence, not predictions; nothing here is investment advice. Connect provider API keys in Settings to prepare live mode.
+        {/* This line said the app "runs on a deterministic synthetic universe
+            (demo mode)" and told the reader to add API keys "to prepare live
+            mode". Both halves are now false — most of the terminal is real
+            Solana and needs no key — and a footer insisting otherwise is the
+            same drift as the opposite error, in the direction that teaches a
+            reader to discount a real number. */}
+        ROM Nova is an analytics and decision-support tool. Most of what you see is live Solana, read keylessly in your
+        own browser; wallet reputation and a few panels are still a labelled simulation, and the data-source chip names
+        which is which on every screen. Signals are ranked evidence, not predictions; nothing here is investment advice.
       </p>
     </div>
   );

@@ -22,8 +22,10 @@ const CAPABILITIES = [
   "mint & freeze authority",
   "whale flow",
   "wallet activity",
+  "wallet positions",
   "holder distribution",
   "rug & LP-lock risk",
+  "new-pool launch feed",
   "smart-money scoring",
 ] as const;
 
@@ -72,14 +74,51 @@ describe("dataMode — the chip cannot outlive the truth", () => {
     expect(FLAGS.rugcheck() ? m.live : m.simulated).toContain("rug & LP-lock risk");
   });
 
-  it("reserves 'demo' for nothing being live, and 'live' for nothing simulated", () => {
+  // The launch feed is the one capability that never falls back — handleLaunches
+  // returns nothing rather than a simulated launch, because a synthetic feed
+  // would look identical to a real one while being fiction about the only thing
+  // it measures. So this line tracks whether the page can exist at all.
+  it("claims the launch feed only when its source is enabled", () => {
+    const m = dataMode();
+    expect(FLAGS.jupiter() ? m.live : m.simulated).toContain("new-pool launch feed");
+  });
+
+  it("reserves 'demo' for nothing being live, and 'live' for nothing qualified", () => {
     const m = dataMode();
     if (m.overall === "demo") expect(m.live).toHaveLength(0);
-    if (m.overall === "live") expect(m.simulated).toHaveLength(0);
+    if (m.overall === "live") {
+      expect(m.simulated).toHaveLength(0);
+      // A bound is a qualification, and "LIVE" beside a qualified number is the
+      // more damaging half-truth — a reader sees LIVE next to a PnL figure and
+      // reads it as the wallet's record rather than as two days of it.
+      expect(m.bounded).toHaveLength(0);
+    }
     if (m.overall === "mixed") {
       expect(m.live.length).toBeGreaterThan(0);
-      expect(m.simulated.length).toBeGreaterThan(0);
+      expect(m.simulated.length + m.bounded.length).toBeGreaterThan(0);
     }
+  });
+
+  // Real wallet history is the capability that needs a third column, and it
+  // needs TWO entries in it: the fills reach ~2 days in every runtime, while
+  // the wallet's age reaches the whole index — but only where no Origin header
+  // is sent. One bound covering both would be false for one of them.
+  it("qualifies wallet history rather than calling it flatly live", () => {
+    const m = dataMode();
+    if (!FLAGS.walletChain() || FLAGS.helius()) return;
+    expect(m.live).toContain("wallet activity");
+    const joined = m.bounded.join(" ");
+    expect(joined).toMatch(/fills/i);
+    // The bound must name the limit, not merely gesture at one.
+    expect(joined).toMatch(/2 days|retention/i);
+    // And it must separate the two depths rather than averaging them.
+    expect(joined).toMatch(/age/i);
+    expect(joined).toMatch(/browser|Origin/i);
+  });
+
+  it("never lists the same claim as both live and bounded", () => {
+    const m = dataMode();
+    for (const b of m.bounded) expect(m.live).not.toContain(b);
   });
 
   // The state this app is actually in, and the one the old flat chip described

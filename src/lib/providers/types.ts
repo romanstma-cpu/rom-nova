@@ -30,6 +30,32 @@ export interface WalletDataProvider {
   getWalletLabels(address: string): Promise<string[]>;
 }
 
+/**
+ * A wallet's CURRENT token balances, read rather than replayed.
+ *
+ * Separate from `WalletDataProvider` because the two questions turned out to
+ * be answered by different vendors and neither can answer the other. Solana's
+ * public RPC hands out a wallet's transactions for free and returns 403 to
+ * `getTokenAccountsByOwner`; Jupiter returns the balances in one call and
+ * knows nothing about how they were acquired.
+ *
+ * Keeping them apart is also what makes the reconciliation in
+ * `engine/wallet-profile.ts` possible: a position derived from trades and a
+ * position read from the chain are independent measurements, and their
+ * DISAGREEMENT is the signal that a cost basis is not knowable.
+ */
+export interface WalletHoldingsProvider {
+  readonly name: string;
+  getHoldings(address: string): Promise<{
+    source: string;
+    address: string;
+    solBalance: number;
+    tokens: { mint: string; tokens: number; decimals: number; frozen: boolean; excludeFromNetWorth: boolean }[];
+  } | null>;
+  /** USD prices for as many of these mints as the budget reaches, in order. */
+  priceMints(mints: string[]): Promise<Map<string, number>>;
+}
+
 export interface SecurityDataProvider {
   readonly name: string;
   getTokenSecurity(mint: string): Promise<{
@@ -135,6 +161,51 @@ export interface TokenRisk {
   /** Whether the vendor has flagged this mint as already rugged. */
   rugged?: boolean;
   /**
+   * The deployer, per the vendor, and what it still holds.
+   *
+   * A second opinion on the two facts the token provider also publishes. They
+   * do not always agree, and a detail page that shows one without the other is
+   * picking a winner silently.
+   */
+  creator?: string;
+  /** Creator balance as a share of supply, 0..1, from the vendor's own two fields. */
+  creatorHoldsPct?: number;
+  /**
+   * Mint and freeze authority ADDRESSES, null when revoked.
+   *
+   * A third answer to the question the token provider and the chain both
+   * answer. Kept as the address rather than a boolean because "revoked" and
+   * "held by 2cVYpag…" are different amounts of information, and the address is
+   * the half a reader can check.
+   */
+  mintAuthority?: string | null;
+  freezeAuthority?: string | null;
+  /**
+   * A permanent delegate, when the mint has one — an SPL-2022 extension that
+   * lets its holder move any balance without permission.
+   *
+   * No other source in this stack reports it, and `TokenInfo.permanentDelegate`
+   * is hardcoded false by every adapter that fills it.
+   */
+  permanentDelegate?: string | null;
+  /** Transfer fee the mint charges, 0..1 of the transferred amount. */
+  transferFeePct?: number;
+  /** Pools the vendor found, and the liquidity it totals across them. */
+  markets?: number;
+  totalMarketLiquidityUsd?: number;
+  totalLpProviders?: number;
+  /** Launchpad name per the vendor, when it names one. */
+  launchpad?: string;
+  /**
+   * Insider clusters the vendor's graph analysis found, and how many wallets.
+   *
+   * Separate from `insiderPct`, which only counts insiders inside the TOP
+   * holders. A network of thirteen coordinated wallets none of which cracks the
+   * top twenty is invisible to that percentage and visible here.
+   */
+  insiderNetworks?: number;
+  graphInsiders?: number;
+  /**
    * The top holders, as published, with a label WHERE ONE EXISTS.
    *
    * No derived "concentration excluding pools" figure accompanies this, and
@@ -147,10 +218,20 @@ export interface TokenRisk {
    */
   topHolders?: {
     owner: string;
+    /**
+     * The token ACCOUNT holding the balance, when published.
+     *
+     * Distinct from the owner and worth carrying: the vendor's label map is
+     * keyed by both, and a reader checking a holder on an explorer wants the
+     * account that actually holds the tokens.
+     */
+    account?: string;
     pct: number;
     /** "Meteora DLMM Pool", "Streamflow Vault", "Creator" — undefined if unknown. */
     label?: string;
     insider?: boolean;
+    /** True when this row's owner or account IS the deployer the vendor named. */
+    isCreator?: boolean;
   }[];
   /** How many of `topHolders` carried a label, so a reader can judge the rest. */
   labelledHolders?: number;
@@ -191,5 +272,11 @@ export interface ProviderSet {
    * which a caller must render as silence rather than as a clean bill.
    */
   risk?: TokenRiskProvider;
+  /**
+   * Optional balance reader. Absent means positions can only be DERIVED from
+   * the trade window, which makes them as incomplete as the window is — and a
+   * caller must say so rather than presenting a partial position as a holding.
+   */
+  holdings?: WalletHoldingsProvider;
   health(): ProviderHealth[];
 }

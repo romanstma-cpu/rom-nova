@@ -104,11 +104,24 @@ describe("signal engine", () => {
     expect(strongRugs.length).toBe(0);
   });
 
-  it("issues NO TRADE when liquidity is below the profile floor", () => {
+  it("refuses a token below the profile's liquidity floor", () => {
+    // Was `expect(s.label).toBe("NO TRADE")`. A security VETO now outranks
+    // abstention in `labelOf`, deliberately: the chip used to read NO TRADE
+    // while the banner directly above it read EXTREME RISK, which is two
+    // verdicts on one screen. "We read the mint account and the authority is
+    // live" is a finding; NO TRADE is the absence of one, and the finding is
+    // what a reader can act on.
+    //
+    // So a thin token that is ALSO vetoed now reads EXTREME RISK. What must
+    // hold either way is that it is never tradeable — the abstention reason is
+    // still carried on the signal, it is just no longer the headline.
     const conservative = signalsAt(store, now, "conservative");
     const thin = conservative.filter((s) => s.features.liquidityUsd < PROFILES.conservative.minLiquidityUsd);
     expect(thin.length).toBeGreaterThan(0);
-    for (const s of thin) expect(s.label).toBe("NO TRADE");
+    for (const s of thin) {
+      expect(["NO TRADE", "EXTREME RISK"]).toContain(s.label);
+      expect(s.noTradeReason ?? "").not.toBe("");
+    }
   });
 
   it("mean_reversion profile prefers weak momentum, momentum profile prefers strong", () => {
@@ -122,9 +135,13 @@ describe("signal engine", () => {
   });
 
   it("flags dev selling and concentration as risks", () => {
+    // The key split when dev SELLING stopped sharing a flag with dev HOLDINGS.
+    // They are different claims — "the deployer is reducing its position" is an
+    // event, "the deployer holds 12%" is a state — and the invalidation copy
+    // promises the reader the first one specifically.
     const withDevRisk = sigs.find((s) => s.features.devSold);
     if (withDevRisk) {
-      expect(withDevRisk.risks.some((r) => r.key === "dev")).toBe(true);
+      expect(withDevRisk.risks.some((r) => r.key === "dev_selling")).toBe(true);
     }
     const concentrated = sigs.find((s) => s.features.top10Pct > 0.4);
     if (concentrated) {

@@ -18,7 +18,10 @@ const MAX_EDGES = 420;
  *  and static positions must not be able to crowd them out. */
 const MAX_TRADE_EDGES = 160;
 import { buildFlowSeries, buildTokenRows, buildWalletRows } from "./rows";
-import { DEMO, candlesFor, trendingRows } from "./source";
+import { DEMO, candlesFor, trendingRows, walletProfile } from "./source";
+import { liveTokenDetail } from "./detail";
+import { isPlausibleAddress } from "../providers/wallet-chain";
+import { launchFeed, type LaunchFeed } from "./launches";
 import { dataMode, providerHealth } from "../providers/registry";
 import type { AlertCondition, BacktestConfig, StrategyProfileId } from "../types";
 
@@ -87,7 +90,66 @@ export async function handleTokens(store: DemoStore, q: TokensQuery) {
   };
 }
 
-export function handleTokenDetail(store: DemoStore, mint: string, asOf?: number, profile: StrategyProfileId = "balanced") {
+/**
+ * The launch feed. Real or nothing.
+ *
+ * Every other read in this file falls back to the simulator when no provider
+ * answers, and that is right for them: a synthetic price chart is obviously a
+ * demonstration and labelled as one. It is wrong here. This page's entire claim
+ * is about TIME — a pool that came into existence eleven seconds ago — and the
+ * demo universe mints tokens on a schedule that has nothing to do with Solana.
+ * A simulated launch feed would be indistinguishable from a real one at a
+ * glance while being fiction about the only thing it measures.
+ *
+ * So the empty state is empty, and it says why.
+ */
+export async function handleLaunches(): Promise<{ feed: LaunchFeed | null; demo: boolean }> {
+  return { feed: await launchFeed(), demo: false };
+}
+
+/**
+ * One token, in depth — real where it can be.
+ *
+ * Live first, because every link out of the live scanner points here with a
+ * real Solana mint, and the simulator's store has never heard of one. Until
+ * this branch existed, clicking any row in the scanner reached "Token not
+ * found": the most-clicked path in the app was a dead end.
+ *
+ * `asOf` forces the simulator for the same reason `handleTokens` does — it is a
+ * request to replay a past moment, and no live source can answer that.
+ */
+export async function handleTokenDetail(
+  store: DemoStore,
+  mint: string,
+  asOf?: number,
+  profile: StrategyProfileId = "balanced",
+) {
+  // A live FAILURE and an unlisted mint are different answers and used to
+  // produce the same one. With the token provider rate-limited, every real mint
+  // fell through to a simulator that has never heard of it and the page said
+  // "unknown mint" — a permanent-sounding claim about the token standing in for
+  // a temporary fact about us. The reason is carried and only surfaces if the
+  // simulator misses too, so a demo mint still resolves normally.
+  let liveError: string | null = null;
+  if (asOf === undefined) {
+    try {
+      const live = await liveTokenDetail(mint, profile);
+      if (live) return { ...live, demo: false };
+    } catch (err) {
+      liveError = err instanceof Error ? err.message : String(err);
+    }
+  }
+  try {
+    return demoTokenDetail(store, mint, asOf, profile);
+  } catch (err) {
+    if (liveError && err instanceof ApiError && err.status === 404) {
+      throw new ApiError(503, `live data unavailable — ${liveError}. This is a source problem, not a verdict on the token.`);
+    }
+    throw err;
+  }
+}
+
+function demoTokenDetail(store: DemoStore, mint: string, asOf?: number, profile: StrategyProfileId = "balanced") {
   const tok = store.token(mint);
   const snap = store.snapshot(mint, asOf);
   if (!tok || !snap) throw new ApiError(404, "unknown mint");
@@ -132,6 +194,7 @@ export function handleTokenDetail(store: DemoStore, mint: string, asOf?: number,
     .slice(0, 12);
 
   return {
+    mode: "demo" as const,
     info: tok.info,
     archetype: tok.archetype,
     supply: tok.supply,
@@ -160,7 +223,13 @@ export function handleTokenDetail(store: DemoStore, mint: string, asOf?: number,
  */
 export async function handleCandles(store: DemoStore, mint: string, from?: number, to?: number) {
   const { data: candles, provenance } = await candlesFor(store, mint, from, to);
-  if (!candles.length) throw new ApiError(404, "unknown mint or empty range");
+  // The REASON, not a generic 404. "unknown mint or empty range" told a reader
+  // nothing about a real Solana token that simply has no OHLCV — measured on
+  // SKHY, where GeckoTerminal lists no pool at all — and the panel showing it
+  // sat on "LOADING CHART…" forever because it had nothing to print.
+  if (!candles.length) {
+    throw new ApiError(404, provenance.note ?? `no price history for this mint from ${provenance.source}`);
+  }
   return {
     candles,
     live: store.livePrice.get(mint) ?? null,
@@ -171,6 +240,96 @@ export async function handleCandles(store: DemoStore, mint: string, from?: numbe
 
 export function handleWallets(store: DemoStore) {
   return { rows: buildWalletRows(store), demo: true };
+}
+
+/**
+ * Real wallets, ranked by money they actually moved in the last few minutes.
+ *
+ * The `/whales` roster is the simulator and its caption claimed the scores were
+ * "measured from each wallet's trade history" — true of the generator, false in
+ * context, and the blind review called it out. Ranked discovery from real data
+ * is the feature traders open GMGN for, so this is the honest version of it.
+ *
+ * A ranked leaderboard by PnL is NOT feasible keylessly and this does not
+ * pretend to be one: profiling a wallet costs ~400 requests against a
+ * 2,400/minute budget, so four to six wallets a minute, and ranking any
+ * meaningful universe by realized PnL would take days.
+ *
+ * Ranking by MEASURED FLOW costs nothing extra. The scanner already streams
+ * per-token wallet deltas from SQD and caches them for thirty seconds; this
+ * aggregates the movers across the trending list. It answers "who is trading
+ * real size right now", which is a different question from "who is good" — and
+ * the one this stack can actually answer.
+ */
+export async function handleLiveMovers(limit = 25) {
+  const rows = await trendingRows();
+  if (!rows) return { movers: [], real: false, note: "no live token source configured", demo: true };
+
+  const byOwner = new Map<string, { owner: string; netUsd: number; grossUsd: number; tokens: Set<string> }>();
+  for (const row of rows.data) {
+    for (const w of row.topWallets ?? []) {
+      let e = byOwner.get(w.owner);
+      if (!e) byOwner.set(w.owner, (e = { owner: w.owner, netUsd: 0, grossUsd: 0, tokens: new Set() }));
+      e.netUsd += w.usd;
+      e.grossUsd += Math.abs(w.usd);
+      e.tokens.add(row.symbol || row.mint);
+    }
+  }
+
+  const movers = [...byOwner.values()]
+    .sort((a, b) => b.grossUsd - a.grossUsd)
+    .slice(0, limit)
+    .map((m) => ({
+      owner: m.owner,
+      netUsd: m.netUsd,
+      grossUsd: m.grossUsd,
+      tokens: [...m.tokens],
+    }));
+
+  return {
+    movers,
+    real: true,
+    source: rows.provenance.source,
+    // The window belongs to the number. These are minutes of flow, not a record.
+    note:
+      "ranked by USD moved in the last few minutes of SQD flow across the trending list — " +
+      "this is size traded right now, NOT a measure of skill, and no PnL is implied",
+    demo: false,
+  };
+}
+
+/**
+ * A real Solana address, profiled from the chain.
+ *
+ * Kept apart from `handleWalletDetail` rather than folded into it, because the
+ * two return genuinely different objects and merging them would mean inventing
+ * the simulator's fields — smart-money score, behavioural profile, known
+ * entity, cluster membership — for a wallet that has none of them. The page
+ * renders whichever it gets and says which.
+ *
+ * A 404 here means "no keyless wallet source is configured", not "no such
+ * wallet": an address with nothing in the readable window still returns a
+ * profile, with a coverage block that explains the emptiness.
+ */
+export async function handleWalletProfile(address: string, stage: "balances" | "full" = "full") {
+  // Two failures wearing one message, which the blind review flagged as both
+  // developer-facing and wrong: it told a trader to "set ENABLE_WALLET_CHAIN"
+  // when the source was working perfectly and they had simply mistyped an
+  // address. Separated, and phrased for the person reading it.
+  if (!isPlausibleAddress(address)) {
+    throw new ApiError(
+      400,
+      "That is not a Solana address. They are 32-44 characters of base58 — no 0, O, I or l.",
+    );
+  }
+  const sourced = await walletProfile(address, stage);
+  if (!sourced) {
+    throw new ApiError(
+      503,
+      "Solana could not be reached to read this wallet. The public RPC may be rate-limiting; try again shortly.",
+    );
+  }
+  return { profile: sourced.data, provenance: sourced.provenance, demo: false };
 }
 
 export function handleWalletDetail(store: DemoStore, address: string) {

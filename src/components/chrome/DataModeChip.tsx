@@ -25,6 +25,15 @@ interface DataMode {
   overall: "live" | "mixed" | "demo";
   live: string[];
   simulated: string[];
+  /**
+   * Real, and narrower than the word LIVE implies.
+   *
+   * Added when wallet history became real, because "live" would have been the
+   * more damaging half-truth: it is live for about forty-eight hours and blind
+   * before that, and a reader who sees LIVE next to a PnL figure reads it as
+   * the wallet's record rather than as two days of it.
+   */
+  bounded?: string[];
 }
 
 const LABEL: Record<DataMode["overall"], string> = {
@@ -44,8 +53,9 @@ const CLASS: Record<DataMode["overall"], string> = {
 function tooltip(m: DataMode | null): string {
   if (!m) return "checking which data sources are live…";
   const real = m.live.length ? `Live: ${m.live.join(", ")}.` : "Nothing is live.";
+  const bounded = m.bounded?.length ? ` Real but bounded: ${m.bounded.join("; ")}.` : "";
   const sim = m.simulated.length ? ` Simulated: ${m.simulated.join(", ")}.` : "";
-  return `${real}${sim} Click for details.`;
+  return `${real}${bounded}${sim} Click for details.`;
 }
 
 export function DataModeChip({ className = "" }: { className?: string }) {

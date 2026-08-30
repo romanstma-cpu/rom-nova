@@ -24,10 +24,20 @@
 //
 // COST, MEASURED, PER OPEN TAB
 //
-//   jupiter recent      1 call / 3s   = 1,200/hr. 45 consecutive calls at 1/s
-//                                       (i.e. 3,600/hr) returned zero 429s at
-//                                       p50 61ms, so this is a third of a rate
-//                                       already sustained clean.
+//   jupiter recent      1 call / 3s = 1,200/hr. 60 consecutive calls at that
+//                                     cadence returned 60x200, zero 429s,
+//                                     p50 82ms.
+//
+//                                     A previous version of this comment claimed
+//                                     "45 consecutive calls at 1/s returned zero
+//                                     429s", and inferred 3,600/hr of headroom
+//                                     from it. That inference was wrong and the
+//                                     measurement was too short to see it: 150
+//                                     calls at 1/s return 88x200 then 62x429,
+//                                     with the first failure at request 89. The
+//                                     45-call run simply stopped before the wall.
+//                                     There is no headroom to raise the poll rate
+//                                     into; do not read one out of this block.
 //   rugcheck summary    <= 8 / pass, once per mint for its whole life. 36 calls
 //                                       at 1.25/s returned zero 429s, p50
 //                                       131ms, ~300B each.
@@ -60,16 +70,37 @@ import type { Provenance } from "./source";
  * half of it before anyone asks. Measured end to end, source indexing costs
  * about 2.3s and is not negotiable, so this is the only dial there is.
  *
- * Three seconds = 1,200 requests an hour per open tab. The measured tolerance
- * is at least three times that — 45 consecutive requests at 1/s returned zero
- * 429s at p50 61ms — so this is a third of a rate already sustained cleanly,
- * not a limit being probed. Going lower buys progressively less: at 3s the poll
- * contributes ~1.5s to a ~3.8s total, and halving it again would shave 0.75s
- * off for double the traffic.
+ * Three seconds = 1,200 requests an hour per open tab, and 60 consecutive calls
+ * at that cadence came back clean. It is NOT a third of some larger budget:
+ * 150 calls at 1/s hit a wall at request 89 and 429ed 62 times after it. So
+ * this is close to what the endpoint will actually give, and the remaining
+ * latency is not bought back by asking more often.
  */
 export const LAUNCH_POLL_MS = 3_000;
-/** The slower secondary sweep for pools Jupiter's launchpad feed never lists. */
-export const POOL_POLL_MS = 20_000;
+/**
+ * The secondary sweep for pools Jupiter's launchpad feed never lists.
+ *
+ * Six seconds rather than twenty, and it is worth saying exactly what that buys
+ * and what it does not. Graduations were measured arriving at p50 ~124s, and
+ * the sweep interval was only the last ~20s of that: GeckoTerminal's own
+ * new-pool index runs 18-94s behind the chain (p50 ~60s for pools, ~89s for
+ * graduations), and that is a floor no polling rate touches. Six seconds is
+ * still 10/min against a limit that 429s on the fifth no-gap request but
+ * tolerates ~30/min, and it goes through the adapter's serialised 2.1s queue.
+ *
+ * The obvious escape — pump.fun's own API — does not exist for a browser. See
+ * the note in `poolSweep`.
+ */
+export const POOL_POLL_MS = 6_000;
+
+/**
+ * How long without a successful primary pass before the feed is stale.
+ *
+ * Two missed polls. Under it, a single transient failure does not flash a
+ * warning at a reader for six seconds; over it, the rows on screen are older
+ * than the feed claims and the UI has to say so.
+ */
+export const STALE_AFTER_MS = LAUNCH_POLL_MS * 3;
 /** Risk summaries per pass. One per mint for its whole life, never repeated. */
 export const RISK_BUDGET_PER_PASS = 8;
 /** Rows kept. A launch older than this has stopped being a launch. */
@@ -104,13 +135,53 @@ export interface LaunchFeed {
   /** How many launches the lag figures are computed from. Small n, weak claim. */
   lagSamples: number;
   /**
+   * The same figures for graduations, which are a different pipeline and were
+   * being silently dropped from the headline entirely.
+   *
+   * The pool lag filter is `poolCreatedAt > startedAt`, where `startedAt` is
+   * the newest row of the first Jupiter page. A graduation arrives 60-90
+   * seconds stale by construction, so that condition is essentially never true
+   * for one and every graduation fell out of the statistic — the headline read
+   * n=119 with 106 rows on screen, describing only the fast half of the feed
+   * while appearing to describe all of it.
+   *
+   * Graduations get their own baseline and their own reported number, because
+   * they are an order of magnitude slower and averaging the two would hide both.
+   */
+  gradLagP50Ms: number | null;
+  gradLagP90Ms: number | null;
+  gradLagSamples: number;
+  /**
    * Seconds of Solana the last primary page actually spanned. The safety margin
    * against the thirty-row ceiling: if this approaches the poll interval,
    * launches are being missed.
    */
   windowSeconds: number | null;
-  /** Launches added on the most recent pass. */
-  addedLastPass: number;
+  /**
+   * Launches added on the most recent pass, or null when that pass FAILED.
+   *
+   * Null rather than 0 for the reason this whole file exists. A failed pass
+   * that reported "+0 last pass" would be making a claim — nothing launched —
+   * on a poll that never reached the vendor, and the reader has no way to tell
+   * a quiet minute from a dead feed. Null renders as a dash.
+   */
+  addedLastPass: number | null;
+  /**
+   * When the primary source last actually ANSWERED. Not when it was last asked.
+   *
+   * The critical distinction, and the one the first version got wrong: a failed
+   * pass is swallowed so the feed can keep serving the rows it already has,
+   * which means every caller gets a successful response containing stale data.
+   * Without this field there is no way for the UI to tell the difference, and it
+   * rendered a pulsing live-dot over a 74-second-dead feed.
+   */
+  lastSuccessAt: number;
+  /** True when no pass has succeeded within STALE_AFTER_MS. */
+  stale: boolean;
+  /** Consecutive failed primary passes. */
+  failures: number;
+  /** Why the last pass failed, when one did. */
+  lastError?: string;
   /**
    * Launches per minute, counted from the launches themselves rather than from
    * how long this feed has been running.
@@ -146,13 +217,18 @@ interface FeedState {
   lastPrimaryAt: number;
   lastPoolSweepAt: number;
   lastWindowSeconds: number | null;
-  addedLastPass: number;
+  addedLastPass: number | null;
   /**
    * When the first pass completed. Launches older than this were backfilled
    * from the source's existing page and their apparent lag is an artifact of
    * when the tab was opened, not a property of the feed.
    */
   startedAt: number;
+  /** The same baseline for the graduation pipeline, which starts later and slower. */
+  sweepStartedAt: number;
+  lastSuccessAt: number;
+  failures: number;
+  lastError?: string;
 }
 
 const state: FeedState = {
@@ -162,8 +238,11 @@ const state: FeedState = {
   lastPrimaryAt: 0,
   lastPoolSweepAt: 0,
   lastWindowSeconds: null,
-  addedLastPass: 0,
+  addedLastPass: null,
   startedAt: 0,
+  sweepStartedAt: 0,
+  lastSuccessAt: 0,
+  failures: 0,
 };
 
 /** In-flight de-duplication, so two polls landing together share one fetch. */
@@ -177,8 +256,12 @@ export function resetLaunchFeed(): void {
   state.lastPrimaryAt = 0;
   state.lastPoolSweepAt = 0;
   state.lastWindowSeconds = null;
-  state.addedLastPass = 0;
+  state.addedLastPass = null;
   state.startedAt = 0;
+  state.sweepStartedAt = 0;
+  state.lastSuccessAt = 0;
+  state.failures = 0;
+  state.lastError = undefined;
   inFlight = null;
 }
 
@@ -340,9 +423,41 @@ async function primaryPass(jup: JupiterTokenProvider, now: number): Promise<void
  * a launchpad — and every one of them needs an audit block GeckoTerminal does
  * not have, which is why they are batched into a single Jupiter query rather
  * than looked up one at a time.
+ *
+ * THIS IS THE SLOW HALF OF THE FEED AND IT IS NOT FIXABLE FROM A BROWSER
+ *
+ * Graduations arrive around a minute and a half behind the chain where new
+ * mints arrive in about six seconds. The obvious fix is pump.fun's own API,
+ * which does serve a new-coin list and does answer in about two seconds — from
+ * a server. It is unusable here, measured three ways:
+ *
+ *   no Origin header          200 (this is the measurement that misleads)
+ *   Origin: app://rom-nova    403
+ *   Origin: https://romapps.xyz  403
+ *   Access-Control-Allow-Origin  absent on every response, including the 200s
+ *
+ * and from an actual browser tab, `fetch` on three of its endpoints threw
+ * `TypeError: Failed to fetch`. A browser always sends Origin, so the 200 can
+ * never be reached from one; and with no ACAO header the body could not be read
+ * even if it were. Nova is a static export that runs in the visitor's tab, so
+ * "works from curl" is not a category of working.
+ *
+ * The chain itself is no better for this. `logsSubscribe` on the PumpSwap
+ * program — the narrowest filter that catches a graduation — measured 455
+ * frames/s and 4,020 MB/hr to extract roughly two pool creations a minute.
+ *
+ * So GeckoTerminal's own staleness (18-94s observed, p50 around a minute) is
+ * the floor, and the sweep interval is the only part that was ever ours to fix.
  */
 async function poolSweep(jup: JupiterTokenProvider, gt: GeckoTerminalTokenProvider, now: number): Promise<void> {
   const pools = await gt.getNewPools(1);
+  // Same backfill baseline as the primary pass, kept separately because this
+  // pipeline starts later and runs an order of magnitude slower. Without it,
+  // graduations already indexed when the tab opened would be counted as if the
+  // feed had waited two minutes for them.
+  if (state.sweepStartedAt === 0 && pools.length > 0) {
+    state.sweepStartedAt = Math.max(...pools.map((p) => p.createdAt));
+  }
   const wanted = pools.filter((p) => GRADUATION_DEXES.test(p.dex) && !state.rows.has(p.mint));
   if (wanted.length === 0) return;
 
@@ -391,6 +506,56 @@ async function poolSweep(jup: JupiterTokenProvider, gt: GeckoTerminalTokenProvid
   }
 }
 
+/**
+ * Names that are the same name.
+ *
+ * Case-folded and stripped of the decoration copycats reach for first — a
+ * leading `$`, spaces, zero-width joiners. Not aggressive beyond that: mapping
+ * `0`→`o` and `1`→`l` would fold genuinely distinct tickers together and turn a
+ * warning into noise.
+ */
+function nameKey(l: TokenLaunch): string | null {
+  // Zero-width characters spelled as \u escapes on purpose. Written literally
+  // they are invisible in the source, and an invisible character sitting next
+  // to a hyphen inside a class silently becomes a RANGE — unreviewable, and
+  // wrong in a way no diff will show.
+  const raw = (l.symbol || l.name || "").toLowerCase().replace(/[\s\u200B-\u200D\uFEFF$]/g, "");
+  // Two unnamed mints are not twins. A blank key would group every metadata-less
+  // launch on the page into one giant false collision.
+  return raw.length >= 2 ? raw : null;
+}
+
+/**
+ * Marks mints sharing a name, and re-triages only the rows whose set changed.
+ *
+ * Runs after both passes because it needs the whole feed: this is the one
+ * finding that cannot be produced from a single token's data however carefully
+ * it is audited.
+ */
+export function markTwins(rows: Map<string, TokenLaunch>): void {
+  const groups = new Map<string, string[]>();
+  for (const row of rows.values()) {
+    const key = nameKey(row);
+    if (!key) continue;
+    const g = groups.get(key);
+    if (g) g.push(row.mint);
+    else groups.set(key, [row.mint]);
+  }
+  for (const row of rows.values()) {
+    const key = nameKey(row);
+    const group = key ? groups.get(key) : undefined;
+    const twins = group && group.length > 1 ? group.filter((m) => m !== row.mint) : undefined;
+    const before = row.twins ?? [];
+    const after = twins ?? [];
+    if (before.length === after.length && before.every((m, i) => m === after[i])) continue;
+    rows.set(row.mint, {
+      ...row,
+      twins,
+      triage: triageLaunch(row, state.riskByMint.get(row.mint), row.triage.completedInMs, twins),
+    });
+  }
+}
+
 async function refresh(): Promise<void> {
   const now = Date.now();
   const jup = new JupiterTokenProvider();
@@ -399,9 +564,20 @@ async function refresh(): Promise<void> {
     state.lastPrimaryAt = now;
     try {
       await primaryPass(jup, now);
-    } catch {
-      // A failed pass keeps the rows it already has. Stale real launches beat
-      // an empty feed, and `polledAt` in the response reports the age.
+      state.lastSuccessAt = Date.now();
+      state.failures = 0;
+      state.lastError = undefined;
+    } catch (err) {
+      // A failed pass keeps the rows it already has, because stale real
+      // launches beat an empty feed. But it must not keep the APPEARANCE of a
+      // working one: this used to swallow the error entirely, so `launchFeed`
+      // returned successfully with a full row set and the page had no way to
+      // know. A killed network froze the feed at 122 rows while the UI carried
+      // on pulsing a live-dot and asserting arrivals for 74 seconds.
+      state.failures++;
+      state.lastError = err instanceof Error ? err.message : String(err);
+      // Not zero. Zero is a claim that nothing launched.
+      state.addedLastPass = null;
     }
   }
 
@@ -410,10 +586,13 @@ async function refresh(): Promise<void> {
     try {
       await poolSweep(jup, new GeckoTerminalTokenProvider(), now);
     } catch {
-      // The secondary source failing costs graduations, not the feed.
+      // The secondary source failing costs graduations, not the feed, and it
+      // 429s often enough by design that counting it as a feed failure would
+      // put the page in a permanent warning state.
     }
   }
 
+  markTwins(state.rows);
   prune(state.rows, now);
 }
 
@@ -444,12 +623,23 @@ export async function launchFeed(): Promise<LaunchFeed | null> {
   const launches = [...state.rows.values()].sort((a, b) => b.poolCreatedAt - a.poolCreatedAt);
   if (launches.length === 0) return null;
 
-  const lags = launches
-    .filter((l) => l.poolCreatedAt > state.startedAt)
-    .map((l) => l.firstSeenAt - l.poolCreatedAt)
-    .sort((a, b) => a - b);
+  // Two pipelines, two baselines, two numbers.
+  //
+  // A single `poolCreatedAt > startedAt` filter looked general and was not: a
+  // graduation is 60-90s stale the instant it arrives, so it never cleared the
+  // Jupiter page's baseline and every one of them fell out of the statistic.
+  // The headline then described the fast half of the feed while appearing to
+  // describe all of it.
+  const lagOf = (l: TokenLaunch) => l.firstSeenAt - l.poolCreatedAt;
+  const pools = launches.filter((l) => l.event === "pool" && l.poolCreatedAt > state.startedAt);
+  const grads = launches.filter(
+    (l) => l.event === "graduation" && state.sweepStartedAt > 0 && l.poolCreatedAt > state.sweepStartedAt,
+  );
+  const lags = pools.map(lagOf).sort((a, b) => a - b);
+  const gradLags = grads.map(lagOf).sort((a, b) => a - b);
   const now = Date.now();
   const lastMinute = launches.filter((l) => now - l.poolCreatedAt <= 60_000).length;
+  const stale = state.lastSuccessAt === 0 || now - state.lastSuccessAt > STALE_AFTER_MS;
 
   return {
     launches,
@@ -457,14 +647,29 @@ export async function launchFeed(): Promise<LaunchFeed | null> {
     lagP90Ms: percentile(lags, 0.9),
     lagMinMs: lags[0] ?? null,
     lagSamples: lags.length,
+    gradLagP50Ms: percentile(gradLags, 0.5),
+    gradLagP90Ms: percentile(gradLags, 0.9),
+    gradLagSamples: gradLags.length,
     windowSeconds: state.lastWindowSeconds,
     addedLastPass: state.addedLastPass,
+    lastSuccessAt: state.lastSuccessAt,
+    stale,
+    failures: state.failures,
+    lastError: state.lastError,
     perMinute: lastMinute,
     awaitingTriage: launches.filter((l) => l.triage.completedInMs === undefined).length,
     polledAt: state.lastPrimaryAt,
     provenance: {
       source: FLAGS.coingecko() ? "jupiter+coingecko" : "jupiter",
       real: true,
+      // Provenance must say when it stopped being true. A source name with no
+      // freshness attached is exactly the "LIVE" label this codebase refuses
+      // elsewhere, and a frozen feed wearing a vendor's name is worse than one
+      // wearing none.
+      note: stale
+        ? `stale — no successful poll for ${Math.round((now - state.lastSuccessAt) / 1000)}s` +
+          (state.lastError ? ` (${state.lastError})` : "")
+        : undefined,
     },
   };
 }

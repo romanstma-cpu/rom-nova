@@ -414,6 +414,23 @@ export interface LaunchCheck {
   state: LaunchCheckState;
   detail: string;
   /**
+   * What a `pass` actually rests on.
+   *
+   * "reading" — somebody looked at a value and it was good. The mint authority
+   * is null; the deployer holds 0.5%.
+   *
+   * "absence" — nobody found anything, which on a token this young is mostly a
+   * statement about how little has had time to happen. A vendor reporting no
+   * rug history for a wallet it has never seen produces the identical output to
+   * one clearing a wallet it knows well.
+   *
+   * These were rendered with the same green tick, so a strip reading
+   * `✓✓✓✓—··✓` claimed eight findings where two were measurements. The UI now
+   * draws them differently, because the difference is the entire subject of
+   * this file.
+   */
+  basis?: "reading" | "absence";
+  /**
    * True when the state came from a fail-safe DEFAULT rather than a reading.
    *
    * House rule: absent mint-authority data is graded as not-revoked. That
@@ -440,6 +457,14 @@ export interface LaunchTriage {
   checks: LaunchCheck[];
   /** Checks that produced a real measurement, and how many there were. */
   measured: number;
+  /**
+   * Of the passes, how many rest on somebody having LOOKED at a value rather
+   * than on nobody having found anything. See `LaunchCheck.basis`.
+   *
+   * On a typical fresh launchpad mint this is two — the mint and freeze
+   * authority reads — out of six or seven ticks.
+   */
+  readings: number;
   total: number;
   /** Checks nobody ran. The honesty number: the headline is meaningless without it. */
   unchecked: number;
@@ -482,6 +507,7 @@ export interface LaunchObservation {
   devMigrations?: number;
   priceUsd?: number;
   liquidityUsd?: number;
+  marketCapUsd?: number;
   holders?: number;
   top10Pct?: number;
   devHoldsPct?: number;
@@ -499,7 +525,19 @@ export interface LaunchObservation {
   source: string;
 }
 
-export type TokenLaunch = LaunchObservation & { triage: LaunchTriage };
+export type TokenLaunch = LaunchObservation & {
+  triage: LaunchTriage;
+  /**
+   * Other mints in the feed launched under the same name or symbol.
+   *
+   * Not a property of the token — a property of the FEED, which is why it lives
+   * here rather than on the observation. Two different mints both called
+   * CASHCOW landing twelve seconds apart is the textbook impersonation play,
+   * and it is invisible in any per-token view however carefully audited: each
+   * one is individually unremarkable.
+   */
+  twins?: string[];
+};
 
 export type SignalLifecycleState =
   | "created"

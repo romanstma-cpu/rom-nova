@@ -288,6 +288,10 @@ export function toLaunch(m: JupMint, seenAt: number, source = "jupiter"): Launch
     devMigrations: a.devMigrations,
     priceUsd: m.usdPrice,
     liquidityUsd: m.liquidity,
+    // Already parsed for the scanner's snapshot; it was simply never carried
+    // onto a launch. On a token minutes old it is the one number that separates
+    // a $3.2k curve everyone ignores from one people are actually buying.
+    marketCapUsd: m.mcap ?? m.fdv,
     holders: m.holderCount,
     top10Pct: frac(a.topHoldersPercentage),
     devHoldsPct: frac(a.devBalancePercentage),

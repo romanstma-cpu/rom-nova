@@ -300,8 +300,9 @@ export function providerHealth(): ProviderHealth[] {
             "also give momentum and volume acceleration WITHOUT candles, which is what un-" +
             "dashed four scanner columns. CAVEAT: topHoldersPercentage counts AMM pools as " +
             "holders, so a high figure can mean deep liquidity rather than a whale. ALSO SERVING " +
-            "THE LAUNCH FEED: its /recent endpoint indexes brand-new mints within ~2.3s of pool " +
-            "creation, the fastest keyless view of a launch measured here — but it caps at 30 " +
+            "THE LAUNCH FEED: its /recent endpoint carries brand-new mints at a measured p50 of " +
+            "about 5.7s behind pool creation (2.3s at BEST, and the median is what a reader " +
+            "experiences), the freshest keyless view of a launch found here — but it caps at 30 " +
             "rows with no cursor, so whatever falls off that page is gone" +
             (process.env.JUPITER_API_KEY ? " · API key present, higher rate limit" : ""),
         }

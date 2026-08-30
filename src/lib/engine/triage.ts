@@ -98,10 +98,26 @@ function check(
   name: string,
   state: LaunchCheck["state"],
   detail: string,
-  assumed?: boolean,
+  opts: { assumed?: boolean; basis?: LaunchCheck["basis"] } = {},
 ): LaunchCheck {
-  return assumed ? { key, name, state, detail, assumed } : { key, name, state, detail };
+  const out: LaunchCheck = { key, name, state, detail };
+  if (opts.assumed) out.assumed = true;
+  if (opts.basis) out.basis = opts.basis;
+  return out;
 }
+
+/**
+ * A pass that rests on somebody not finding anything.
+ *
+ * Kept as its own helper so adding a check forces the author to decide which
+ * kind of pass it is. A vendor reporting no rug history for a wallet it has
+ * never seen is indistinguishable, in its output, from one clearing a wallet it
+ * knows — and on a token ninety seconds old the first is far more likely.
+ */
+const absencePass = (key: string, name: string, detail: string) =>
+  check(key, name, "pass", detail, { basis: "absence" });
+const readingPass = (key: string, name: string, detail: string) =>
+  check(key, name, "pass", detail, { basis: "reading" });
 
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 
@@ -123,17 +139,19 @@ function authorityChecks(l: LaunchObservation): LaunchCheck[] {
         "Mint authority",
         "fail",
         "The source published no audit for this mint. Graded as NOT revoked, because an unexamined token must never read as renounced — but nobody has actually looked.",
-        true,
+        { assumed: true },
       ),
       check(
         "freeze_authority",
         "Freeze authority",
         "fail",
         "The source published no audit for this mint. Graded as NOT revoked. Absence of a finding is not a finding of absence.",
-        true,
+        { assumed: true },
       ),
     ];
   }
+  // The only two checks on a fresh launchpad mint that are hard chain readings
+  // rather than an opinion or an absence.
   return [
     check(
       "mint_authority",
@@ -142,6 +160,7 @@ function authorityChecks(l: LaunchObservation): LaunchCheck[] {
       l.mintAuthorityRevoked
         ? "Revoked — the supply cannot be increased."
         : "LIVE — whoever holds that key can mint more supply out from under you at any time.",
+      { basis: "reading" },
     ),
     check(
       "freeze_authority",
@@ -150,6 +169,7 @@ function authorityChecks(l: LaunchObservation): LaunchCheck[] {
       l.freezeAuthorityRevoked
         ? "Revoked — balances cannot be frozen."
         : "LIVE — whoever holds that key can freeze your balance in place, leaving you holding a token you cannot sell.",
+      { basis: "reading" },
     ),
   ];
 }
@@ -205,13 +225,45 @@ function creatorCheck(l: LaunchObservation): LaunchCheck {
       `This wallet has issued ${n} mints.${reached} Repeat deployers are not automatically bad, but you are not their first attempt.`,
     );
   }
-  return check(
+  return readingPass(
     "creator_history",
     "Creator history",
-    "pass",
     l.devMints <= 1
       ? "First mint from this wallet — the top fifth of the feed by this measure. There is no history to hold against it, which is not the same as a clean one: every serial deployer's first token looked exactly like this."
       : `This wallet has issued ${n} mints.${reached}`,
+  );
+}
+
+/**
+ * Other mints in the feed wearing this one's name.
+ *
+ * The only check here that no per-token audit can produce, however thorough,
+ * because the evidence is not in the token — it is in its neighbours. Two mints
+ * called CASHCOW twelve seconds apart are individually unremarkable and jointly
+ * an impersonation play, and the reader watching rows scroll past will not
+ * notice the first one by the time the second lands.
+ *
+ * Graded `warn` rather than `fail`: name collisions on Solana are also produced
+ * by coincidence and by fifty people memeing the same news story within a
+ * minute of each other, and this cannot tell those apart from a targeted
+ * copycat. RugCheck's own "Copycat token" finding is the sharper instrument and
+ * it lands in `vendor_flags`.
+ */
+function twinCheck(twins: string[] | undefined): LaunchCheck {
+  if (!twins || twins.length === 0) {
+    return absencePass(
+      "name_collision",
+      "Name collision",
+      "No other launch currently in this feed shares its name or symbol. Only covers what the feed is holding — a copycat that launched an hour ago has already aged out.",
+    );
+  }
+  return check(
+    "name_collision",
+    "Name collision",
+    "warn",
+    `${twins.length} other mint${twins.length === 1 ? "" : "s"} in this feed launched under the same name or symbol: ${twins
+      .map((m) => `${m.slice(0, 6)}…${m.slice(-4)}`)
+      .join(", ")}. Sometimes coincidence, sometimes a copy riding the original's search traffic — check which one people are actually buying before assuming this is it.`,
   );
 }
 
@@ -224,11 +276,10 @@ function rugHistoryCheck(risk: TokenRisk | undefined): LaunchCheck {
   if (hit) {
     return check("rug_history", "Creator rug history", "fail", `${risk.source}: ${hit.detail || hit.name}`);
   }
-  return check(
+  return absencePass(
     "rug_history",
     "Creator rug history",
-    "pass",
-    `${risk.source} did not link this deployer to a previous rug. Its coverage is its own, and a first-time deployer has nothing to find.`,
+    `${risk.source} did not link this deployer to a previous rug. That is the absence of a finding, not a finding: a wallet it has never seen and a wallet it has cleared produce the same answer, and a deployer on their first token has nothing to find by construction.`,
   );
 }
 
@@ -252,7 +303,7 @@ function lpCheck(l: LaunchObservation, risk: TokenRisk | undefined): LaunchCheck
     return check("lp_locked", "LP locked", "unchecked", "No risk provider reported an LP lock share for this pool.");
   }
   const p = risk.lpLockedPct;
-  if (p >= 0.9) return check("lp_locked", "LP locked", "pass", `${pct(p)} of LP locked or burned per ${risk.source}.`);
+  if (p >= 0.9) return readingPass("lp_locked", "LP locked", `${pct(p)} of LP locked or burned per ${risk.source}.`);
   if (p >= 0.5) return check("lp_locked", "LP locked", "warn", `Only ${pct(p)} of LP is locked per ${risk.source}; the rest can be withdrawn.`);
   return check(
     "lp_locked",
@@ -278,7 +329,7 @@ function devHoldCheck(l: LaunchObservation): LaunchCheck {
   if (l.devHoldsPct >= DEV_HOLD_WARN) {
     return check("dev_balance", "Deployer allocation", "warn", `The deployer holds ${pct(l.devHoldsPct)} of supply.`);
   }
-  return check("dev_balance", "Deployer allocation", "pass", `The deployer holds ${pct(l.devHoldsPct)} of supply.`);
+  return readingPass("dev_balance", "Deployer allocation", `The deployer holds ${pct(l.devHoldsPct)} of supply.`);
 }
 
 /**
@@ -308,7 +359,7 @@ function concentrationCheck(l: LaunchObservation): LaunchCheck {
   if (l.top10Pct >= TOP10_WARN) {
     return check("top_holders", "Top-10 concentration", "warn", `Top 10 hold ${pct(l.top10Pct)} of supply.${caveat}`);
   }
-  return check("top_holders", "Top-10 concentration", "pass", `Top 10 hold ${pct(l.top10Pct)} of supply.${caveat}`);
+  return readingPass("top_holders", "Top-10 concentration", `Top 10 hold ${pct(l.top10Pct)} of supply.${caveat}`);
 }
 
 /**
@@ -359,12 +410,20 @@ function vendorCheck(l: LaunchObservation, risk: TokenRisk | undefined): LaunchC
   if (!risk) {
     return check("vendor_flags", "Vendor flags", "unchecked", "No vendor has graded this mint yet, and the listing source raised no flag of its own.");
   }
-  return check(
+  // The vendor's numeric score is deliberately NOT quoted here.
+  //
+  // It used to read "it grades the mint 1/100 where higher is riskier", which
+  // hands the reader the exact trap this file's header documents: a 1 on a
+  // nine-second-old mint is what you get when nothing has had time to happen,
+  // and the sentence presented it as a clean bill from a grader that had looked.
+  // The score is real and it belongs on the row where it is labelled as a
+  // vendor's opinion; inside a check that has just PASSED, it reads as
+  // corroboration and it is not.
+  return absencePass(
     "vendor_flags",
     "Vendor flags",
-    "pass",
-    `${risk.source} raised nothing beyond what the checks above already cover; it grades the mint ${risk.score}/100 where higher is riskier.` +
-      (curve ? " Its concentration and liquidity findings are excluded here because the bonding curve produces them on every launch." : ""),
+    `${risk.source} raised nothing beyond what the checks above already cover. On a token this young that is close to meaningless: its low scores are produced by an absence of history, not by an audit, and a mint minutes old has no history to have.` +
+      (curve ? " Its concentration and liquidity findings are excluded here because the bonding curve produces them on every launch regardless of the token." : ""),
   );
 }
 
@@ -382,6 +441,7 @@ export function triageLaunch(
   l: LaunchObservation,
   risk?: TokenRisk,
   completedInMs?: number,
+  twins?: string[],
 ): LaunchTriage {
   const checks: LaunchCheck[] = [
     creatorCheck(l),
@@ -390,10 +450,16 @@ export function triageLaunch(
     devHoldCheck(l),
     lpCheck(l, risk),
     concentrationCheck(l),
+    twinCheck(twins),
     vendorCheck(l, risk),
   ];
 
   const unchecked = checks.filter((c) => c.state === "unchecked").length;
+  // Passes that came from somebody looking at a value, as opposed to somebody
+  // not finding anything. On a fresh launchpad mint this is usually just the
+  // two authority reads, and a reader who thinks eight ticks means eight
+  // verifications has been misled by the shape of the row.
+  const readings = checks.filter((c) => c.state === "pass" && c.basis === "reading").length;
   // n/a is excluded from `measured` on purpose. A check that cannot apply did
   // not verify anything, and counting it toward "5 of 8 checks passed" would
   // inflate the reassurance with structural non-answers.
@@ -409,6 +475,7 @@ export function triageLaunch(
     verdict,
     checks,
     measured,
+    readings,
     total: checks.length,
     unchecked,
     riskScore: risk?.score,
@@ -432,5 +499,11 @@ export function triageHeadline(t: LaunchTriage): string {
   if (warned.length) parts.push(`${warned.length} warning${warned.length === 1 ? "" : "s"}`);
   if (t.unchecked) parts.push(`${t.unchecked} not checked`);
   const body = parts.length ? parts.join(", ") : "nothing found yet";
-  return `${t.verdict.toUpperCase()} — ${body} (${t.measured} of ${t.total} checks could run)`;
+  // The reading count travels with the verdict, because "6 of 8 checks could
+  // run" and "2 of those rest on a direct reading" are the two halves of the
+  // same sentence, and the first alone reads far stronger than the evidence is.
+  return (
+    `${t.verdict.toUpperCase()} — ${body} (${t.measured} of ${t.total} checks could run; ` +
+    `${t.readings} pass${t.readings === 1 ? "" : "es"} from a direct reading, the rest from nobody finding anything)`
+  );
 }

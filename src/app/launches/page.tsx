@@ -55,41 +55,65 @@ const VERDICT_CLASS: Record<string, string> = {
   unverified: "chip",
 };
 
-const CHECK_GLYPH: Record<LaunchCheck["state"], string> = {
-  pass: "✓",
-  warn: "!",
-  fail: "✕",
-  unchecked: "—",
-  "n/a": "·",
-};
-
-const CHECK_CLASS: Record<LaunchCheck["state"], string> = {
-  pass: "pos",
-  warn: "warn",
-  fail: "neg",
-  unchecked: "faint",
-  "n/a": "faint",
-};
-
 /**
- * The eight checks as eight glyphs.
+ * A glyph per check state, with `pass` split by what the pass rests on.
  *
- * A dash and a tick have to be distinguishable at a glance, because the whole
- * point is that "nobody looked" and "looked and it is fine" are different
- * answers. Hovering any glyph gives the sentence behind it.
+ * A solid tick is a reading: somebody looked at a value and it was good. A
+ * hollow ring is an absence: nobody found anything, which on a token this young
+ * is mostly a statement about how little has had time to happen. They used to
+ * render identically, so a strip reading eight ticks claimed eight
+ * verifications where two were measurements and the rest were silence — the
+ * exact confusion the whole triage model exists to prevent, reintroduced at the
+ * last step by the drawing code.
  */
+function glyphOf(c: LaunchCheck): { glyph: string; cls: string } {
+  switch (c.state) {
+    case "pass":
+      return c.basis === "absence" ? { glyph: "○", cls: "dim" } : { glyph: "✓", cls: "pos" };
+    case "warn":
+      return { glyph: "!", cls: "warn" };
+    case "fail":
+      return { glyph: "✕", cls: "neg" };
+    case "unchecked":
+      return { glyph: "—", cls: "faint" };
+    default:
+      return { glyph: "·", cls: "faint" };
+  }
+}
+
+const STATE_WORD: Record<LaunchCheck["state"], string> = {
+  pass: "PASS",
+  warn: "WARNING",
+  fail: "FAILED",
+  unchecked: "NOT CHECKED",
+  "n/a": "DOES NOT APPLY YET",
+};
+
+/** The checks as glyphs. Hovering any one gives the sentence behind it. */
 function CheckStrip({ launch }: { launch: TokenLaunch }) {
   return (
     <span className="inline-flex gap-[3px] items-center">
-      {launch.triage.checks.map((c) => (
-        <span
-          key={c.key}
-          className={`${CHECK_CLASS[c.state]} text-[11px] leading-none w-[11px] text-center`}
-          title={`${c.name}: ${c.state.toUpperCase()}${c.assumed ? " (assumed, not measured)" : ""}\n${c.detail}`}
-        >
-          {CHECK_GLYPH[c.state]}
-        </span>
-      ))}
+      {launch.triage.checks.map((c) => {
+        const { glyph, cls } = glyphOf(c);
+        return (
+          <span
+            key={c.key}
+            className={`${cls} text-[11px] leading-none w-[11px] text-center`}
+            title={
+              `${c.name}: ${STATE_WORD[c.state]}` +
+              (c.assumed ? " (assumed from absent data, not measured)" : "") +
+              (c.state === "pass"
+                ? c.basis === "absence"
+                  ? " — from nobody finding anything, not from a reading"
+                  : " — from a direct reading"
+                : "") +
+              `\n${c.detail}`
+            }
+          >
+            {glyph}
+          </span>
+        );
+      })}
     </span>
   );
 }
@@ -234,7 +258,15 @@ export default function LaunchesPage() {
   }, [feed, minLiq, hideSerial, hideAvoid, venue]);
 
   const lag = feed?.lagP50Ms;
-  const skewed = feed?.lagMinMs !== null && feed?.lagMinMs !== undefined && feed.lagMinMs < 0;
+  const stale = feed?.stale === true;
+  const sinceOk = feed && feed.lastSuccessAt > 0 ? now - feed.lastSuccessAt : null;
+  const clockNote =
+    "\n\nUNCORRECTED. This is local-clock arithmetic: your clock minus the source's timestamp, and a " +
+    "browser cannot bracket the difference because none of these APIs expose the HTTP Date header to " +
+    "scripts (no Access-Control-Expose-Headers). A clock running BEHIND the source flatters this " +
+    "number and a clock running ahead inflates it — the machine this was built on ran 2.3s behind, " +
+    "which would have understated the true lag by that much. `npm run probe:launches` brackets the " +
+    "offset properly and reports both figures.";
 
   return (
     <div className="p-3 flex flex-col gap-2 h-full min-h-0">
@@ -243,25 +275,40 @@ export default function LaunchesPage() {
         {feed && (
           <span
             className="flex items-center gap-1.5 text-[10.5px] dim num ml-2"
-            title="Pools created in the last 60 seconds, counted from the feed's own rows. Not a rate extrapolated from how long this tab has been open."
+            title={
+              stale
+                ? "The feed is not currently receiving data. This rate describes the rows still on screen, which have stopped being updated."
+                : "Pools created in the last 60 seconds, counted from the feed's own rows. Not a rate extrapolated from how long this tab has been open."
+            }
           >
-            <span className="live-dot" />
-            {feed.perMinute}/min · +{feed.addedLastPass} last pass
+            {/* No pulsing dot on a dead feed. The dot is the single strongest
+                "this is live" signal on the page and it kept beating through a
+                74-second outage. */}
+            {stale ? <span className="text-[var(--neg)]">■</span> : <span className="live-dot" />}
+            {feed.perMinute}/min ·{" "}
+            {feed.addedLastPass === null ? (
+              <span className="neg" title="the last poll did not reach the source, so nothing can be said about arrivals">
+                last pass failed
+              </span>
+            ) : (
+              `+${feed.addedLastPass} last pass`
+            )}
           </span>
         )}
         {feed && (
           <span
             className="text-[10.5px] num dim"
             title={
-              "Median of (when this tab first saw the row) minus (the pool creation time the source published).\n\n" +
-              `From ${feed.lagSamples} launch${feed.lagSamples === 1 ? "" : "es"} that happened AFTER this feed opened. ` +
+              "Median of (when this tab first saw the row) minus (the pool creation time the source published), " +
+              "for NEW MINTS only. Graduations are a separate, much slower pipeline and have their own figure " +
+              "beside this one — averaging the two would hide both.\n\n" +
+              `From ${feed.lagSamples} mint${feed.lagSamples === 1 ? "" : "s"} that launched AFTER this feed opened. ` +
               "The rows already on screen when you arrived were backfilled from the source's existing page, so their " +
               "apparent age says when you opened the tab, not how fast the feed is — they are excluded here and shown " +
               "in the list anyway.\n\n" +
               `p90 ${feed.lagP90Ms === null ? "—" : `${(feed.lagP90Ms / 1000).toFixed(1)}s`} · ` +
-              `min ${feed.lagMinMs === null ? "—" : `${(feed.lagMinMs / 1000).toFixed(1)}s`}\n\n` +
-              "Includes any difference between the source's clock and yours. A negative minimum means your clock " +
-              "is ahead of theirs, not that the feed saw the future." +
+              `min ${feed.lagMinMs === null ? "—" : `${(feed.lagMinMs / 1000).toFixed(1)}s`}` +
+              clockNote +
               (feed.windowSeconds !== null
                 ? `\n\nThe last listing page spanned ${feed.windowSeconds.toFixed(0)}s of Solana. That endpoint caps ` +
                   `at 30 rows with no cursor, so if the span ever falls near the ${POLL_MS / 1000}s poll interval, ` +
@@ -269,16 +316,54 @@ export default function LaunchesPage() {
                 : "")
             }
           >
-            feed lag{" "}
-            {feed.lagSamples === 0 ? (
-              <span className="faint" title="no launch has arrived since this feed opened yet">
+            mint lag{" "}
+            {/* A frozen feed's lag figure describes a moment that has passed.
+                Dashed rather than left standing at its last good value. */}
+            {stale ? (
+              <span className="neg" title="no successful poll recently — this figure would describe a moment that has passed">
+                —
+              </span>
+            ) : feed.lagSamples === 0 ? (
+              <span className="faint" title="no mint has arrived since this feed opened yet">
                 measuring…
               </span>
             ) : (
               <>
                 {lag === null || lag === undefined ? "—" : `${(lag / 1000).toFixed(1)}s`}
-                <span className="faint"> n={feed.lagSamples}</span>
-                {skewed ? " *" : ""}
+                <span className="faint"> n={feed.lagSamples}*</span>
+              </>
+            )}
+          </span>
+        )}
+        {/* Graduations reported separately because they are an order of
+            magnitude slower and were previously excluded from the headline
+            entirely — see LaunchFeed.gradLagP50Ms. */}
+        {feed && (
+          <span
+            className="text-[10.5px] num dim"
+            title={
+              "Median lag for GRADUATIONS — a launchpad curve completing into a real AMM pool.\n\n" +
+              `From ${feed.gradLagSamples} graduation${feed.gradLagSamples === 1 ? "" : "s"} that happened after the ` +
+              "secondary sweep started.\n\n" +
+              "This is the slow half of the feed and it is a source floor, not a tuning choice. GeckoTerminal's " +
+              "new-pool index is the only browser-reachable graduation source and it runs 18-94s behind the chain " +
+              "on its own. pump.fun's API answers in ~2s but 403s any request carrying an Origin header and sends " +
+              "no CORS header at all, so a browser cannot read it; watching the PumpSwap program over the public " +
+              "RPC costs ~4,020 MB/hr for about two pool creations a minute." +
+              clockNote
+            }
+          >
+            grad lag{" "}
+            {stale ? (
+              <span className="neg">—</span>
+            ) : feed.gradLagSamples === 0 ? (
+              <span className="faint" title="no graduation has been observed since the sweep started">
+                measuring…
+              </span>
+            ) : (
+              <>
+                {feed.gradLagP50Ms === null ? "—" : `${(feed.gradLagP50Ms / 1000).toFixed(0)}s`}
+                <span className="faint"> n={feed.gradLagSamples}*</span>
               </>
             )}
           </span>
@@ -316,18 +401,44 @@ export default function LaunchesPage() {
         </div>
       </div>
 
+      {/* The feed has stopped receiving data and the rows are frozen.
+          Everything above this line is deliberately neutered when that happens
+          — the dot, the arrival count, both lag figures — because the failure
+          being fixed here is a page that kept asserting liveness through a
+          74-second outage while looking exactly like a quiet market. */}
+      {stale && feed && (
+        <div className="px-3 py-2 rounded border border-[rgba(255,77,109,0.45)] bg-[rgba(255,77,109,0.09)] text-[11.5px] neg">
+          <b>FEED STALLED — these rows are frozen.</b> No successful poll for{" "}
+          {sinceOk === null ? "the whole session" : `${Math.round(sinceOk / 1000)}s`}
+          {feed.failures > 0 && ` (${feed.failures} failed attempt${feed.failures === 1 ? "" : "s"})`}.
+          {feed.lastError && <span className="dim"> Last error: {feed.lastError}.</span>}{" "}
+          <span className="dim">
+            Ages keep ticking because the clock is local; nothing new is arriving. An empty market and a
+            dead connection look identical from here, so this says which it is. Polling continues and
+            the feed recovers on its own.
+          </span>
+        </div>
+      )}
+
       <div className="hint px-1 pb-1">
-        Every new mint and pool on Solana, triaged the moment it appears. <b>Nothing here is ranked or
+        New mints and new pools on Solana, triaged as they arrive. <b>Nothing here is ranked or
         scored</b> — a token seconds old has no momentum to rank it by, so each row is a set of checks
         that either ran or did not, and the verdict says which. The best verdict available is{" "}
         <b>UNVERIFIED</b>: no check has failed, on a token far too young to have a record. There is no
         pass mark and no prediction of profit.{" "}
+        <b>A solid ✓ is a reading; a hollow ○ only means nobody found anything</b>, which on a
+        one-minute-old mint is usually a statement about how little has had time to happen.{" "}
         <b>LP lock and top-holder share read <i>n/a</i> on bonding-curve tokens</b> and that is not an
         omission — the curve holds the liquidity and the curve is the top holder, so graders return
         100% for every token at that stage regardless of quality. What can be judged before graduation
         is the deployer: how many mints they have issued, how many reached a pool, and how much of this
         one they still hold. Hover any glyph for the sentence behind it, or click a row to open all of
-        them.
+        them.{" "}
+        <span className="dim">
+          Mints arrive within seconds; graduations run about a minute and a half behind, which is the
+          source&rsquo;s own delay rather than this page&rsquo;s — the two lag figures above report them
+          separately.
+        </span>
       </div>
 
       <div className="panel overflow-auto flex-1 min-h-0">
@@ -336,11 +447,23 @@ export default function LaunchesPage() {
             <tr>
               <th className="text-left px-3 py-2 font-medium w-[62px]">Age</th>
               <th className="text-left px-2 font-medium">Token</th>
-              <th className="text-left px-2 font-medium w-[104px]" title="Every triage check, in order: creator history, creator rug history, mint authority, freeze authority, deployer allocation, LP lock, top-10 concentration, vendor flags.">
+              <th
+                className="text-left px-2 font-medium w-[116px]"
+                title={
+                  "Every triage check, in order: creator history, creator rug history, mint authority, freeze authority, deployer allocation, LP lock, top-10 concentration, name collision, vendor flags.\n\n" +
+                  "✓ solid = a direct reading   ○ hollow = nobody found anything   ! = warning   ✕ = failed   — = not checked   · = does not apply yet"
+                }
+              >
                 Checks
               </th>
               <th className="text-left px-2 font-medium w-[128px]">Verdict</th>
               <th className="text-right px-2 font-medium">Liq</th>
+              <th
+                className="text-right px-2 font-medium"
+                title="Market cap as the listing source publishes it. On a token minutes old it is what separates a curve nobody is buying from one people are."
+              >
+                MCap
+              </th>
               <th className="text-right px-2 font-medium">Price</th>
               <th className="text-right px-2 font-medium" title="Holder count as published. On a token this young it is mostly a measure of age.">
                 Holders
@@ -390,6 +513,18 @@ export default function LaunchesPage() {
                               would not be. */}
                           {l.symbol || <span className="faint" title="the mint has no metadata yet">{l.mint.slice(0, 6)}…</span>}
                         </span>
+                        {/* The one finding no per-token view can produce, because
+                            the evidence is in the neighbours. Two mints with the
+                            same name seconds apart is the impersonation play, and
+                            each one alone looks unremarkable. */}
+                        {l.twins && l.twins.length > 0 && (
+                          <span
+                            className="chip chip-warn text-[9px]"
+                            title={`${l.twins.length} other mint${l.twins.length === 1 ? "" : "s"} in this feed launched under the same name or symbol:\n${l.twins.join("\n")}\n\nSometimes coincidence, sometimes a copy riding the original's search traffic.`}
+                          >
+                            ×{l.twins.length + 1} SAME NAME
+                          </span>
+                        )}
                       </Link>
                     </td>
                     <td className="px-2">
@@ -411,6 +546,13 @@ export default function LaunchesPage() {
                         <span className="faint" title="the source has not priced this pool yet">—</span>
                       ) : (
                         fmtUsd(l.liquidityUsd)
+                      )}
+                    </td>
+                    <td className="text-right px-2 dim">
+                      {l.marketCapUsd === undefined ? (
+                        <span className="faint" title="the source has not published a market cap for this mint yet">—</span>
+                      ) : (
+                        fmtUsd(l.marketCapUsd)
                       )}
                     </td>
                     <td className="text-right px-2">
@@ -447,13 +589,13 @@ export default function LaunchesPage() {
                   </tr>
                   {expanded && (
                     <tr>
-                      <td colSpan={10} className="px-3 pb-3 pt-1">
+                      <td colSpan={11} className="px-3 pb-3 pt-1">
                         <div className="text-[11px] flex flex-col gap-1">
                           <div className="dim pb-1">{triageHeadline(l.triage)}</div>
                           {l.triage.checks.map((c) => (
                             <div key={c.key} className="flex gap-2 items-start">
-                              <span className={`${CHECK_CLASS[c.state]} w-[11px] text-center shrink-0`}>
-                                {CHECK_GLYPH[c.state]}
+                              <span className={`${glyphOf(c).cls} w-[11px] text-center shrink-0`}>
+                                {glyphOf(c).glyph}
                               </span>
                               <span className="w-[150px] shrink-0 dim" style={{ fontFamily: "var(--font-sans)" }}>
                                 {c.name}

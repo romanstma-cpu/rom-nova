@@ -146,10 +146,20 @@ export interface NewPool {
   pairName: string;
   dex: string;
   createdAt: number;
-  priceUsd: number;
-  liquidityUsd: number;
-  buys5m: number;
-  sells5m: number;
+  /**
+   * OPTIONAL, and that is the whole point of not reusing `num()` here.
+   *
+   * `num()` coerces a missing field to 0, which is right for `fromPools` — its
+   * snapshots declare an unmeasured set that covers the lie. Nothing covers it
+   * on this path: a pool GeckoTerminal has not priced yet would reach the launch
+   * feed as `$0` liquidity and `0/0` trades, which reads as a dead pool rather
+   * than an unmeasured one, and would sail through a "min liquidity" filter as
+   * genuinely worthless. Undefined renders as a dash.
+   */
+  priceUsd?: number;
+  liquidityUsd?: number;
+  buys5m?: number;
+  sells5m?: number;
 }
 
 /**
@@ -165,6 +175,18 @@ export const GRADUATION_DEXES = /^(pumpswap|raydium|meteora|orca|whirlpool|lifin
 const num = (v: unknown): number => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+};
+
+/**
+ * The same parse, without the zero.
+ *
+ * For callers that have no `unmeasured` set to declare the absence into, so a
+ * defaulted zero would be an unlabelled measurement rather than a covered one.
+ */
+const numOrNone = (v: unknown): number | undefined => {
+  if (v === undefined || v === null || v === "") return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
 };
 
 /** GeckoTerminal ids look like "solana_<address>". */
@@ -323,10 +345,10 @@ export class GeckoTerminalTokenProvider implements TokenDataProvider {
         pairName: a.name ?? "",
         dex: row.relationships?.dex?.data?.id ?? "",
         createdAt: created,
-        priceUsd: num(a.base_token_price_usd),
-        liquidityUsd: num(a.reserve_in_usd),
-        buys5m: m5.buys ?? 0,
-        sells5m: m5.sells ?? 0,
+        priceUsd: numOrNone(a.base_token_price_usd),
+        liquidityUsd: numOrNone(a.reserve_in_usd),
+        buys5m: m5.buys,
+        sells5m: m5.sells,
       });
     }
     return out;

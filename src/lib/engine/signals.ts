@@ -347,6 +347,43 @@ export const RISK_FACTORS: FactorDef[] = [
   },
 ];
 
+/**
+ * The risk factors that answer "who holds this, and who made it".
+ *
+ * A subset rather than the whole list, because the abstention gate has to be
+ * able to name a FAMILY. Counting all risk factors was tried and broke: adding
+ * the three authority checks took the list from eight to eleven, so a token
+ * whose cap table, insiders, bundlers and dev holdings were ALL unknown still
+ * cleared "more than half assessable" on the authorities alone, and rendered
+ * EXTREME POSITIVE. A ratio taken over a list that changes length is not a
+ * threshold.
+ *
+ * The authorities are deliberately NOT in here. "Nobody can inflate the supply"
+ * is not evidence about who is already holding it, and the two must not
+ * substitute for one another.
+ *
+ * `lp_lock` is also out: it is about whether the pool can be withdrawn, which is
+ * a liquidity question rather than a distribution one, and it has its own factor
+ * and its own veto path.
+ *
+ * AND SO ARE THE TWO NOBODY CAN ANSWER. `bundler_sniper` and `dev_selling` are
+ * distribution questions, and they are missing from this list on purpose: no
+ * source in this stack publishes either, at any price we pay. Counting a
+ * permanently-blind factor in a threshold is what broke the original
+ * `unmeasuredRisks >= 2` rule — every token started one gap down, so any second
+ * gap abstained and the verdict stopped meaning anything.
+ *
+ * Measured on twelve live trending mints with the six-key version: eight
+ * abstained. The gate has to count what is KNOWABLE, or it drifts straight back
+ * to the constant it replaced.
+ */
+export const SUPPLY_RISK_KEYS = [
+  "concentration_risk",
+  "insider_risk",
+  "dev_risk",
+  "deployer_history",
+] as const;
+
 // ---------------------------------------------------------------- profiles
 
 export interface StrategyProfile {
@@ -691,6 +728,8 @@ export function scoreFeatures(
   let unmeasuredWeight = 0;
   /** Risk factors that could not be assessed at all. */
   let unmeasuredRisks = 0;
+  /** Which of the SUPPLY_RISK_KEYS specifically went unread, for the named gate. */
+  const supplyBlind: string[] = [];
   for (const def of FACTORS) {
     const weight = profile.weights[def.key] ?? 0;
     const absW = Math.abs(weight);
@@ -740,6 +779,7 @@ export function scoreFeatures(
     // against confidence below.
     if (!measured(def, f)) {
       unmeasuredRisks++;
+      if ((SUPPLY_RISK_KEYS as readonly string[]).includes(def.key)) supplyBlind.push(def.key);
       factors.push({
         key: def.key,
         name: def.name,
@@ -816,17 +856,33 @@ export function scoreFeatures(
   if ((f.unmeasured ?? []).includes("authorities")) {
     noTrade = "the mint and freeze authorities could not be read — the two facts most likely to take a position to zero are unknown";
   }
-  // Then the SHARE of the risk model that could be assessed, not a raw count.
+  // Then whether anyone could see WHO HOLDS THE SUPPLY.
   //
-  // `unmeasuredRisks >= 2` was the old rule and it stopped meaning anything:
-  // Jupiter never publishes bundlerPct or sniperPct, so that factor is always
-  // unmeasured, and a second gap took every token to NO TRADE. Five of six
-  // mints in review abstained through it, which is a verdict carrying no
-  // information. The share scales with the eight risk factors there are now,
-  // and — critically — the two that were making it fire constantly are no
-  // longer the only ones: the authorities and the LP lock ARE measured.
-  else if (RISK_FACTORS.length - unmeasuredRisks < RISK_FACTORS.length / 2) {
-    noTrade = `only ${RISK_FACTORS.length - unmeasuredRisks} of ${RISK_FACTORS.length} risk factors could be assessed from this data source`;
+  // This gate has now been wrong in both directions, and the second failure is
+  // the instructive one.
+  //
+  // It began as `unmeasuredRisks >= 2`, which stopped meaning anything: Jupiter
+  // never publishes bundlerPct or sniperPct, so one factor was permanently
+  // unmeasured and any second gap abstained. Five of six mints in review
+  // abstained through it — a verdict carrying no information.
+  //
+  // It was replaced with a SHARE of all risk factors, and that broke the moment
+  // the model grew. Adding the three authority checks took the list from eight
+  // to eleven, so a token with its cap table, insiders, bundlers and dev
+  // holdings ALL unknown still cleared "more than half assessable" on the
+  // strength of authorities alone — and scored EXTREME POSITIVE. A ratio over a
+  // list that changes length is not a threshold, it is a moving target.
+  //
+  // So the gate names its family instead of counting. The authorities and the
+  // supply are different questions: "nobody can inflate this" is not evidence
+  // about who is already holding it, and a clean mint account must never buy a
+  // positive verdict on a cap table no one has read.
+  else if (supplyBlind.length > SUPPLY_RISK_KEYS.length - 2) {
+    noTrade =
+      `the authorities are readable but the supply is not — ` +
+      `${supplyBlind.length} of ${SUPPLY_RISK_KEYS.length} distribution risks ` +
+      `(${supplyBlind.join(", ")}) could not be assessed, so who actually holds ` +
+      `this token is unknown`;
   } else if (coverage < 0.6) {
     noTrade = `only ${(coverage * 100).toFixed(0)}% of the model's inputs were available`;
   } else if (confidence < profile.minConfidence) noTrade = `confidence ${(confidence * 100).toFixed(0)}% below the ${profile.name} floor`;

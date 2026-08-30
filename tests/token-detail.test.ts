@@ -279,16 +279,25 @@ describe("auditFactors — the score, fully auditable", () => {
     expect(audit.unmeasuredRisks).toBe(4);
   });
 
-  it("leaves exactly one gap on a simulated token: the LP lock it does not model", () => {
+  it("leaves exactly two gaps on a simulated token: LP lock and deployer history", () => {
     // The simulator authors its own authorities and delegate, so those are
     // measured here. It has no concept of liquidity locking, and inventing a
     // 100% lock would be the most reassuring possible reading of something this
     // universe does not simulate.
+    //
+    // Deployer history joined that list rather than being an oversight: the
+    // synthetic universe gives every token a `devWallet` but never a count of
+    // what else that wallet minted. On live data Jupiter publishes it, and
+    // treating the simulator's silence as "first-time creator" would be the
+    // same reassuring default in a second place.
     const audit = auditFactors(computeSignal(store, demoMint, now)!);
-    expect(audit.rows.filter((r) => !r.measured).map((r) => r.key)).toEqual(["lp_lock"]);
+    expect(audit.rows.filter((r) => !r.measured).map((r) => r.key).sort()).toEqual([
+      "deployer_history",
+      "lp_lock",
+    ]);
     // Coverage weighs the SIGNAL factors only, and none of those is missing.
     expect(audit.coverage).toBe(1);
-    expect(audit.unmeasuredRisks).toBe(1);
+    expect(audit.unmeasuredRisks).toBe(2);
   });
 });
 
@@ -479,7 +488,14 @@ describe("the abstention gate says something a reader can act on", () => {
       "balanced",
     );
     expect(s.label).toBe("NO TRADE");
-    expect(s.noTradeReason).toMatch(/risk factors could be assessed/);
+    // The reason names the FAMILY that went unread, not a fraction of a list.
+    // Counting all risk factors was tried and broke when the list grew: the
+    // three authority checks took it from eight to eleven, and this exact
+    // vector — cap table, insiders, bundlers and dev holdings all unknown —
+    // then cleared "more than half assessable" on the authorities alone and
+    // scored EXTREME POSITIVE.
+    expect(s.noTradeReason).toMatch(/the supply is not/);
+    expect(s.noTradeReason).toMatch(/who actually holds/);
   });
 });
 

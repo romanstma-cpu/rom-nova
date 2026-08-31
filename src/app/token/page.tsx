@@ -245,11 +245,34 @@ function ChartPanel({
     return all.filter((c) => c.t >= cutoff);
   }, [payload, spanMs]);
 
+  // A 7d button over ~115 hourly bars (~4.8d of history) stayed lit and
+  // silently showed less than it promised. The button is an ask; when the
+  // source's history starts inside the window, the shortfall gets a sentence.
+  const shortfallDays = useMemo(() => {
+    const all = payload?.candles ?? [];
+    if (spanMs === 0 || all.length < 2) return null;
+    const covered = all[all.length - 1].t - all[0].t;
+    if (covered >= spanMs) return null;
+    return covered / 86_400_000;
+  }, [payload, spanMs]);
+
   return (
     <div className="panel">
       <div className="flex items-center justify-between px-3 pt-2.5 gap-2 flex-wrap">
         <span className="panel-title">
-          Price{payload?.interval ? <span> · {payload.interval} bars</span> : null}
+          Price
+          {payload?.interval ? (
+            <span> · {payload.interval} bars</span>
+          ) : payload && payload.candles.length > 0 && payload.candles.length < 3 ? (
+            // Too few steps to measure a spacing. Naming the requested bucket
+            // here would caption an ask, not a measurement — so the caption
+            // says what it counted instead of going silently mute.
+            <span>
+              {" "}
+              · {payload.candles.length} bar{payload.candles.length === 1 ? "" : "s"} — too few to
+              measure a granularity
+            </span>
+          ) : null}
         </span>
         <span className="flex items-center gap-2 flex-wrap">
           <span className="flex items-center gap-0.5" role="group" aria-label="bar interval">
@@ -283,7 +306,11 @@ function ChartPanel({
           >
             log
           </button>
-          {payload?.provenance && (
+          {/* A dead chart must not wear a live chip. During a candle failure
+              the previous payload's source and "updated Ns ago" kept rendering
+              beside a body reporting the outage — two adjacent claims about the
+              same panel, one of them false. */}
+          {payload?.provenance && !candles.error && (
             <span
               className={`chip ${payload.provenance.real ? "chip-accent" : "chip-warn"}`}
               title={payload.provenance.note ?? "real market data"}
@@ -291,7 +318,7 @@ function ChartPanel({
               {payload.provenance.real ? payload.provenance.source.toUpperCase() : "SIMULATED"}
             </span>
           )}
-          {freshTs !== undefined && <Freshness ts={freshTs} />}
+          {freshTs !== undefined && !candles.error && <Freshness ts={freshTs} />}
         </span>
       </div>
       <div className="px-2 pb-2">
@@ -302,7 +329,15 @@ function ChartPanel({
           </div>
         ) : payload ? (
           shown.length > 0 ? (
-            <PriceChart candles={shown} markers={markers} height={340} logScale={logScale} />
+            <>
+              <PriceChart candles={shown} markers={markers} height={340} logScale={logScale} />
+              {shortfallDays !== null && (
+                <div className="px-1 pt-1 text-[9.5px] faint">
+                  the source&rsquo;s history covers {shortfallDays.toFixed(1)} days — less than the
+                  window selected
+                </div>
+              )}
+            </>
           ) : (
             <div className="h-[340px] flex items-center justify-center faint text-[11px] px-8 text-center">
               No bars in this range. {payload.provenance?.note ?? "The history source returned nothing."}

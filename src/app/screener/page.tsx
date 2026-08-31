@@ -104,14 +104,17 @@ export default function ScreenerPage() {
         {data && <Freshness ts={data.asOf} />}
       </div>
 
+      {/* Placeholders read "any · e.g. N", not a bare number: a grey "50000"
+          in an empty field looks exactly like an applied filter, and a reader
+          who trusts it is filtering when nothing is set. */}
       <div className="panel p-3 flex items-end gap-3 flex-wrap">
-        {field("Min liquidity $", "minLiq", "50000")}
-        {field("Max mcap $", "maxMcap", "10000000")}
-        {field("Max age (h)", "maxAgeH", "72")}
-        {field("Min signal", "minScore", "60")}
-        {field("Min holders", "minHolders", "500")}
-        {field("Max top10 %", "maxTop10", "30")}
-        {field("Min organic", "minOrganic", "50")}
+        {field("Min liquidity $", "minLiq", "any · e.g. 50000")}
+        {field("Max mcap $", "maxMcap", "any · e.g. 10000000")}
+        {field("Max age (h)", "maxAgeH", "any · e.g. 72")}
+        {field("Min signal", "minScore", "any · e.g. 60")}
+        {field("Min holders", "minHolders", "any · e.g. 500")}
+        {field("Max top10 %", "maxTop10", "any · e.g. 30")}
+        {field("Min organic", "minOrganic", "any · e.g. 50")}
         <label className="flex items-center gap-2 text-[11.5px] dim cursor-pointer pb-1.5">
           <input type="checkbox" checked={f.smartOnly} onChange={() => setF((p) => ({ ...p, smartOnly: !p.smartOnly }))} className="accent-[#38e1ff]" />
           smart money in

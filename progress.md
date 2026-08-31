@@ -41,7 +41,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 
 | # | Stream | Reference to beat | State |
 |---|---|---|---|
-| W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | 🔵 round-3 blind re-review RUNNING against main |
+| W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | 🟢 round 3 FAIL (narrow) · full fail-list closed same hour · round-4 confirm running |
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **PASS** — round 4 confirmed the last defect closed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ⏸ until W1–W3 pass |
@@ -116,6 +116,50 @@ One honest residual it correctly declined to count: with the local clock
 negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
+
+## W1 round 3 — the arithmetic survived its second independent audit
+
+The critic found a trader itself via Jupiter fee payers (184 txs / 51.1h),
+extracted the fills with its own code, rebuilt the FIFO against crypto.com
+hourly bars, and matched Nova figure for figure: movements 141=141, realized
+$83.74 vs $83.70 (the gap is a still-forming final SOL bar), win rate
+65%=65.2%, profit factor 1.85=1.85, the same two unmatched-sell mints. Its
+sentence to keep: GMGN "silently prices transfers at pool price and
+fabricates cost bases" — Nova refuses, and the refusal now reads as the
+feature it is. Four of round 2's five items verified closed live, including
+the Raydium authority refusal by pure curve math.
+
+It failed the round on two findings, both correct:
+
+1. **The token page's flow table never got the wallet filter** — 15 of 39
+   rows on a live token were off-curve pool vaults sided BUY/SELL under a
+   column headed "Wallet". Same defect class round 2 failed, one page from
+   where it was fixed.
+2. **The curve check created its own casualty**: it fired before the account
+   read, and every ATA is off-curve by construction — so a trader's own
+   token account was called "a pool authority, a vault, an escrow" and the
+   purpose-built token-account branch was nearly dead code.
+
+Plus three smaller ones: 44 z's confidently called a PDA (a typo is not a
+PDA), sub-8-digit dust rendering "0", and un-symboled position rows.
+
+### All five closed same hour (`a9b3cfa`)
+
+The wallet filter moved into `summarise()` where the per-owner ledger is
+folded, so every consumer gets it — people counts exclude pool sides, unit
+totals keep the whole ledger (token flow is symmetric; removing one side of
+every swap would change what netflow measures). `classifyAccount` now reads
+first and lets the curve decide only what the read cannot name, with the
+offline PDA refusal kept as the fetch fallback. Undecodable strings are
+"invalid", not PDAs. Dust renders exponential. Symbols come from
+`tokens/v2/search`, which takes a comma-separated batch (probed live: fifty
+symbols, one request, cosmetic-only failure mode). **468 tests, build
+clean.** A round-4 critic is confirming. Report: `W1-ROUND3-REPORT.md`.
+
+The keyless-unfixable list stands unchanged and disclosed: entity labels
+(every keyless source gated or attacker-controllable), lifetime PnL beyond
+the ~2-day archival ceiling, ranked real-PnL leaderboards, 7/30-day
+win-rate windows. Helius or Solscan Pro money buys them; nothing else does.
 
 ## W1 round 2 — reviewed, and the whole fail-list closed same day
 

@@ -241,7 +241,7 @@ async function whatIsThisAddress(address: string): Promise<string | null> {
     if (id.kind === "token-account") {
       return `${id.detail}. A token account is not a mint and not a wallet; the owner named above is the address to look up.`;
     }
-    if (id.kind === "program" || id.kind === "empty") return id.detail;
+    if (id.kind === "program" || id.kind === "empty" || id.kind === "invalid") return id.detail;
     // A real mint that nothing lists is the honest original answer, said better.
     if (id.kind === "mint") {
       return "this IS a token mint, but no source in this stack lists it — no pool, no price, no history. That is an absence of coverage, not a verdict on the token.";

@@ -58,11 +58,14 @@ const stamp = (ts: number): string => (ts > 0 ? new Date(ts).toLocaleString() : 
  * this codebase's one forbidden rendering. Small amounts get enough digits to
  * be non-zero; large ones keep the readable two.
  */
-const fmtTokens = (n: number): string => {
+export const fmtTokens = (n: number): string => {
   const abs = Math.abs(n);
   if (n === 0) return "0";
   if (abs >= 1) return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
   if (abs >= 0.001) return n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+  // Below what eight fraction digits can show, exponential — a real 5.2e-9
+  // balance rounded to "0" at this tier, the same forbidden zero one tier up.
+  if (abs < 1e-8) return n.toExponential(2);
   return n.toLocaleString(undefined, { maximumFractionDigits: 8 });
 };
 

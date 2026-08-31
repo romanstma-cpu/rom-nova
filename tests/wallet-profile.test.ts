@@ -394,3 +394,16 @@ describe("assembleProfile — what reaches the screen", () => {
     expect(p.positions.find((x) => x.mint === A)?.tokens).toBeCloseTo(100, 9);
   });
 });
+
+// The display tier below what eight fraction digits can show. A real 5.2e-9
+// balance rendered "0" — the same forbidden zero the 0.0016 cbBTC fix cured
+// one tier up, surviving for true dust.
+describe("fmtTokens below the eight-digit floor", () => {
+  it("renders dust as exponential rather than zero", async () => {
+    const { fmtTokens } = await import("@/components/wallet/RealWalletProfile");
+    expect(fmtTokens(5.2e-9)).toBe("5.20e-9");
+    expect(fmtTokens(-5.2e-9)).toBe("-5.20e-9");
+    expect(fmtTokens(0)).toBe("0");
+    expect(fmtTokens(0.0016)).not.toBe("0");
+  });
+});

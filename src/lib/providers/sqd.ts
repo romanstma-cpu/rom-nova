@@ -42,6 +42,7 @@
 //    conversions to a caller that has them.
 
 import type { TokenFlow, TokenFlowProvider } from "./types";
+import { KNOWN_ADDRESSES, isOnCurve } from "./account-kind";
 
 const PORTAL = "https://portal.sqd.dev/datasets/solana-mainnet";
 
@@ -114,25 +115,41 @@ export function foldBalance(
   return "counted";
 }
 
-/** Turns the per-owner ledger into the shape a feature vector wants. */
+/**
+ * Turns the per-owner ledger into the shape a feature vector wants.
+ *
+ * Two populations, deliberately split. `inflowUnits`/`outflowUnits`/`netUnits`
+ * describe ALL movement — the full ledger, pool sides included, because token
+ * flow is symmetric and removing one side of every swap would change what the
+ * engine's netflow features measure. `wallets`/`buyers`/`sellers`/`largest`
+ * claim PEOPLE, and pool vaults are not people: the round-3 review found 15 of
+ * 39 rows on a live token's flow table were off-curve pool vaults sided
+ * BUY/SELL under a column headed "Wallet" — the pool side of a swap moves size
+ * by definition, and counting it as a buyer double-counts every trade.
+ */
 export function summarise(
   byOwner: Map<string, bigint>,
   topMovers: number,
+  // Injectable so the suite can use readable synthetic owners; the default is
+  // the same verdict the movers list and Buyers tooltips already apply.
+  isWalletOwner: (owner: string) => boolean = (o) => !KNOWN_ADDRESSES[o] && isOnCurve(o),
 ): Pick<TokenFlow, "wallets" | "netUnits" | "inflowUnits" | "outflowUnits" | "buyers" | "sellers" | "largest"> {
   let inflow = ZERO;
   let outflow = ZERO;
   let buyers = 0;
   let sellers = 0;
-  for (const delta of byOwner.values()) {
-    if (delta > ZERO) {
-      inflow += delta;
-      buyers++;
-    } else if (delta < ZERO) {
-      outflow += -delta;
-      sellers++;
-    }
+  let wallets = 0;
+  const walletLedger: [string, bigint][] = [];
+  for (const [owner, delta] of byOwner.entries()) {
+    if (delta > ZERO) inflow += delta;
+    else if (delta < ZERO) outflow += -delta;
+    if (!isWalletOwner(owner)) continue;
+    wallets++;
+    if (delta > ZERO) buyers++;
+    else if (delta < ZERO) sellers++;
+    walletLedger.push([owner, delta]);
   }
-  const largest = [...byOwner.entries()]
+  const largest = walletLedger
     .sort((a, b) => (a[1] > b[1] ? -1 : a[1] < b[1] ? 1 : 0))
     .filter(([, d]) => d !== ZERO);
   // Biggest accumulation and biggest distribution both matter; taking only the
@@ -149,7 +166,7 @@ export function summarise(
   }
 
   return {
-    wallets: byOwner.size,
+    wallets,
     netUnits: (inflow - outflow).toString(),
     inflowUnits: inflow.toString(),
     outflowUnits: outflow.toString(),

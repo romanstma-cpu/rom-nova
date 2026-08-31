@@ -54,6 +54,8 @@ export interface WalletHoldingsProvider {
   } | null>;
   /** USD prices for as many of these mints as the budget reaches, in order. */
   priceMints(mints: string[]): Promise<Map<string, number>>;
+  /** Symbols for these mints. Cosmetic — a failure must cost an address on screen, never a row. */
+  symbolsFor?(mints: string[]): Promise<Map<string, string>>;
 }
 
 export interface SecurityDataProvider {
@@ -109,14 +111,19 @@ export interface TokenFlow {
    * measured at 75% on wSOL and 93% on a trending memecoin.
    */
   touchedNotMoved: number;
-  /** Distinct owners with any net change. */
+  /**
+   * Distinct PERSON-HOLDABLE owners with any change — pool vaults, program
+   * authorities and the burn address are excluded, the same verdict the movers
+   * list applies. `buyers`/`sellers`/`largest` follow the same rule.
+   */
   wallets: number;
+  /** ALL movement, pool sides included — the units describe the token, not people. */
   netUnits: string;
   inflowUnits: string;
   outflowUnits: string;
   buyers: number;
   sellers: number;
-  /** Biggest accumulators and distributors — whale candidates. */
+  /** Biggest accumulators and distributors — whale candidates. People only. */
   largest: { owner: string; deltaUnits: string }[];
 }
 

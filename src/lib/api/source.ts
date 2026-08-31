@@ -559,16 +559,18 @@ async function buildWalletProfile(
   // The SOL price comes with them: native SOL is not a token account, so it was
   // missing from the portfolio total entirely — a 52% understatement on a
   // wallet holding 1.66M SOL.
-  const [prices, solRef] = await Promise.all([
+  const [prices, solRef, symbols] = await Promise.all([
     providers.holdings
       ? providers.holdings.priceMints(traded).catch(() => new Map<string, number>())
       : Promise.resolve(new Map<string, number>()),
     getSolReference().catch(() => null),
+    // Symbols are cosmetic and must never gate a figure, so one failed lookup
+    // is an address on screen instead of a missing row. `traded` is already in
+    // priority order — the mints the wallet actually traded before its dust —
+    // so the one-request cap drops the right end.
+    providers.holdings?.symbolsFor?.(traded).catch(() => new Map<string, string>()) ??
+      Promise.resolve(new Map<string, string>()),
   ]);
-
-  // Symbols are cosmetic and must never gate a figure, so one failed lookup is
-  // an address on screen instead of a missing row.
-  const symbols = new Map<string, string>();
   const profile = assembleProfile({
     address,
     fills: activity?.fills ?? [],

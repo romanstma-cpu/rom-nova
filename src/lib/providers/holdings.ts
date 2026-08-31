@@ -24,6 +24,9 @@ import { providerFetch } from "./http";
 
 const HOLDINGS_URL = "https://lite-api.jup.ag/ultra/v1/holdings";
 const PRICE_URL = "https://lite-api.jup.ag/price/v3";
+const SEARCH_URL = "https://lite-api.jup.ag/tokens/v2/search";
+/** One search request's worth. Fifty 44-char mints keep the URL under 3KB. */
+export const MAX_SYMBOL_MINTS = 50;
 
 /**
  * Mints per price request.
@@ -122,6 +125,37 @@ export class JupiterHoldingsProvider {
         // A failed batch leaves those mints unpriced, which the caller reports
         // as unpriced. Retrying here would turn one slow wallet into a stall.
       }
+    }
+    return out;
+  }
+
+  /**
+   * Symbols for these mints, one request, best effort.
+   *
+   * The price endpoint carries no symbols, so the wallet page rendered every
+   * position as a truncated mint — "BvsA…pump" for a token Jupiter itself
+   * lists as USELESSV2. `tokens/v2/search` accepts a comma-separated batch
+   * (probed live: two mints in, two rows out), so fifty symbols cost one
+   * request. Cosmetic and must never gate a figure: any failure is an address
+   * on screen, not a missing row.
+   */
+  async symbolsFor(mints: string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    const wanted = [...new Set(mints)].slice(0, MAX_SYMBOL_MINTS);
+    if (wanted.length === 0) return out;
+    try {
+      const body = await providerFetch<{ id?: string; symbol?: string }[]>(
+        "jupiter",
+        `${SEARCH_URL}?query=${wanted.join(",")}`,
+        { timeoutMs: 8_000 },
+      );
+      for (const row of body ?? []) {
+        if (typeof row?.id === "string" && typeof row?.symbol === "string" && row.symbol) {
+          out.set(row.id, row.symbol);
+        }
+      }
+    } catch {
+      // An empty map, by design.
     }
     return out;
   }

@@ -46,6 +46,13 @@ export type AccountKind =
   | "program-owned"
   /** Nothing at this address. Valid key, never funded. */
   | "empty"
+  /**
+   * Not an address at all — the string does not decode to 32 bytes of base58.
+   * Calling this "off the ed25519 curve" (which it was, briefly) dressed a
+   * mangled paste as a chain finding: a PDA is a real address that fails the
+   * curve test, and a typo is not a PDA.
+   */
+  | "invalid"
   /** The lookup itself failed; the address is not disqualified, just unchecked. */
   | "unknown";
 
@@ -200,8 +207,56 @@ export function classifyAccount(
   value: AccountInfoValue | null | undefined,
   address?: string,
 ): AccountIdentity {
-  // The curve verdict outranks the account read: an off-curve address has no
-  // private key BY CONSTRUCTION, whatever the account at it looks like. The
+  // A string that does not decode to 32 bytes is not an address, and saying
+  // anything chain-flavoured about it would be fiction. Forty-four 'z's are
+  // valid base58 characters at a plausible length — the shape of a mangled
+  // paste — and the curve verdict below confidently called that a PDA.
+  const decoded = address !== undefined ? decodeAddress(address) : undefined;
+  if (address !== undefined && decoded === null) {
+    return {
+      kind: "invalid",
+      detail:
+        "not a valid Solana address — base58 that decodes to exactly 32 bytes is required, " +
+        "and this string does not. Check the paste for missing or extra characters",
+      profilable: false,
+    };
+  }
+  // What the account READ says outranks what the curve implies. Every
+  // associated token account is off-curve BY CONSTRUCTION — that is how ATAs
+  // are derived — so a curve check that fires first turns a trader's own
+  // holding into "a pool authority, a vault, an escrow" and makes the
+  // token-account branch below dead code. Round 3 caught exactly that.
+  if (value?.executable) {
+    return {
+      kind: "program",
+      owner: value.owner,
+      detail: "this is an on-chain PROGRAM, not a wallet — it executes code, it does not trade",
+      profilable: false,
+    };
+  }
+  const parsedType = value?.data?.parsed?.type;
+  if (parsedType === "mint") {
+    return {
+      kind: "mint",
+      owner: value?.owner,
+      detail: "this is a TOKEN MINT, not a wallet — the balances under it are the token's own, not a trader's",
+      profilable: false,
+    };
+  }
+  if (parsedType === "account" && (value?.owner === TOKEN_PROGRAM || value?.owner === TOKEN_2022)) {
+    const holder = value?.data?.parsed?.info?.owner;
+    return {
+      kind: "token-account",
+      owner: value?.owner,
+      holder: typeof holder === "string" ? holder : undefined,
+      detail:
+        "this is a TOKEN ACCOUNT — one wallet's holding of one mint" +
+        (typeof holder === "string" ? `, owned by ${holder}` : ""),
+      profilable: false,
+    };
+  }
+  // The curve verdict decides what remains: an off-curve address has no
+  // private key BY CONSTRUCTION, whatever else the account looks like. The
   // Raydium Authority V4 is system-owned with no data — indistinguishable from
   // a wallet by ownership alone — and it profiled as a trader until this check
   // existed.
@@ -231,35 +286,6 @@ export function classifyAccount(
     };
   }
   const owner = value.owner;
-  if (value.executable) {
-    return {
-      kind: "program",
-      owner,
-      detail: "this is an on-chain PROGRAM, not a wallet — it executes code, it does not trade",
-      profilable: false,
-    };
-  }
-  const parsedType = value.data?.parsed?.type;
-  if (parsedType === "mint") {
-    return {
-      kind: "mint",
-      owner,
-      detail: "this is a TOKEN MINT, not a wallet — the balances under it are the token's own, not a trader's",
-      profilable: false,
-    };
-  }
-  if (parsedType === "account" && (owner === TOKEN_PROGRAM || owner === TOKEN_2022)) {
-    const holder = value.data?.parsed?.info?.owner;
-    return {
-      kind: "token-account",
-      owner,
-      holder: typeof holder === "string" ? holder : undefined,
-      detail:
-        "this is a TOKEN ACCOUNT — one wallet's holding of one mint" +
-        (typeof holder === "string" ? `, owned by ${holder}` : ""),
-      profilable: false,
-    };
-  }
   if (owner === SYSTEM_PROGRAM) {
     return { kind: "wallet", owner, detail: "a normal Solana wallet", profilable: true };
   }
@@ -285,13 +311,16 @@ export async function identifyAccount(
   endpoint: string,
   signal?: AbortSignal,
 ): Promise<AccountIdentity> {
-  // Two verdicts need no network at all. A known constant has a fixed meaning,
-  // and an off-curve address is a PDA by definition — both are decided before
-  // spending an RPC call, which also means they still work when the chain is
-  // unreachable.
+  // Two verdicts need no network. A known constant has a fixed meaning, and a
+  // string that does not decode is not an address at all. An OFF-CURVE address
+  // is NOT one of them any more: every associated token account is off-curve
+  // by construction, so short-circuiting to "PDA, a protocol's" here
+  // misdescribed virtually every token account and left the purpose-built
+  // token-account branch (with its link to the owning wallet) nearly dead.
+  // The read decides; the offline PDA verdict survives as the fetch fallback.
   const known = KNOWN_ADDRESSES[address];
   if (known) return known;
-  if (!isOnCurve(address)) return classifyAccount(undefined, address);
+  if (decodeAddress(address) === null) return classifyAccount(undefined, address);
   try {
     const res = await fetch(endpoint, {
       method: "POST",
@@ -312,6 +341,11 @@ export async function identifyAccount(
     if (body.error) throw new Error("rpc error");
     return classifyAccount(body.result?.value, address);
   } catch {
+    // Unknown stays profilable for an on-curve address — a timed-out request
+    // is not evidence. An off-curve one keeps its offline refusal: whatever
+    // the account is, no private key can exist for it, so "treat it as a
+    // wallet" would be the one answer the math already ruled out.
+    if (!isOnCurve(address)) return classifyAccount(undefined, address);
     return {
       kind: "unknown",
       detail: "the account type could not be checked — treating it as a wallet",

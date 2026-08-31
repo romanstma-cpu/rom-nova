@@ -751,7 +751,9 @@ function FlowPanelView({ detail }: { detail: LiveTokenDetail }) {
         <span className="num">{f.movements}</span> balance changes across{" "}
         <span className="num">{f.wallets}</span> wallets ({f.buyers} accumulating, {f.sellers}{" "}
         distributing) · <span className="num">{f.touchedNotMoved}</span> rows were accounts merely
-        touched by a transaction and discarded. Every address below is real and checkable.
+        touched by a transaction and discarded. Pool vaults, program authorities and the burn
+        address are not counted or listed — the pool side of a swap moves size by definition.
+        Every address below is real and checkable.
       </div>
       <div className="max-h-[300px] overflow-y-auto">
         <table className="w-full text-[11.5px]">

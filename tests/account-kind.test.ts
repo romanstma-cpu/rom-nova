@@ -60,6 +60,40 @@ describe("the curve verdict inside classifyAccount", () => {
     expect(id.detail).toMatch(/no private key can exist/i);
   });
 
+  // Round 3: every associated token account is off-curve BY CONSTRUCTION, so
+  // a curve check that fired before the account read called a trader's own
+  // holding "a pool authority, a vault, an escrow" and made the token-account
+  // branch nearly dead code. The read outranks the curve.
+  it("lets the account read outrank the curve for a token account", () => {
+    const id = classifyAccount(
+      {
+        owner: TOKEN_PROGRAM,
+        executable: false,
+        data: { parsed: { type: "account", info: { owner: "EmNnGUq5eeVRhU175SswgkUWiVD3E6gagJKQE6aomqRK" } } },
+      },
+      RAYDIUM_AUTHORITY_V4, // any off-curve address — ATAs all are
+    );
+    expect(id.kind).toBe("token-account");
+    expect(id.holder).toBe("EmNnGUq5eeVRhU175SswgkUWiVD3E6gagJKQE6aomqRK");
+    expect(id.detail).not.toMatch(/pool authority/i);
+  });
+
+  // Round 3 again: forty-four 'z's are valid base58 characters at a plausible
+  // length — a mangled paste — and the page confidently called that "off the
+  // ed25519 curve". A typo is not a PDA; it is not an address at all.
+  it("calls an undecodable string invalid, not a PDA", () => {
+    const id = classifyAccount(undefined, "z".repeat(44));
+    expect(id.kind).toBe("invalid");
+    expect(id.profilable).toBe(false);
+    expect(id.detail).toMatch(/not a valid Solana address/i);
+    expect(id.detail).not.toMatch(/ed25519/);
+  });
+
+  it("still decodes nothing from 44 z's", () => {
+    // 58^44 exceeds 2^256, so the all-z string carries more than 32 bytes.
+    expect(decodeAddress("z".repeat(44))).toBeNull();
+  });
+
   it("still accepts a system-owned account at an on-curve address", () => {
     const id = classifyAccount({ owner: SYSTEM, executable: false }, REAL_KEYPAIRS[0]);
     expect(id.kind).toBe("wallet");

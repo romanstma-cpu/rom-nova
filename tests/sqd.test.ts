@@ -69,13 +69,17 @@ describe("foldBalance — only real movement counts", () => {
 });
 
 describe("summarise", () => {
+  // Synthetic names are not valid addresses, so these pass an explicit
+  // everyone-is-a-wallet predicate; the production default (curve + known
+  // addresses) has its own test below with real ones.
+  const anyOwner = () => true;
   const built = () => {
     const m = ledger();
     m.set("buyerBig", BigInt(1000));
     m.set("buyerSmall", BigInt(10));
     m.set("sellerBig", BigInt(-800));
     m.set("flat", BigInt(0));
-    return summarise(m, 2);
+    return summarise(m, 2, anyOwner);
   };
 
   it("splits buyers from sellers", () => {
@@ -102,7 +106,7 @@ describe("summarise", () => {
   it("does not list a wallet twice when the ranges overlap", () => {
     const m = ledger();
     m.set("only", BigInt(5));
-    const s = summarise(m, 5);
+    const s = summarise(m, 5, anyOwner);
     expect(s.largest).toHaveLength(1);
   });
 
@@ -110,6 +114,29 @@ describe("summarise", () => {
     const s = built();
     expect(s.wallets).toBe(4);
     expect(s.buyers + s.sellers).toBe(3);
+  });
+
+  // Round 3: 15 of 39 rows on a live token's flow table were off-curve pool
+  // vaults sided BUY/SELL under a column headed "Wallet", and the burn address
+  // would have passed through too. People counts exclude them; the unit
+  // totals keep the whole ledger, because token flow is symmetric and
+  // removing one side of every swap would change what netflow measures.
+  it("excludes pool authorities and the burn address from the people counts, not the units", () => {
+    const RAYDIUM_AUTHORITY_V4 = "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1"; // off-curve
+    const TRADER = "AN47o2eFxxMakqU1SNjLCE4YCPwoDJ83tzumk8Ec2wQ7"; // real keypair
+    const BURN = "1nc1nerator11111111111111111111111111111111";
+    const m = ledger();
+    m.set(RAYDIUM_AUTHORITY_V4, BigInt(-800));
+    m.set(TRADER, BigInt(800));
+    m.set(BURN, BigInt(50));
+    const s = summarise(m, 5); // the production default predicate
+    expect(s.wallets).toBe(1);
+    expect(s.buyers).toBe(1);
+    expect(s.sellers).toBe(0);
+    expect(s.largest.map((l) => l.owner)).toEqual([TRADER]);
+    expect(s.inflowUnits).toBe("850");
+    expect(s.outflowUnits).toBe("800");
+    expect(s.netUnits).toBe("50");
   });
 });
 

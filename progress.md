@@ -41,12 +41,34 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 
 | # | Stream | Reference to beat | State |
 |---|---|---|---|
-| W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | 🟢 round 2 reviewed · full fail-list closed |
-| W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **both defects verified closed** — one exposed follow-up, fixed |
+| W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | 🔵 round-3 blind re-review RUNNING against main |
+| W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | 🔵 confirmation pass RUNNING — gradSeenAt fix under blind review |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ⏸ until W1–W3 pass |
 | W5 | Alerts that actually fire | Cielo alerts, Photon alerts | ⏸ until W1–W3 pass |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
+
+## Round 3 dispatched — both confirmation critics in flight (2026-08-31)
+
+Two blind critics are running in parallel against main (`388ee22` + the
+gradSeenAt fix), each in its own worktree on its own port so neither can
+review the other's build by accident:
+
+- **W1 round 3** (port 4611): re-verify the five failed items live — the
+  Raydium Authority V4 refused as a PDA, no pools or burn address in
+  movers/Buyers, honest burn-address copy, 0.0016 cbBTC rendering, the
+  provenance line — plus an independent re-derivation of one wallet's PnL
+  from raw chain data to prove no regression in the arithmetic.
+- **W2 confirmation** (port 4622): the one unreviewed fix — promoted rows
+  fabricated negative graduation lags (−90.2s, −158.8s) before gradSeenAt.
+  The critic watches live for a bonding→graduated promotion and checks the
+  displayed lag is small and positive, falling back to source + tests +
+  a synthetic merge-driver if no token graduates during the watch.
+
+Both were killed once mid-run by a session rate limit and resumed with
+context intact when it reset. On a double PASS: ship **1.6.0** (main is
+ahead of the deployed 1.5.0 by the on-curve/movers work and gradSeenAt),
+then unlock W4 and W5.
 
 ## W1 round 2 — reviewed, and the whole fail-list closed same day
 

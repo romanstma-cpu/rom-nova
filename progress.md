@@ -44,7 +44,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 | W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | ✅ **PASS** — round 4 confirmed all five defects closed, no regressions |
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **PASS** — round 4 confirmed the last defect closed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
-| W4 | UI/UX + performance craft | Axiom & Photon density and latency | 🔵 UNLOCKED — builder running (cold load, chart granularity, density) |
+| W4 | UI/UX + performance craft | Axiom & Photon density and latency | 🔵 built (`w4/ui-craft` @ d33711f, 485 tests) — round-1 blind critic running |
 | W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🔵 built (`w5/alerts` @ dd9b5e3, 503 tests) — round-1 blind critic running |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
 
@@ -116,6 +116,27 @@ One honest residual it correctly declined to count: with the local clock
 negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
+
+## W4 built — the chart got fast by measuring, not by claiming (2026-08-31)
+
+Branch `w4/ui-craft` (d33711f, five commits, 485/485 tests, tsc clean),
+now under blind review. The headline, DOM-sentinel-timed on the static
+build: **token-page first chart canvas 5.4s → 0.49–1.26s** — candles
+hoisted parallel to detail and served from datapi's sub-hour buckets,
+probed live before any claim (1m/5m/15m all answer keylessly; the
+ms-vs-seconds trap re-confirmed on the way).
+
+The honest part: the chart caption states the interval **measured from
+median bar spacing, never echoed from the request** — which exposed that
+the old "hourly" caption was already false whenever the fallback served
+4h bars. Finer-bar failures degrade to hourly with the reason in the
+provenance note; a real GeckoTerminal throttle during the build exercised
+that path live. Also: skeletons that shimmer bars and never digits, the
+missing `.hint` CSS class four pages referenced, `/`-to-palette with
+selection that scrolls into view, sticky headers on radar/screener.
+Rejected with measurements in the notes: hoisting the hourly fetch (would
+have pushed the verdict header toward ~4.5s), 1s buckets (a liveness
+claim a 10s poll can't keep).
 
 ## W5 built — alerts that admit what they didn't see (2026-08-31)
 

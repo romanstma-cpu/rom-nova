@@ -44,7 +44,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 | W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | ✅ **PASS** — round 4 confirmed all five defects closed, no regressions |
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **PASS** — round 4 confirmed the last defect closed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
-| W4 | UI/UX + performance craft | Axiom & Photon density and latency | 🔵 built (`w4/ui-craft` @ d33711f, 485 tests) — round-1 blind critic running |
+| W4 | UI/UX + performance craft | Axiom & Photon density and latency | ✅ **PASS round 1** — merged to main, post-PASS list closed same hour |
 | W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🔵 built (`w5/alerts` @ dd9b5e3, 503 tests) — round-1 blind critic running |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
 
@@ -116,6 +116,30 @@ One honest residual it correctly declined to count: with the local clock
 negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
+
+## ✅ W4 round 1: PASS — the first stream to clear on its first review
+
+The critic re-measured everything itself and could not break it: first
+canvas with real 15m bars at 477/609/548ms cold (three runs, DOM
+sentinels), skeleton DOM containing zero fabricated digits, every
+interval's bar spacing payload-verified (1m = exactly 60s deltas ×360,
+1h = exactly 3600s ×115), CLS 0.000 on the token page, and under a forced
+total vendor outage the chart refused simulated bars for a real mint with
+the full reason chain. It even confirmed the launch feed caught this
+machine's slow clock. Regression sweep clean: Raydium authority still
+refused, all 20 live flow movers pass the curve filter.
+
+**Merged to main (`c6439b1`), and its five fixable notes closed same hour
+(`ef9ae58`)**: a dead chart no longer wears the previous payload's live
+chip; a two-bar chart says "too few to measure a granularity" instead of
+going mute; watchlists banner their simulation at panel level; screener
+placeholders read "any · e.g. 50000" so an empty field stops looking
+filtered; an over-asking window button gets a shortfall sentence. One nit
+stays open honestly: identical change figures across windows on a token
+younger than the windows needs an age source the detail payload does not
+carry. The reference gap that remains is structural: Axiom/Photon lead
+with 1s/15s bars off streaming servers; Nova's floor is 1m because a 1s
+tape on a 10s poll would be a liveness claim the poll cannot keep.
 
 ## W4 built — the chart got fast by measuring, not by claiming (2026-08-31)
 

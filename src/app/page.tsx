@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useApi, useEventStream, fmtUsd, fmtPct, fmtNum, fmtAge, whaleFlowCell } from "@/lib/client";
-import { Score, Stat, TokenMark } from "@/components/ui/bits";
+import { Score, Skel, SkeletonRows, Stat, TokenMark } from "@/components/ui/bits";
 import { FirstRun } from "@/components/FirstRun";
 import { ActivityFeed } from "@/components/feed/ActivityFeed";
 import { FlowChart } from "@/components/charts/FlowChart";
@@ -127,9 +127,30 @@ export default function Dashboard() {
                 <div className="text-[11px] faint mt-0.5 leading-snug line-clamp-1">▽ {s.bearCase[0]}</div>
               </Link>
             ))}
-            {conviction.length === 0 && (
+            {/* Before the first signals payload: card-shaped shimmer, so the
+                column holds its width and the eventual cards land in place. */}
+            {!sigData &&
+              Array.from({ length: 4 }, (_, i) => (
+                <div key={i} className="px-3 py-2.5 border-b border-[rgba(27,35,51,0.5)]">
+                  <div className="flex items-center gap-2">
+                    <Skel w={20} h={20} round />
+                    <Skel w={56} />
+                    <span className="ml-auto">
+                      <Skel w={64} h={14} />
+                    </span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between">
+                    <Skel w={100} h={6} />
+                    <Skel w={44} />
+                  </div>
+                  <div className="mt-2">
+                    <Skel w={190} h={8} />
+                  </div>
+                </div>
+              ))}
+            {sigData && conviction.length === 0 && (
               <div className="px-3 py-8 text-center faint text-[11px]">
-                {sigData ? "No setup clears the conviction bar right now — NO TRADE is a valid answer." : "ANALYZING TOKENS…"}
+                No setup clears the conviction bar right now — NO TRADE is a valid answer.
               </div>
             )}
           </div>
@@ -196,6 +217,11 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody className="num">
+              {/* Live rows take ~5s to assemble on a cold load (trending +
+                  rugcheck + chain flow, measured); an empty tbody for that long
+                  reads as broken and lets everything below jump up when rows
+                  land. Shimmer rows hold the space — bars, never numbers. */}
+              {!rowData && <SkeletonRows rows={8} widths={["label", 58, 44, 48, 52, 72]} />}
               {(rowData?.rows ?? []).slice(0, 8).map((r) => (
                 <tr key={r.mint} className="trow">
                   <td className="px-3 py-1.5">

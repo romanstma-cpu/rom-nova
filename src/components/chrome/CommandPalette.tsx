@@ -34,11 +34,21 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const [results, setResults] = useState<SearchResult>(EMPTY);
   const [selRaw, setSelRaw] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const t = setTimeout(() => inputRef.current?.focus(), 30);
     return () => clearTimeout(t);
   }, []);
+
+  // Keep the selection on screen. Twelve rows overflow the 46vh list, and an
+  // arrow-key selection that walks below the fold was invisible — the reader
+  // pressed Enter on a row they could not see.
+  useEffect(() => {
+    listRef.current
+      ?.querySelector("[data-selected=true]")
+      ?.scrollIntoView({ block: "nearest" });
+  }, [selRaw, results, q]);
 
   useEffect(() => {
     if (!q.trim()) return;
@@ -102,17 +112,28 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           }}
           onKeyDown={(e) => {
             if (e.key === "Escape") onClose();
-            if (e.key === "ArrowDown") setSelRaw(Math.min(items.length - 1, sel + 1));
-            if (e.key === "ArrowUp") setSelRaw(Math.max(0, sel - 1));
+            // Tab walks the list like ArrowDown so the palette never tabs the
+            // focus out of itself onto the page underneath.
+            if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) {
+              e.preventDefault();
+              setSelRaw(Math.min(items.length - 1, sel + 1));
+            }
+            if (e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey)) {
+              e.preventDefault();
+              setSelRaw(Math.max(0, sel - 1));
+            }
+            if (e.key === "Home" && !q) setSelRaw(0);
+            if (e.key === "End" && !q) setSelRaw(Math.max(0, items.length - 1));
             if (e.key === "Enter" && items[sel]) go(items[sel].href);
           }}
           placeholder="Search tokens, wallets, or type a command…"
           className="w-full bg-transparent px-4 py-3 text-[14px] outline-none border-b border-[var(--border)]"
         />
-        <div className="max-h-[46vh] overflow-y-auto py-1">
+        <div ref={listRef} className="max-h-[46vh] overflow-y-auto py-1">
           {items.map((it, i) => (
             <button
               key={it.key}
+              data-selected={i === sel || undefined}
               onMouseEnter={() => setSelRaw(i)}
               onClick={() => go(it.href)}
               className={`w-full text-left px-4 py-2 flex items-center justify-between gap-3 text-[13px] ${
@@ -130,7 +151,29 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           ))}
           {items.length === 0 && <div className="px-4 py-6 text-center faint text-[12px]">Nothing matches.</div>}
         </div>
+        <div className="flex items-center gap-3 px-4 py-1.5 border-t border-[var(--border)] text-[10px] faint">
+          <span>
+            <Kbd>↑↓</Kbd> navigate
+          </span>
+          <span>
+            <Kbd>↵</Kbd> open
+          </span>
+          <span>
+            <Kbd>esc</Kbd> close
+          </span>
+          <span className="ml-auto">
+            <Kbd>/</Kbd> or <Kbd>⌘K</Kbd> from anywhere
+          </span>
+        </div>
       </div>
     </div>
+  );
+}
+
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="inline-block text-[9.5px] border border-[var(--border-hi)] rounded px-1 py-px bg-[rgba(20,28,44,0.8)] num">
+      {children}
+    </kbd>
   );
 }

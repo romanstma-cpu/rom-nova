@@ -150,11 +150,17 @@ export function PriceChart({
     // setMarkers rather than a fresh primitive per update: the old call left
     // every previous batch attached, so a re-poll stacked duplicate arrows on
     // the same bars and an empty batch never cleared the last one.
+    //
+    // Snapped to the newest BAR at or before the timestamp, not to the top of
+    // the hour: this chart plots minute buckets now, and the old
+    // `floor(ts / 1h)` put an arrow up to 59 minutes left of the trade it
+    // described — an invisible marker on an hourly tape, a wrong one on a
+    // minute tape.
     markerRef.current?.setMarkers(
       [...markers]
         .sort((a, b) => a.ts - b.ts)
         .map((m) => ({
-          time: (Math.floor(m.ts / 3600_000) * 3600) as UTCTimestamp,
+          time: (barAtOrBefore(candles, m.ts) / 1000) as UTCTimestamp,
           position: m.kind.includes("sell") ? ("aboveBar" as const) : ("belowBar" as const),
           color: m.kind === "signal" ? "#38e1ff" : m.kind.includes("sell") ? "#ff4d6d" : "#2ee6a8",
           shape: m.kind === "signal" ? ("circle" as const) : m.kind.includes("sell") ? ("arrowDown" as const) : ("arrowUp" as const),
@@ -168,7 +174,11 @@ export function PriceChart({
   useEffect(() => {
     if (!seriesRef.current || !livePrice || candles.length === 0) return;
     const last = candles[candles.length - 1];
-    const barStart = Math.floor(livePrice.ts / 3600_000) * 3600_000;
+    // The tape's own grid, not the wall clock's hour grid — with minute bars a
+    // tick after :00 must extend the current bar, not invent an hourly one.
+    const span = barSpan(candles);
+    const steps = Math.max(0, Math.floor((livePrice.ts - last.t) / span));
+    const barStart = last.t + steps * span;
     const base = barStart === last.t ? last : { t: barStart, o: last.c, h: last.c, l: last.c, c: last.c, v: 0 };
     seriesRef.current.update({
       time: (base.t / 1000) as UTCTimestamp,
@@ -217,6 +227,27 @@ function ChartReadout({ bar, last }: { bar: Readout | null; last: Candle | undef
       </span>
     </div>
   );
+}
+
+/** The tape's bar width, measured from its last step — the only place the
+ *  interval is known for certain. Hourly when there is nothing to measure. */
+function barSpan(candles: Candle[]): number {
+  if (candles.length < 2) return 3_600_000;
+  return Math.max(1, candles[candles.length - 1].t - candles[candles.length - 2].t);
+}
+
+/** The newest bar time at or before `ts` — binary search, bars are sorted.
+ *  Clamps to the first bar so an early marker still lands on the plot. */
+function barAtOrBefore(candles: Candle[], ts: number): number {
+  if (candles.length === 0) return ts;
+  let lo = 0;
+  let hi = candles.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (candles[mid].t <= ts) lo = mid;
+    else hi = mid - 1;
+  }
+  return candles[lo].t;
 }
 
 /** Four significant digits, whatever the exponent — meme prices live at 1e-9. */

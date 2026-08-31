@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useApi, fmtUsd, fmtPct, fmtNum, fmtAge, whaleFlowCell } from "@/lib/client";
-import { Score, RiskBadge, TokenMark, Freshness, Empty } from "@/components/ui/bits";
+import { Score, RiskBadge, SkeletonRows, TokenMark, Freshness, Empty } from "@/components/ui/bits";
 import type { TokenRow } from "@/lib/api/rows";
 
 type Quick = "all" | "fresh" | "smart" | "conviction" | "risky";
@@ -51,7 +51,7 @@ export default function TokenRadar() {
   );
 
   return (
-    <div className="p-3 flex flex-col gap-3">
+    <div className="p-3 flex flex-col gap-3 h-full min-h-0">
       <div className="flex items-center gap-2 flex-wrap">
         <h1 className="text-[15px] font-semibold tracking-wide mr-2">MEME COIN RADAR</h1>
         {QUICKS.map((f) => (
@@ -63,9 +63,12 @@ export default function TokenRadar() {
         {data && <Freshness ts={data.asOf} />}
       </div>
 
-      <div className="panel overflow-x-auto">
+      {/* The scanner's scroll pattern: the PANEL scrolls, so three hundred
+          rows keep their column names on screen. Sorting by a header you can
+          no longer read is a guess. */}
+      <div className="panel overflow-auto flex-1 min-h-0">
         <table className="w-full text-[12px] min-w-[1080px]">
-          <thead className="thead">
+          <thead className="thead sticky top-0 bg-[var(--panel-solid)] z-10">
             <tr>
               {th("symbol", "Token", false)}
               {th("priceUsd", "Price")}
@@ -87,6 +90,14 @@ export default function TokenRadar() {
             </tr>
           </thead>
           <tbody className="num">
+            {/* First payload in flight: rows of shimmer at real row height, so
+                the table is furniture immediately and nothing reflows. */}
+            {loading && (
+              <SkeletonRows
+                rows={12}
+                widths={["label", 56, 36, 36, 38, 48, 46, 48, 32, 40, 36, 52, 48, 34, 30, 68, 40]}
+              />
+            )}
             {rows.map((r) => (
               <tr key={r.mint} className="trow">
                 <td className="px-2 py-[7px]">
@@ -128,9 +139,11 @@ export default function TokenRadar() {
             ))}
           </tbody>
         </table>
-        {rows.length === 0 && (
+        {/* The loading case is the skeleton above; this strip only ever
+            describes a real empty result. */}
+        {rows.length === 0 && !loading && (
           <Empty>
-            {loading ? "ANALYZING TOKENS…" : error ? "Token data is unavailable right now — retrying automatically." : "No token matches these filters."}
+            {error ? "Token data is unavailable right now — retrying automatically." : "No token matches these filters."}
           </Empty>
         )}
       </div>

@@ -41,6 +41,7 @@ import {
   type WatchlistOp,
 } from "./api/handlers";
 import { getSolReference } from "./providers/reference";
+import { asChartInterval } from "./providers/jupiter-chart";
 import type { StrategyProfileId } from "./types";
 
 export const IS_STATIC = process.env.NEXT_PUBLIC_STATIC === "1";
@@ -124,7 +125,17 @@ export async function localGet(url: string): Promise<LocalResponse> {
       // Awaited: candles now go through the provider seam, so in the static
       // build this is a real fetch from the visitor's own browser rather than a
       // synchronous read of the simulator.
-      if (m) return { status: 200, body: await handleCandles(store, m[1], num(q.get("from")), num(q.get("to"))) };
+      if (m)
+        return {
+          status: 200,
+          body: await handleCandles(
+            store,
+            m[1],
+            num(q.get("from")),
+            num(q.get("to")),
+            asChartInterval(q.get("interval")),
+          ),
+        };
     }
     {
       const m = p.match(/^\/api\/tokens\/([^/]+)$/);

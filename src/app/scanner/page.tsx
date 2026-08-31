@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { apiGet, useEventStream, fmtUsd, fmtPct, fmtAge, whaleFlowCell, type StreamEvent } from "@/lib/client";
-import { Score, TokenMark, Empty } from "@/components/ui/bits";
+import { Score, SkeletonRows, TokenMark, Empty } from "@/components/ui/bits";
 import { appendPass } from "@/lib/track-store";
 import type { TokenRow } from "@/lib/api/rows";
 
@@ -131,6 +131,9 @@ export default function ScannerPage() {
   const [pinned, setPinned] = useState<Set<string>>(new Set());
   const [minLiq, setMinLiq] = useState("0");
   const [rows, setRows] = useState<TokenRow[]>([]);
+  // Distinguishes "first payload still in flight" (skeleton) from "loaded and
+  // genuinely empty" (message). Rows alone cannot tell the two apart.
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const prevRank = useRef<Map<string, number>>(new Map());
   const [flash, setFlash] = useState<Map<string, 1 | -1>>(new Map());
   const [eventsPerMin, setEventsPerMin] = useState(0);
@@ -161,6 +164,7 @@ export default function ScannerPage() {
         });
         prevRank.current = new Map(next.map((r, i) => [r.mint, i]));
         setRows(next);
+        setLoadedOnce(true);
         setFlash(flashes);
 
         // Keep score of the scoring. Every pass that reaches here is a set of
@@ -294,6 +298,14 @@ export default function ScannerPage() {
             </tr>
           </thead>
           <tbody className="num">
+            {/* Cold load takes ~5s of provider work before the first ranked
+                pass; shimmer rows at real height instead of a bare panel. */}
+            {!loadedOnce && (
+              <SkeletonRows
+                rows={12}
+                widths={[16, 14, "label", 56, 36, 38, 32, 52, 44, 52, 46, 26, 68]}
+              />
+            )}
             {ordered.map((r, i) => {
               const fl = flash.get(r.mint);
               return (
@@ -385,7 +397,7 @@ export default function ScannerPage() {
             })}
           </tbody>
         </table>
-        {ordered.length === 0 && <Empty>SCANNING SOLANA…</Empty>}
+        {loadedOnce && ordered.length === 0 && <Empty>No token clears the liquidity floor right now.</Empty>}
       </div>
     </div>
   );

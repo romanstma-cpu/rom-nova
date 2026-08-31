@@ -149,6 +149,16 @@ export function runBacktest(store: DemoStore, cfg: BacktestConfig): BacktestResu
         }
 
         const fillTs = ts + cfg.entryDelayMin * 60_000;
+        // The fill is deliberately in the future of the step clock — that is
+        // the anti-lookahead delay — which means a signal on the FINAL step
+        // fills after the window closes. The end-of-run pass then force-closed
+        // it at `end`, producing a trade that exited ten minutes before it
+        // entered. It only surfaced when the simulated tape happened to put a
+        // qualifying signal on the last hourly step, so the suite passed for
+        // weeks and failed by wall-clock alignment. A fill this run cannot
+        // live through is not a trade; it is skipped, exactly like a fill with
+        // no price.
+        if (fillTs > end) continue;
         const fillPx = priceAt(s.mint, fillTs);
         if (fillPx === undefined) continue;
         const eff = fillPx * (1 + cfg.slippagePct / 100);

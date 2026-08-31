@@ -703,7 +703,10 @@ function classifyKind(f: FeatureVector, factors: SignalFactor[], score: number):
   if (get("volume_accel") > 0.8) return "volume_dislocation";
   if (get("social") > 0.75) return "social_momentum";
   if (f.momentum24h < -25 && get("organic") > 0.6 && get("liquidity") > 0.5) return "mean_reversion";
-  return "momentum_ignition";
+  // No archetype matched, and that is the answer. The fallback used to be
+  // momentum_ignition, which put "SIGNAL · MOMENTUM IGNITION" over a token
+  // bleeding -51% — a pattern claim made by elimination rather than detection.
+  return "no_pattern";
 }
 
 /**
@@ -1130,7 +1133,16 @@ export function scoreFeatures(
     missing.includes("whaleFlow")
       ? "whale flow becomes observable and shows net distribution — no whale-sized move has been seen in the short window this reads"
       : `whale netflow turns below ${usd(-Math.max(50_000, Math.abs(f.whaleNetFlowUsd)))} on a subsequent flow read (a ten-minute chain scan, not a 6h window)`,
-    f.smartMoneyWallets > 0 ? "tracked smart money flips to net selling" : "no smart-money confirmation appears within 24h",
+    // An invalidation list is a list of things the reader can WATCH FOR. Smart
+    // money is declared NEVER_AVAILABLE on live data, so "no smart-money
+    // confirmation appears within 24h" promised a confirmation nothing in this
+    // stack could ever deliver — the same copy-vs-capability failure as the dev
+    // selling line below, one entry up. When it is unmeasured the line is
+    // omitted rather than reworded: a condition nobody can observe does not
+    // belong on the list at all.
+    ...(missing.includes("smartMoney")
+      ? []
+      : [f.smartMoneyWallets > 0 ? "tracked smart money flips to net selling" : "no smart-money confirmation appears within 24h"]),
     `price loses the 24h structure (${pct(-Math.max(12, Math.abs(f.momentum24h) * 0.4))} from here)`,
     missing.includes("devSold")
       ? "a new security flag (freeze or mint authority) appears — dev selling is NOT watched here, nothing in this stack tracks the deployer's balance over time"

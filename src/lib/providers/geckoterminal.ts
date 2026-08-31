@@ -152,6 +152,11 @@ interface GtToken {
       transactions?: Record<string, { buys?: number; sells?: number }>;
       price_change_percentage?: Record<string, string>;
     };
+    /** Which token sits on which side of the pool — see `poolFor` for why. */
+    relationships?: {
+      base_token?: { data?: { id?: string } };
+      quote_token?: { data?: { id?: string } };
+    };
   }[];
 }
 
@@ -247,10 +252,10 @@ const addressOf = (id: string | undefined): string => (id ?? "").split("_").pop(
 export class GeckoTerminalMarketProvider implements MarketDataProvider {
   readonly name = "coingecko";
 
-  /** mint -> deepest pool address. Pools rarely move; the lookup costs a call. */
-  private pools = new Map<string, string>();
+  /** mint -> deepest pool + which SIDE of it the mint is. One lookup, cached. */
+  private pools = new Map<string, { addr: string; side: "base" | "quote" }>();
 
-  private async poolFor(mint: string): Promise<string | null> {
+  private async poolFor(mint: string): Promise<{ addr: string; side: "base" | "quote" } | null> {
     const cached = this.pools.get(mint);
     if (cached) return cached;
     const res = await gtFetch<GtToken>(
@@ -260,10 +265,21 @@ export class GeckoTerminalMarketProvider implements MarketDataProvider {
     if (!pools.length) return null;
     // Deepest reserve is the pool whose prints actually mean something.
     pools.sort((a, b) => num(b.attributes?.reserve_in_usd) - num(a.attributes?.reserve_in_usd));
-    const addr = pools[0].attributes?.address ?? addressOf(pools[0].id);
+    const top = pools[0];
+    const addr = top.attributes?.address ?? addressOf(top.id);
     if (!addr) return null;
-    this.pools.set(mint, addr);
-    return addr;
+    // A pool has two tokens and its OHLCV defaults to the BASE one. Charting
+    // the pool without asking which side the mint sits on rendered the OTHER
+    // token's tape for every quote-side mint: USDC's deepest pool is ETC/USDC,
+    // and the page showed a ~$7.90 candle series under a header saying $0.9999
+    // — verified live, close 7.91 with token=base against 1.0013 with
+    // token=quote on the same pool. Memecoins are essentially always the base
+    // side, which is why every memecoin charted correctly and the bug hid in
+    // the majors.
+    const side = addressOf(top.relationships?.quote_token?.data?.id) === mint ? "quote" : "base";
+    const entry = { addr, side } as const;
+    this.pools.set(mint, entry);
+    return entry;
   }
 
   /**
@@ -278,7 +294,7 @@ export class GeckoTerminalMarketProvider implements MarketDataProvider {
     const pool = await this.poolFor(mint);
     if (!pool) return [];
     const res = await gtFetch<GtOhlcv>(
-      `/networks/${NETWORK}/pools/${pool}/ohlcv/hour?limit=1000&currency=usd`,
+      `/networks/${NETWORK}/pools/${pool.addr}/ohlcv/hour?limit=1000&currency=usd&token=${pool.side}`,
     );
     const rows = res.data?.attributes?.ohlcv_list ?? [];
     return rows

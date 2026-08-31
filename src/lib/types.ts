@@ -758,7 +758,15 @@ export type SignalKind =
   | "distribution_warning"
   | "rug_risk_escalation"
   | "liquidity_collapse"
-  | "coordinated_activity";
+  | "coordinated_activity"
+  /**
+   * Nothing matched. Every signal needs a kind, and the fallback used to be
+   * `momentum_ignition` — so a token bleeding -51% wore "SIGNAL · MOMENTUM
+   * IGNITION" purely because no other archetype claimed it. An archetype is a
+   * CLAIM about what the tape is doing, and a default that names one asserts a
+   * pattern nobody detected.
+   */
+  | "no_pattern";
 
 export type SignalLabel =
   | "EXTREME POSITIVE"

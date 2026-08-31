@@ -41,12 +41,55 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 
 | # | Stream | Reference to beat | State |
 |---|---|---|---|
-| W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | ✅ shipped in 1.4.0 · critic list open |
+| W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | 🟢 round 2 reviewed · full fail-list closed |
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **both defects verified closed** — one exposed follow-up, fixed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ⏸ until W1–W3 pass |
 | W5 | Alerts that actually fire | Cielo alerts, Photon alerts | ⏸ until W1–W3 pass |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
+
+## W1 round 2 — reviewed, and the whole fail-list closed same day
+
+The critic verified **ten of eleven** round-1 items genuinely fixed — and it
+re-derived the PnL arithmetic independently from raw `getTransaction` data:
+every figure reconciled **to the cent**, including the three-denominator page
+($3.63 = −$1.4645 over 5 full closes + $5.09 over 45 partial exits, each
+labelled). Its summary: *"the numbers this app does print are right."* It rated
+the honesty surface as beating GMGN/Cielo — *"GMGN silently prices transfers at
+pool price and fabricates cost bases."*
+
+It failed the round on what was left, and the headline finding was sharp:
+
+**The Raydium Authority V4 profiled as a trader** — *"win rate 50%, profit
+factor 4.38"* — a pool's churn dressed as a person's skill, on the most famous
+AMM address on Solana. It is system-owned with no data, so the ownership test
+could not tell it from a wallet. And the flow lists still ranked **two AMM pools
+and the burn address** under a column headed "Wallet" — the one round-1 charge
+that had survived verbatim.
+
+### The fix is pure math, and it closed both at once
+
+A wallet is a public key someone can hold the private key FOR — its 32 bytes
+must decompress to a point on ed25519. **PDAs are ground out until they fail
+that exact test.** So `account-kind.ts` now carries RFC 8032 point
+decompression (~40 lines of BigInt, no dependency, no RPC, no list to
+maintain), verified against ground truth before wiring: the Raydium authority
+**off-curve**, and four known real keypairs all **on-curve**.
+
+The same free test now filters the movers list and the scanner's Buyers
+tooltips. The burn address gets a named constant — the wallet page had claimed
+it was *"never been funded or used"* one click after the movers list showed it
+receiving $10.4K; a null `getAccountInfo` cannot establish "never used" for an
+address that owns thousands of token accounts, and the copy now claims only
+what the lookup measured.
+
+Also closed from the list: 0.0016 cbBTC rendering as "0" tokens, the
+"0 transactions over 0min" window nobody opened, the unlinked token-account
+owner, and the "(measured)" chip under a SIMULATED banner.
+
+460 tests. One catch found while testing: an empty string decodes to 32 zero
+bytes, and the all-zeros key is mathematically ON the curve — the decoder
+rejects bad lengths first.
 
 ## Merged-build review — the one nobody had done
 

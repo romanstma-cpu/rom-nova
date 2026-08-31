@@ -221,7 +221,13 @@ function DemoWallet({ address, initial }: { address: string; initial: WalletDeta
           </div>
         </div>
         <div className="ml-auto text-right">
-          <div className="panel-title">Smart money score (measured)</div>
+          {/* "(measured)" was written when this page only ever showed the
+              simulator, where the score genuinely is measured — from FIFO
+              replay of synthetic trades. Under the SIMULATED banner the word
+              read as a claim about real markets, which is exactly the
+              confusion the banner exists to prevent. The measurement is real;
+              the universe is not, and the label now says which. */}
+          <div className="panel-title">Smart money score (measured in the simulation)</div>
           <div className="flex items-center gap-2 justify-end mt-1">
             <span className="num text-[22px]" style={{ color: sm.total >= 65 ? "var(--pos)" : "var(--text-dim)" }}>{sm.total}</span>
             <span className="faint text-[11px]">/100</span>

@@ -35,7 +35,7 @@ import { JupiterChartProvider } from "../providers/jupiter-chart";
 import { noteOutcome } from "../providers/health-log";
 import { ChainWalletProvider, isPlausibleAddress, WSOL } from "../providers/wallet-chain";
 import { resolveRpcRoute, type RpcRuntime } from "../providers/rpc-endpoint";
-import { identifyAccount } from "../providers/account-kind";
+import { identifyAccount, isOnCurve, KNOWN_ADDRESSES } from "../providers/account-kind";
 import { getSolReference } from "../providers/reference";
 import { assembleProfile } from "../engine/wallet-profile";
 import type { WalletCoverage } from "../types";
@@ -367,7 +367,15 @@ async function scoreRows(
     // The addresses behind the netflow number, biggest absolute move first.
     // A reader can check any of these on a block explorer, which a summary
     // figure does not allow.
+    //
+    // People only. The largest movers on any active mint routinely include the
+    // pool's own authority — the pool side of every swap moves size by
+    // definition — and the scanner's Buyers column was offering those as named
+    // buyers whose links landed on the wallet page's refusal to profile them.
+    // Off-curve is the PDA test and costs nothing; the netflow figure above is
+    // untouched, this only decides who is worth naming as a person.
     const topWallets = (flow?.largest ?? [])
+      .filter((m) => !KNOWN_ADDRESSES[m.owner] && isOnCurve(m.owner))
       .map((m) => ({ owner: m.owner, usd: (Number(m.deltaUnits) / 10 ** decimals) * price }))
       .filter((w) => Number.isFinite(w.usd) && Math.abs(w.usd) >= 1)
       .sort((a, b) => Math.abs(b.usd) - Math.abs(a.usd))

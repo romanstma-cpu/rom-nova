@@ -50,6 +50,22 @@ const pnlClass = (x: number): string => (x >= 0 ? "pos" : "neg");
  */
 const stamp = (ts: number): string => (ts > 0 ? new Date(ts).toLocaleString() : "—");
 
+/**
+ * A token amount at the precision the amount deserves.
+ *
+ * A flat `maximumFractionDigits: 2` rendered a 0.0016 cbBTC position as "0"
+ * tokens beside "$173.84" — a zero standing in for a real balance, which is
+ * this codebase's one forbidden rendering. Small amounts get enough digits to
+ * be non-zero; large ones keep the readable two.
+ */
+const fmtTokens = (n: number): string => {
+  const abs = Math.abs(n);
+  if (n === 0) return "0";
+  if (abs >= 1) return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (abs >= 0.001) return n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+  return n.toLocaleString(undefined, { maximumFractionDigits: 8 });
+};
+
 function CoverageStrip({ p }: { p: WalletProfile }) {
   const c = p.coverage;
   const window =
@@ -144,6 +160,13 @@ function NotAWallet({ p }: { p: WalletProfile }) {
             open the token page instead →
           </Link>
         )}
+        {/* The owning wallet was named in prose and left unlinked — the one
+            useful next step from a token-account page, as a copy-paste job. */}
+        {p.identity.kind === "token-account" && p.identity.holder && (
+          <Link href={`/whale?a=${p.identity.holder}`} className="chip chip-accent">
+            profile the wallet that owns it →
+          </Link>
+        )}
         <a
           href={`https://solscan.io/account/${p.address}`}
           target="_blank"
@@ -185,9 +208,7 @@ function PositionRow({ h }: { h: WalletHolding }) {
           </span>
         )}
       </td>
-      <td className="text-right px-2 dim">
-        {h.tokens.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-      </td>
+      <td className="text-right px-2 dim">{fmtTokens(h.tokens)}</td>
       <td className="text-right px-2">
         <Measured
           value={h.valueUsd}
@@ -241,7 +262,7 @@ function FillRow({ f }: { f: WalletFill }) {
           {shortAddr(f.mint)}
         </Link>
       </td>
-      <td className="px-2 dim">{f.tokens.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+      <td className="px-2 dim">{fmtTokens(f.tokens)}</td>
       <td className="px-2">
         {unpriced ? (
           <span className="faint cursor-help" title={f.unpricedReason}>

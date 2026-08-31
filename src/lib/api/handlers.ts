@@ -22,7 +22,7 @@ import { DEMO, candlesFor, trendingRows, walletProfile } from "./source";
 import { liveTokenDetail } from "./detail";
 import { isPlausibleAddress } from "../providers/wallet-chain";
 import { resolveRpcRoute } from "../providers/rpc-endpoint";
-import { identifyAccount } from "../providers/account-kind";
+import { identifyAccount, isOnCurve, KNOWN_ADDRESSES } from "../providers/account-kind";
 import { launchFeed, type LaunchFeed } from "./launches";
 import { dataMode, providerHealth } from "../providers/registry";
 import type { AlertCondition, BacktestConfig, StrategyProfileId } from "../types";
@@ -371,6 +371,14 @@ export async function handleLiveMovers(limit = 25) {
   const byOwner = new Map<string, { owner: string; netUsd: number; grossUsd: number; tokens: Set<string> }>();
   for (const row of rows.data) {
     for (const w of row.topWallets ?? []) {
+      // Only addresses a PERSON can hold the key for. This column is headed
+      // "Wallet" and its rows link to trader profiles, and it was ranking two
+      // AMM pools and the burn address as movers — the pool side of a swap
+      // moves size by definition, and the incinerator "receiving $10.4K" is a
+      // token being destroyed, not somebody buying. Off-curve is the PDA test
+      // and costs no network call; the constants cover the on-curve addresses
+      // whose meaning is a chain-wide convention.
+      if (KNOWN_ADDRESSES[w.owner] || !isOnCurve(w.owner)) continue;
       let e = byOwner.get(w.owner);
       if (!e) byOwner.set(w.owner, (e = { owner: w.owner, netUsd: 0, grossUsd: 0, tokens: new Set() }));
       e.netUsd += w.usd;
@@ -396,7 +404,9 @@ export async function handleLiveMovers(limit = 25) {
     // The window belongs to the number. These are minutes of flow, not a record.
     note:
       "ranked by USD moved in the last few minutes of SQD flow across the trending list — " +
-      "this is size traded right now, NOT a measure of skill, and no PnL is implied",
+      "this is size traded right now, NOT a measure of skill, and no PnL is implied. " +
+      "Pool authorities, vaults and the burn address are excluded: the pool side of a swap " +
+      "moves size by definition, and none of them is a trader",
     demo: false,
   };
 }

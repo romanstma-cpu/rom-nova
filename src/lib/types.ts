@@ -677,6 +677,8 @@ export interface WalletProfile {
     kind: string;
     detail: string;
     profilable: boolean;
+    /** For a token account: the wallet that owns it, so the page can link there. */
+    holder?: string;
   };
   coverage: WalletCoverage;
   holdings: {

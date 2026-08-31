@@ -425,9 +425,14 @@ function provenanceLines(
 ): string[] {
   const out: string[] = [];
   const hours = coverage.windowHours;
+  // "0 transactions over 0min" is a window nobody opened phrased as one that
+  // was measured and found empty. When nothing was read there is no window to
+  // describe, and the note already says why.
   out.push(
-    `fills: ${coverage.source} — ${coverage.transactionsRead} transactions over ` +
-      `${hours >= 1 ? `${hours.toFixed(1)}h` : `${Math.round(hours * 60)}min`}, ${coverage.note}`,
+    coverage.transactionsRead === 0
+      ? `fills: ${coverage.source} — none read; ${coverage.note}`
+      : `fills: ${coverage.source} — ${coverage.transactionsRead} transactions over ` +
+          `${hours >= 1 ? `${hours.toFixed(1)}h` : `${Math.round(hours * 60)}min`}, ${coverage.note}`,
   );
   // The index span, which is a different and much longer number wherever the
   // archival endpoint is reachable. Stating both is the point: a wallet can be

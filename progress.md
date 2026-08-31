@@ -42,7 +42,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 | # | Stream | Reference to beat | State |
 |---|---|---|---|
 | W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | ✅ shipped in 1.4.0 · critic list open |
-| W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | 🟢 round 2 · 2 defects closed, re-review due |
+| W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **both defects verified closed** — one exposed follow-up, fixed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ⏸ until W1–W3 pass |
 | W5 | Alerts that actually fire | Cielo alerts, Photon alerts | ⏸ until W1–W3 pass |

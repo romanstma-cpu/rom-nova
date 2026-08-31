@@ -42,7 +42,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 | # | Stream | Reference to beat | State |
 |---|---|---|---|
 | W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | 🔵 round-3 blind re-review RUNNING against main |
-| W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | 🟢 round 3 FAIL (narrow) · the one defect fixed same hour · round-4 confirm running |
+| W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **PASS** — round 4 confirmed the last defect closed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ⏸ until W1–W3 pass |
 | W5 | Alerts that actually fire | Cielo alerts, Photon alerts | ⏸ until W1–W3 pass |
@@ -94,8 +94,28 @@ function, `sightingLine` — graduation rows anchor on
 stat — with a regression test pinning the live reproduction's numbers, plus
 the tooltip sentence the critic's MINOR item asked for. Every display of
 this quantity has now been wrong once; none of them can drift apart again
-without a test failing. 463 tests, build clean. A narrow round-4 critic is
-confirming the fix. Full findings: `W2-ROUND3-REPORT.md` (untracked).
+without a test failing. 463 tests, build clean. Full findings:
+`W2-ROUND3-REPORT.md` (untracked).
+
+### ✅ W2 round 4: PASS — the stream is done
+
+The narrow confirm went further than asked. Beyond verifying `sightingLine`
+is the only producer of the sentence (grep across src/: the string lives
+only inside the function; one render call site) and that the regression test
+pins the live repro's numbers against the real exported function, it proved
+the `?? firstSeenAt` fallback CANNOT resurrect the negative: promotion is
+the only merge path that re-dates `poolCreatedAt` past a curve-era
+`firstSeenAt`, and that exact path is the one that stamps `gradSeenAt` —
+and no persistence layer serializes launch rows, so the field can't be
+silently dropped. It then drove the function itself with an adversarial
+sweep — curve lifetimes 1s→2h crossed with grad lags 0–60s — and got zero
+negative renders. 463/463 on an isolated worktree.
+
+One honest residual it correctly declined to count: with the local clock
+~2–3s behind, a genuinely fast graduation can still measure marginally
+negative. That is the measurement itself, it matches the header statistic,
+and `clockSkewHint` exists to flag exactly that. The fabricated
+curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
 
 ## W1 round 2 — reviewed, and the whole fail-list closed same day
 

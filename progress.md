@@ -42,7 +42,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 | # | Stream | Reference to beat | State |
 |---|---|---|---|
 | W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | 🔵 round-3 blind re-review RUNNING against main |
-| W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | 🔵 confirmation pass RUNNING — gradSeenAt fix under blind review |
+| W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | 🟢 round 3 FAIL (narrow) · the one defect fixed same hour · round-4 confirm running |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ⏸ until W1–W3 pass |
 | W5 | Alerts that actually fire | Cielo alerts, Photon alerts | ⏸ until W1–W3 pass |
@@ -69,6 +69,33 @@ Both were killed once mid-run by a session rate limit and resumed with
 context intact when it reset. On a double PASS: ship **1.6.0** (main is
 ahead of the deployed 1.5.0 by the on-curve/movers work and gradSeenAt),
 then unlock W4 and W5.
+
+### W2 round 3 verdict: FAIL (narrow) — and the critic earned its keep
+
+The headline fix is real, verified blind from a fresh build: **six live
+promotions watched** (cleanest: $SITCOM), every graduation lag small and
+positive, p50 settling 10s→4s against the ~4s vendor floor as real samples
+accumulated (n=5→24), the stamp-once semantics confirmed in source at
+`launches.ts:358`, backfilled graduations correctly excluded, no simulator
+leakage, and the clock-skew hint proven CORRECT by the critic's own
+independent bracket (machine 1.9–2.2s behind).
+
+Then it failed the round anyway, correctly. A DOM watcher polling every 2s
+found exactly one negative-seconds string on the whole page for the whole
+watch: the **expanded detail panel** still computed raw
+`firstSeenAt − poolCreatedAt` and rendered *"seen −116.7s after the source's
+pool-creation time"* on a promoted row — the identical fabrication the header
+statistic was cured of, relocated one click down. Reproduced live twice
+(牛来 −116.7s, chimp −65.9s).
+
+**Fixed same hour** (`abac406`): the sentence is now a single exported
+function, `sightingLine` — graduation rows anchor on
+`gradSeenAt ?? firstSeenAt`, the exact quantity `gradLagOf` feeds the header
+stat — with a regression test pinning the live reproduction's numbers, plus
+the tooltip sentence the critic's MINOR item asked for. Every display of
+this quantity has now been wrong once; none of them can drift apart again
+without a test failing. 463 tests, build clean. A narrow round-4 critic is
+confirming the fix. Full findings: `W2-ROUND3-REPORT.md` (untracked).
 
 ## W1 round 2 — reviewed, and the whole fail-list closed same day
 

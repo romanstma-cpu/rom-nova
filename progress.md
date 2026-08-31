@@ -723,6 +723,39 @@ web, firing on wallet buys, score crossings and launch matches.
 
 ## Deploy log
 
+**1.5.0 — LIVE, verified 2026-08-31.** The critic-verified wave.
+
+| check | result |
+|---|---|
+| tests | **447 passed** |
+| release | `v1.5.0`, 83,128,856 bytes |
+| SHA256 vs GitHub digest | **match** — `f079f2db…713073` |
+| feed | `latest.yml` at 1.5.0 |
+| site | v1.5.0 live; scanner/launches/token all 200 |
+| other apps | untouched |
+
+What users get that 1.4.0 didn't: a scanner that actually ranks · new mints no
+longer depressed ~16 points by an unpriced pool · graduations at **p50 3.9s**
+(was 123.6s) · a feed that admits when it's dead · the full W3 PASS (authority
+veto, LP scaling, deployer cap, honest confidence) · quote-side charts showing
+the right token's price · `/status` that says "not asked yet" instead of
+pretending health.
+
+**Two release-process traps, one old and one repeat:**
+- The 1.5.0 bump committed `middleware.server-only` — `build-static.mjs` renames
+  `middleware.ts` aside during export, and a `git add -A` landed inside that
+  window, dropping rate limiting and security headers from any server build of
+  that commit. **This exact accident IS v1.1.1's entire content** — twice is a
+  pattern; the rename window needs closing. Caught before CI published; tag
+  force-moved, broken run cancelled, checksums verified from the fixed tree.
+- The site version bump via `Set-Content` mojibake'd 87 characters (the known
+  PowerShell UTF-8 trap, re-confirmed). Reverted, redone with the Edit tool,
+  final diff exactly 2 lines.
+- Also merged in flight: the lint-fix PR from LO's separate session landed on
+  main mid-release; rebased, single history, lint config included in the tag.
+
+---
+
 **1.4.0 — LIVE, verified 2026-08-30.** All three wave-1 streams merged.
 
 | check | result |

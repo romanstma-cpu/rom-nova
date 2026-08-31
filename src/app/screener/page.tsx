@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useApi, fmtUsd, fmtPct, fmtNum, fmtAge, whaleFlowCell } from "@/lib/client";
-import { Score, RiskBadge, TokenMark, Empty, Freshness } from "@/components/ui/bits";
+import { Score, RiskBadge, SkeletonRows, TokenMark, Empty, Freshness } from "@/components/ui/bits";
 import type { TokenRow } from "@/lib/api/rows";
 
 interface Filters {
@@ -150,6 +150,14 @@ export default function ScreenerPage() {
             </tr>
           </thead>
           <tbody className="num">
+            {/* Same treatment as the radar: bars hold the table's final shape
+                while the first payload is assembled. */}
+            {!data && (
+              <SkeletonRows
+                rows={10}
+                widths={[14, "label", 56, 48, 46, 48, 36, 38, 44, 40, 52, 48, 68, 30, 40]}
+              />
+            )}
             {rows.map((r, i) => (
               <tr key={r.mint} className="trow">
                 <td className="px-3 py-[7px] faint">{i + 1}</td>
@@ -182,7 +190,7 @@ export default function ScreenerPage() {
             ))}
           </tbody>
         </table>
-        {rows.length === 0 && <Empty>{data ? "Nothing passes this screen — loosen a constraint." : "SCANNING SOLANA…"}</Empty>}
+        {data && rows.length === 0 && <Empty>Nothing passes this screen — loosen a constraint.</Empty>}
       </div>
     </div>
   );

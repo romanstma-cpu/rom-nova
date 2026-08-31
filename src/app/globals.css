@@ -264,9 +264,39 @@ body {
   animation: shimmer 1.25s linear infinite;
 }
 
+/* Skeleton bar — the shape of a value that is still in flight. Always a blank
+   shimmer, never a digit: a placeholder that fabricates a number is the one
+   forbidden rendering in this codebase, and a grey bar cannot be mistaken for
+   a measurement. */
+.skel {
+  display: inline-block;
+  height: 10px;
+  border-radius: 3px;
+  background-color: rgba(88, 110, 160, 0.13);
+  background-image: linear-gradient(90deg, transparent, rgba(120, 170, 230, 0.14), transparent);
+  background-size: 220px 100%;
+  background-repeat: no-repeat;
+  animation: shimmer 1.25s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .rise-in, .shimmer { animation: none; }
+  .rise-in, .shimmer, .skel { animation: none; }
   .scorebar > div { transition: none; }
+}
+
+/* Caption block under a page title. Four pages used this class and nothing
+   defined it, so the one explanatory paragraph on each of those screens
+   rendered at the browser's 16px default — the largest, brightest text on a
+   page whose own captions run 10.5–12px. */
+.hint {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-faint);
+  max-width: 1180px;
+}
+.hint b {
+  color: var(--text-dim);
+  font-weight: 600;
 }
 
 

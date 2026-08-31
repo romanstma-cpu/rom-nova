@@ -91,7 +91,7 @@ export default function ScreenerPage() {
   );
 
   return (
-    <div className="p-3 flex flex-col gap-3">
+    <div className="p-3 flex flex-col gap-3 h-full min-h-0">
       <div className="flex items-center gap-2 flex-wrap">
         <h1 className="text-[15px] font-semibold tracking-wide mr-2">ADVANCED SCREENER</h1>
         {PRESETS.map((p) => (
@@ -122,9 +122,11 @@ export default function ScreenerPage() {
         </label>
       </div>
 
-      <div className="panel overflow-x-auto">
+      {/* Panel-scrolled with a pinned header, like the scanner and radar — a
+          screen built around column thresholds needs its column names. */}
+      <div className="panel overflow-auto flex-1 min-h-0">
         <table className="w-full text-[12px] min-w-[1100px]">
-          <thead className="thead">
+          <thead className="thead sticky top-0 bg-[var(--panel-solid)] z-10">
             <tr>
               <th className="text-left px-3 py-2 font-medium">#</th>
               <th className="text-left px-2 font-medium">Token</th>

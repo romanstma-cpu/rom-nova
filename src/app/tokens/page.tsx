@@ -51,7 +51,7 @@ export default function TokenRadar() {
   );
 
   return (
-    <div className="p-3 flex flex-col gap-3">
+    <div className="p-3 flex flex-col gap-3 h-full min-h-0">
       <div className="flex items-center gap-2 flex-wrap">
         <h1 className="text-[15px] font-semibold tracking-wide mr-2">MEME COIN RADAR</h1>
         {QUICKS.map((f) => (
@@ -63,9 +63,12 @@ export default function TokenRadar() {
         {data && <Freshness ts={data.asOf} />}
       </div>
 
-      <div className="panel overflow-x-auto">
+      {/* The scanner's scroll pattern: the PANEL scrolls, so three hundred
+          rows keep their column names on screen. Sorting by a header you can
+          no longer read is a guess. */}
+      <div className="panel overflow-auto flex-1 min-h-0">
         <table className="w-full text-[12px] min-w-[1080px]">
-          <thead className="thead">
+          <thead className="thead sticky top-0 bg-[var(--panel-solid)] z-10">
             <tr>
               {th("symbol", "Token", false)}
               {th("priceUsd", "Price")}

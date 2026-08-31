@@ -43,7 +43,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 |---|---|---|---|
 | W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | ✅ shipped in 1.4.0 · critic list open |
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | 🟢 round 2 · 2 defects closed, re-review due |
-| W3 | Token deep-dive | Photon token page, GMGN, DexScreener | 🔍 round 3 merged · critic re-running |
+| W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ⏸ until W1–W3 pass |
 | W5 | Alerts that actually fire | Cielo alerts, Photon alerts | ⏸ until W1–W3 pass |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
@@ -249,6 +249,51 @@ existed. Lesson recorded.
   list, and a mint allowlist is exactly what a scam impersonating USDC needs.
   The failure modes aren't symmetric — over-warning about Circle vs
   under-warning about something wearing its name.
+
+### ✅ Round 3 verdict: PASS — the campaign's first
+
+A fresh blind critic tested seven live pages (PUMP, TRUMP, Fartcoin, SKHY, USDC,
+a **0.2-minute-old** mint from a 166-mint serial deployer, and a 4-minute-old
+~100%-concentration token), verified `location.port` on every measurement, and
+confirmed **all twelve failed items genuinely fixed — live and in source, none
+cosmetic**.
+
+The discrimination check it weighted heaviest: SKHY (live authorities, RugCheck
+81) → **EXTREME RISK / 5** · fresh gambles → **NO TRADE** · TRUMP (82% insider
+top-10) → **WEAK / 35** · PUMP → **NEUTRAL / 45** · Fartcoin (77.8% LP locked,
+deep, old) → **WATCH / 60**. Verdicts track danger; nothing dangerous gets a
+positive label; nothing safe and non-custodial gets flagged extreme.
+
+Against the reference: **BEATS** on safety depth and honesty ("no commercial
+tool does any of this" — the summing factor audit, printed source
+disagreements, abstention, per-number provenance), **MATCHES** the standard
+header/holders/socials/security surface, **LOSES** on chart granularity (hourly
+vs 1s/1m — the one gap a memecoin trader feels daily, gated by GeckoTerminal's
+throttle) and cold time-to-useful.
+
+Both judged decisions accepted: the deployer cap discriminates on the
+graduation *ratio* (166 mints/2.4% → −5.5 + NO TRADE; 495 mints/**53%** — the
+pump.fun migration authority — → 0.0), and custodial wrappers stay EXTREME RISK.
+
+### Post-PASS fixes, shipped to main same hour
+
+- **The chart showed the other token's price on quote-side mints.** USDC's
+  deepest pool is ETC/USDC; the OHLCV defaults to base, so its page charted a
+  ~$7.90 series under a $0.9999 header. Verified live: `token=base` → 7.91,
+  `token=quote` → 1.0013, same pool. `poolFor` now returns the side. Memecoins
+  are essentially always base-side — which is why every memecoin charted
+  correctly and the bug hid in the majors.
+- **`no_pattern` archetype** — the fallback was `momentum_ignition`, a pattern
+  claim by elimination, worn by a token bleeding −51%.
+- **An invalidation line promising the unobservable** ("no smart-money
+  confirmation within 24h" on a capability declared NEVER_AVAILABLE) is omitted
+  when unmeasured — a condition nobody can watch doesn't belong on a watch list.
+- **A backtest trade that exited before it entered.** Entries fill at
+  `ts + entryDelayMin`; a signal on the final hourly step fills after the window
+  closes and the end-of-run pass force-closed it ten minutes before its own
+  entry. Wall-clock-dependent — reproduced on the previous commit with today's
+  changes stashed, so it predates them all. Caught only because the gates
+  happened to run at the right hour.
 
 ### The standing trap, generalised
 

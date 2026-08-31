@@ -43,7 +43,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 |---|---|---|---|
 | W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | ✅ shipped in 1.4.0 · critic list open |
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | 🟢 round 2 · 2 defects closed, re-review due |
-| W3 | Token deep-dive | Photon token page, GMGN, DexScreener | 🔨 round 3 · LP over-penalty |
+| W3 | Token deep-dive | Photon token page, GMGN, DexScreener | 🔍 round 3 merged · critic re-running |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ⏸ until W1–W3 pass |
 | W5 | Alerts that actually fire | Cielo alerts, Photon alerts | ⏸ until W1–W3 pass |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
@@ -202,6 +202,61 @@ cell away:
 
 397 tests. `tests/launch-filters.test.ts` covers the case that hid the second
 one: mints plausible while graduations are already negative.
+
+---
+
+## W3 round 3 — merged to main · 447 tests
+
+All nine critic items plus the four merged-build additions are addressed. The
+first blind critic on this round was killed by a rate limit before ruling; a
+fresh one is running against the merged result.
+
+### It found a defect in MY commit
+
+The interrupted round-3 WIP I preserved and gate-verified (`bb60d49`) carried a
+comment claiming `lpProviders` stayed unmeasured — **but nothing added it to the
+set**, so a vendor zero produced the fabricated sentence *"a single provider
+holds the pool — that party can withdraw it."* I checked typecheck, tests and
+build on that commit; I did not check that its comment described behaviour that
+existed. Lesson recorded.
+
+### Highlights, with live measurements
+
+- **The critical liquidity zero** ([A]): blast radius was **six readers**, not
+  one — `exitDepthUsd` took the exit penalty to maximum *and* fired a
+  high-severity flag, `regimeOf` inferred `low_liquidity`, and the abstention
+  gate announced "$0 below the floor". A 3-second-old mint (`USWR`) with
+  `liquidity: undefined` now stands the factors down; everything with a real
+  pool still scores.
+- **LP lock on PUMP: −6.3 → −1.0** (score 49→51). The false "pool can be
+  withdrawn" sentence was in **four** places; the remaining gap to WATCH is
+  measured 68% top-10 concentration — real, and left alone.
+- **A second midpoint leak**: `REGIME_ADJUST` multiplied the whole mean, which
+  is a constant added to every factor row — an evidence-free token scored 42.5
+  in `risk_off`. Now scales the deviation, so 50 maps to 50 in every regime.
+- **The chart mystery solved**: `datapi.jup.ag/v2/charts` wants
+  **milliseconds** — and given seconds it returns **HTTP 200 with an empty
+  array**, indistinguishable from "this token has no history". I verified:
+  same call, seconds → 0 candles, milliseconds → 168 real bars. My earlier
+  "params need work" conclusion was this trap. Adapter verified 7d→168 bars;
+  GeckoTerminal stays primary.
+- **Serial deployer: cap, not veto** — and the first threshold (1,000 mints)
+  was rejected as an arbitrary cliff after it capped MAGA (4,681 / 4.3%) while
+  clearing STACY (731 / 4.5%). Recalibrated to a 250-mint sample-size floor
+  with the graduation rate doing the judging; **Orangutan (405 mints, 8.4%
+  graduation) passes**, which is the row that proves it discriminates.
+- **Custodial wrappers stay EXTREME RISK**, deliberately: any exemption is a
+  list, and a mint allowlist is exactly what a scam impersonating USDC needs.
+  The failure modes aren't symmetric — over-warning about Circle vs
+  under-warning about something wearing its name.
+
+### The standing trap, generalised
+
+"Most wrong on the largest tokens" appeared twice more this round — once at the
+*opposite* end (newest tokens). The generalised shape: **a metric whose error
+concentrates at one end of the age/size distribution**, and the defence is that
+absence declarations must be asserted at the seam, not left to whichever
+adapter remembers.
 
 ### Why a critic on the merged build
 

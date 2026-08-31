@@ -114,3 +114,59 @@ export function Stat({ label, children, sub }: { label: string; children: React.
 export function Empty({ children }: { children: React.ReactNode }) {
   return <div className="px-4 py-8 text-center faint text-[12px]">{children}</div>;
 }
+
+/** One shimmer bar the width and rough height of the value it stands in for. */
+export function Skel({ w, h = 10, round = false }: { w: number; h?: number; round?: boolean }) {
+  return (
+    <span
+      className="skel"
+      style={{ width: w, height: h, borderRadius: round ? "50%" : undefined }}
+      aria-hidden="true"
+    />
+  );
+}
+
+/**
+ * Placeholder rows while a table's first payload is in flight.
+ *
+ * Two rules, both measured against the references this UI is judged by:
+ * shimmer bars only — a skeleton that prints digits renders data nobody
+ * measured — and real row height, so the table occupies its final space
+ * from the first paint and nothing below it jumps when rows land.
+ *
+ * `widths` is per-column: a number is a right-aligned bar that wide (numeric
+ * columns sit right, like their values will); "label" is a left-aligned pair
+ * shaped like an icon + name cell.
+ */
+export function SkeletonRows({
+  rows,
+  widths,
+  rowHeight = 30,
+}: {
+  rows: number;
+  widths: (number | "label")[];
+  rowHeight?: number;
+}) {
+  return (
+    <>
+      {Array.from({ length: rows }, (_, i) => (
+        <tr key={i} style={{ height: rowHeight }} className="border-b border-[rgba(27,35,51,0.55)]">
+          {widths.map((w, j) =>
+            w === "label" ? (
+              <td key={j} className="px-2">
+                <span className="flex items-center gap-2">
+                  <Skel w={17} h={17} round />
+                  <Skel w={52} />
+                </span>
+              </td>
+            ) : (
+              <td key={j} className="px-2 text-right">
+                <Skel w={w} />
+              </td>
+            ),
+          )}
+        </tr>
+      ))}
+    </>
+  );
+}

@@ -18,7 +18,8 @@ const MAX_EDGES = 420;
  *  and static positions must not be able to crowd them out. */
 const MAX_TRADE_EDGES = 160;
 import { buildFlowSeries, buildTokenRows, buildWalletRows } from "./rows";
-import { DEMO, candlesFor, trendingRows, walletProfile } from "./source";
+import { DEMO, candlesFor, measuredInterval, trendingRows, walletProfile } from "./source";
+import type { ChartInterval } from "../providers/jupiter-chart";
 import { liveTokenDetail } from "./detail";
 import { isPlausibleAddress } from "../providers/wallet-chain";
 import { resolveRpcRoute } from "../providers/rpc-endpoint";
@@ -324,8 +325,14 @@ function demoTokenDetail(store: DemoStore, mint: string, asOf?: number, profile:
  *
  * `live` is unrelated and keeps its meaning — the simulator's own price tick.
  */
-export async function handleCandles(store: DemoStore, mint: string, from?: number, to?: number) {
-  const { data: candles, provenance } = await candlesFor(store, mint, from, to);
+export async function handleCandles(
+  store: DemoStore,
+  mint: string,
+  from?: number,
+  to?: number,
+  interval: ChartInterval = "1h",
+) {
+  const { data: candles, provenance } = await candlesFor(store, mint, from, to, interval);
   // The REASON, not a generic 404. "unknown mint or empty range" told a reader
   // nothing about a real Solana token that simply has no OHLCV — measured on
   // SKHY, where GeckoTerminal lists no pool at all — and the panel showing it
@@ -338,6 +345,10 @@ export async function handleCandles(store: DemoStore, mint: string, from?: numbe
     live: store.livePrice.get(mint) ?? null,
     provenance,
     demo: !provenance.real,
+    // What the bars ARE, measured from their spacing — not what was asked for.
+    // At least one path serves coarser than the ask (see measuredInterval),
+    // and the chart caption is only allowed to print this field.
+    interval: measuredInterval(candles),
   };
 }
 

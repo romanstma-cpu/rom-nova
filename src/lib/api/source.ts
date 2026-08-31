@@ -31,7 +31,7 @@ import type { DemoStore } from "../demo/store";
 import { FLAGS, getProviders } from "../providers/registry";
 import { DexScreenerTokenProvider } from "../providers/dexscreener";
 import { JupiterTokenProvider } from "../providers/jupiter";
-import { JupiterChartProvider } from "../providers/jupiter-chart";
+import { JupiterChartProvider, type ChartInterval } from "../providers/jupiter-chart";
 import { noteOutcome } from "../providers/health-log";
 import { ChainWalletProvider, isPlausibleAddress, WSOL } from "../providers/wallet-chain";
 import { resolveRpcRoute, type RpcRuntime } from "../providers/rpc-endpoint";
@@ -99,6 +99,38 @@ async function tryChartFallback(
 }
 
 /**
+ * What granularity a set of bars actually is, measured from the bars.
+ *
+ * Declared nowhere, computed always: the request's interval is an ASK, and at
+ * least one path serves something else — a 45-day window through the Jupiter
+ * fallback comes back as 4-hour bars because hourly would blow the bar cap,
+ * while the chart's caption said "hourly" the whole time. The median step
+ * between consecutive bars is what the reader is looking at, so it is the only
+ * thing the caption is allowed to claim.
+ *
+ * Median, not first-delta: a gap where nobody traded widens one step, not the
+ * typical one. Null when there are too few bars to measure or the step matches
+ * no bucket this app plots.
+ */
+export function measuredInterval(candles: Candle[]): ChartInterval | null {
+  if (candles.length < 3) return null;
+  const deltas = [];
+  for (let i = 1; i < candles.length; i++) deltas.push(candles[i].t - candles[i - 1].t);
+  deltas.sort((a, b) => a - b);
+  const median = deltas[Math.floor(deltas.length / 2)];
+  const buckets: [ChartInterval, number][] = [
+    ["1m", 60_000],
+    ["5m", 300_000],
+    ["15m", 900_000],
+    ["1h", 3_600_000],
+    ["4h", 14_400_000],
+    ["1d", 86_400_000],
+  ];
+  for (const [name, ms] of buckets) if (median === ms) return name;
+  return null;
+}
+
+/**
  * Candles for a mint, from the best configured source.
  *
  * GeckoTerminal is the only keyless adapter with history — roughly a thousand
@@ -110,18 +142,55 @@ async function tryChartFallback(
  * truth. A brand-new mint with no pool history and a rate-limited request look
  * identical from here, and both should show the reader a simulator label rather
  * than an empty chart captioned "live".
+ *
+ * `interval` other than hourly routes to Jupiter's chart endpoint DIRECTLY:
+ * it is the only keyless source that serves named minute buckets (probed, not
+ * assumed — see jupiter-chart.ts), and GeckoTerminal's 2.1-second serialised
+ * queue is exactly the wrong place to put a reader flipping between 1m and 5m.
+ * When the finer ask comes back empty the request degrades to the hourly path
+ * below and the provenance note says so; the caption reads the bars either
+ * way, so it can never claim a granularity the reader is not looking at.
  */
 export async function candlesFor(
   store: DemoStore,
   mint: string,
   from?: number,
   to?: number,
+  interval: ChartInterval = "1h",
 ): Promise<Sourced<Candle[]>> {
   const market = getProviders().market;
   const fallback = (note?: string): Sourced<Candle[]> => ({
     data: store.candles(mint, from, to),
     provenance: note ? { ...DEMO, note } : DEMO,
   });
+
+  if (interval !== "1h" && market.name !== "demo") {
+    try {
+      const jup = new JupiterChartProvider();
+      const fine = await jup.getCandlesAt(mint, interval, from ?? 0, to ?? Date.now());
+      if (fine.length > 0) {
+        noteCandleOutcome(true);
+        return { data: fine, provenance: { source: jup.name, real: true } };
+      }
+    } catch {
+      // Degradation below carries the story; Jupiter's own error adds nothing
+      // a reader can act on beyond "the finer bars were not there".
+    }
+    // Degrade to hourly rather than to a blank panel — an empty fine-grained
+    // answer usually means the mint has no recent tape at that resolution —
+    // and SAY so: the switcher snaps back to what is actually plotted, and
+    // this note is the reason it did.
+    const hourly = await candlesFor(store, mint, from, to, "1h");
+    return {
+      ...hourly,
+      provenance: {
+        ...hourly.provenance,
+        note:
+          `no ${interval} bars for this mint from jupiter-charts — ` +
+          (hourly.provenance.note ?? "showing the hourly history instead"),
+      },
+    };
+  }
 
   if (market.name === "demo") return fallback();
 

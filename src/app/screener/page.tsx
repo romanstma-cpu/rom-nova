@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useApi, fmtUsd, fmtPct, fmtNum, fmtAge, whaleFlowCell } from "@/lib/client";
-import { Score, RiskBadge, TokenMark, Empty, Freshness } from "@/components/ui/bits";
+import { Score, RiskBadge, SkeletonRows, TokenMark, Empty, Freshness } from "@/components/ui/bits";
 import type { TokenRow } from "@/lib/api/rows";
 
 interface Filters {
@@ -91,7 +91,7 @@ export default function ScreenerPage() {
   );
 
   return (
-    <div className="p-3 flex flex-col gap-3">
+    <div className="p-3 flex flex-col gap-3 h-full min-h-0">
       <div className="flex items-center gap-2 flex-wrap">
         <h1 className="text-[15px] font-semibold tracking-wide mr-2">ADVANCED SCREENER</h1>
         {PRESETS.map((p) => (
@@ -104,14 +104,17 @@ export default function ScreenerPage() {
         {data && <Freshness ts={data.asOf} />}
       </div>
 
+      {/* Placeholders read "any · e.g. N", not a bare number: a grey "50000"
+          in an empty field looks exactly like an applied filter, and a reader
+          who trusts it is filtering when nothing is set. */}
       <div className="panel p-3 flex items-end gap-3 flex-wrap">
-        {field("Min liquidity $", "minLiq", "50000")}
-        {field("Max mcap $", "maxMcap", "10000000")}
-        {field("Max age (h)", "maxAgeH", "72")}
-        {field("Min signal", "minScore", "60")}
-        {field("Min holders", "minHolders", "500")}
-        {field("Max top10 %", "maxTop10", "30")}
-        {field("Min organic", "minOrganic", "50")}
+        {field("Min liquidity $", "minLiq", "any · e.g. 50000")}
+        {field("Max mcap $", "maxMcap", "any · e.g. 10000000")}
+        {field("Max age (h)", "maxAgeH", "any · e.g. 72")}
+        {field("Min signal", "minScore", "any · e.g. 60")}
+        {field("Min holders", "minHolders", "any · e.g. 500")}
+        {field("Max top10 %", "maxTop10", "any · e.g. 30")}
+        {field("Min organic", "minOrganic", "any · e.g. 50")}
         <label className="flex items-center gap-2 text-[11.5px] dim cursor-pointer pb-1.5">
           <input type="checkbox" checked={f.smartOnly} onChange={() => setF((p) => ({ ...p, smartOnly: !p.smartOnly }))} className="accent-[#38e1ff]" />
           smart money in
@@ -122,9 +125,11 @@ export default function ScreenerPage() {
         </label>
       </div>
 
-      <div className="panel overflow-x-auto">
+      {/* Panel-scrolled with a pinned header, like the scanner and radar — a
+          screen built around column thresholds needs its column names. */}
+      <div className="panel overflow-auto flex-1 min-h-0">
         <table className="w-full text-[12px] min-w-[1100px]">
-          <thead className="thead">
+          <thead className="thead sticky top-0 bg-[var(--panel-solid)] z-10">
             <tr>
               <th className="text-left px-3 py-2 font-medium">#</th>
               <th className="text-left px-2 font-medium">Token</th>
@@ -150,6 +155,14 @@ export default function ScreenerPage() {
             </tr>
           </thead>
           <tbody className="num">
+            {/* Same treatment as the radar: bars hold the table's final shape
+                while the first payload is assembled. */}
+            {!data && (
+              <SkeletonRows
+                rows={10}
+                widths={[14, "label", 56, 48, 46, 48, 36, 38, 44, 40, 52, 48, 68, 30, 40]}
+              />
+            )}
             {rows.map((r, i) => (
               <tr key={r.mint} className="trow">
                 <td className="px-3 py-[7px] faint">{i + 1}</td>
@@ -182,7 +195,7 @@ export default function ScreenerPage() {
             ))}
           </tbody>
         </table>
-        {rows.length === 0 && <Empty>{data ? "Nothing passes this screen — loosen a constraint." : "SCANNING SOLANA…"}</Empty>}
+        {data && rows.length === 0 && <Empty>Nothing passes this screen — loosen a constraint.</Empty>}
       </div>
     </div>
   );

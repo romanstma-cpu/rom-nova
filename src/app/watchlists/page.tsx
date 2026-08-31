@@ -52,6 +52,19 @@ export default function WatchlistsPage() {
         </button>
       </div>
 
+      {/* handleWatchlists enriches every row from the DemoStore and nothing
+          else, so each figure below is synthetic even when the address is a
+          real one the reader pasted. The whales page banners this; a reader
+          seeing "realized $874.6K" beside a wallet they added deserves the
+          same sentence here, not a tooltip. */}
+      <div className="panel px-3 py-2 text-[11px] dim flex items-center gap-2 flex-wrap">
+        <span className="chip chip-warn">SIMULATED</span>
+        <span>
+          The stats beside each item — prices, SM scores, realized PnL — come from the simulation.
+          For a real wallet&rsquo;s measured figures, open it on the wallet page.
+        </span>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         {(data?.watchlists ?? []).map((wl) => (
           <div key={wl.id} className="panel">

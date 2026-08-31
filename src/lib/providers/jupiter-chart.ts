@@ -72,6 +72,33 @@ const INTERVALS = [
 const MAX_CANDLES = 1000;
 
 /**
+ * The buckets a caller may ask for BY NAME, probed 2026-08-31 with real
+ * requests rather than trusted from documentation (there is none): every one
+ * of 1_SECOND…1_WEEK answered 200 with correctly-stepped bars on wrapped SOL,
+ * and 1_MINUTE/5_MINUTE/15_MINUTE answered with full windows on BONK and WIF —
+ * fresh to within ~30 seconds, no key, ACAO intact.
+ *
+ * Seconds are deliberately not offered: a 1-second tape refreshed on a
+ * 10-second poll would be a liveness claim the poll cannot keep.
+ */
+export const NAMED_INTERVALS = {
+  "1m": { api: "1_MINUTE", ms: 60_000, defaultSpanMs: 6 * 3_600_000 },
+  "5m": { api: "5_MINUTE", ms: 5 * 60_000, defaultSpanMs: 24 * 3_600_000 },
+  "15m": { api: "15_MINUTE", ms: 15 * 60_000, defaultSpanMs: 3 * 86_400_000 },
+  "1h": { api: "1_HOUR", ms: 3_600_000, defaultSpanMs: 45 * 86_400_000 },
+  "4h": { api: "4_HOUR", ms: 4 * 3_600_000, defaultSpanMs: 120 * 86_400_000 },
+  "1d": { api: "1_DAY", ms: 86_400_000, defaultSpanMs: 365 * 86_400_000 },
+} as const;
+
+export type ChartInterval = keyof typeof NAMED_INTERVALS;
+
+/** The whitelist, for query-string parsing. Unknown asks fall back to hourly
+ *  rather than erroring: a bad interval is a UI bug, not a reader's problem. */
+export function asChartInterval(v: string | null | undefined): ChartInterval {
+  return v && v in NAMED_INTERVALS ? (v as ChartInterval) : "1h";
+}
+
+/**
  * The coarsest interval that still fills the window with real bars, and how
  * many to ask for.
  *
@@ -97,6 +124,31 @@ export class JupiterChartProvider implements MarketDataProvider {
     // convention. Forty-five days matches what the primary is asked for.
     const from = fromTs > 0 ? fromTs : to - 45 * 86_400_000;
     const { interval, candles } = bucketFor(from, to);
+    return this.fetchBars(mint, interval, from, to, candles);
+  }
+
+  /**
+   * Bars at a NAMED granularity, for the chart's interval switcher.
+   *
+   * Unlike `getCandles`, which picks whatever bucket fits the window, this asks
+   * for exactly the interval the reader chose and lets an empty answer stand —
+   * the caller decides whether to degrade to hourly, and says so if it does.
+   */
+  async getCandlesAt(mint: string, interval: ChartInterval, fromTs: number, toTs: number): Promise<Candle[]> {
+    const def = NAMED_INTERVALS[interval];
+    const to = toTs > 0 ? toTs : Date.now();
+    const from = fromTs > 0 ? fromTs : to - def.defaultSpanMs;
+    const candles = Math.min(MAX_CANDLES, Math.max(1, Math.ceil((to - from) / def.ms)));
+    return this.fetchBars(mint, def.api, from, to, candles);
+  }
+
+  private async fetchBars(
+    mint: string,
+    interval: string,
+    from: number,
+    to: number,
+    candles: number,
+  ): Promise<Candle[]> {
     const url =
       `${BASE}/${encodeURIComponent(mint)}` +
       `?interval=${interval}&from=${Math.floor(from)}&to=${Math.floor(to)}` +

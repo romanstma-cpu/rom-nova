@@ -16,12 +16,13 @@
 // factors the score is missing. Where two sources answer one question
 // differently, both answers are printed with their source attached.
 
-import { Suspense, useMemo, useState, useSyncExternalStore } from "react";
+import { Suspense, useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useApi, apiPost, fmtUsd, fmtPct, fmtNum, fmtAge, shortAddr, labelClass } from "@/lib/client";
-import { Score, RiskBadge, TokenMark, Freshness, Empty } from "@/components/ui/bits";
+import { Score, RiskBadge, Skel, TokenMark, Freshness, Empty } from "@/components/ui/bits";
 import { PriceChart, type ChartMarker } from "@/components/charts/PriceChart";
+import { asChartInterval, NAMED_INTERVALS, type ChartInterval } from "@/lib/providers/jupiter-chart";
 import { FlowChart } from "@/components/charts/FlowChart";
 import { LineChart } from "@/components/charts/LineChart";
 import type {
@@ -78,6 +79,15 @@ interface CandlePayload {
   candles: Candle[];
   live: { ts: number; price: number } | null;
   provenance?: { source: string; real: boolean; note?: string };
+  /** What the bars ARE, measured server-side from their spacing. Null when the
+   *  tape is too short or too irregular to name. */
+  interval?: ChartInterval | null;
+}
+
+/** The one candle subscription, owned above the live/demo split. */
+interface CandleHook {
+  data: CandlePayload | null;
+  error: string | null;
 }
 
 /** Where a reader goes to check an address against the chain itself. */
@@ -91,6 +101,20 @@ export default function TokenPage() {
   );
 }
 
+/** Where the reader's granularity choice survives reloads. */
+const INTERVAL_KEY = "romnova_chart_interval_v1";
+
+/**
+ * First visit defaults to 15-minute bars, not hourly, for two measured
+ * reasons. It is the granularity a memecoin question is actually asked at —
+ * the reference terminals lead with minutes. And it is served by Jupiter's
+ * chart endpoint directly, so the bars do not queue behind GeckoTerminal's
+ * 2.1-second serialised slot that the detail assembly is already using:
+ * hourly-behind-detail put the first canvas at ~5.4s on a cold load, this
+ * path has the bars back before the detail payload lands.
+ */
+const DEFAULT_INTERVAL: ChartInterval = "15m";
+
 function TokenInner() {
   const mint = useSearchParams().get("m") ?? "";
   // Thirty seconds, not fifteen. A live assembly reaches five providers and
@@ -98,6 +122,41 @@ function TokenInner() {
   // twenty, so a faster poll would re-render the same payload and a slower one
   // would show a stale price.
   const { data, error, loading } = useApi<TokenDetail>(mint ? `/api/tokens/${mint}` : null, 30_000);
+
+  const [chartInterval, setChartIntervalRaw] = useState<ChartInterval>(() => {
+    if (typeof localStorage === "undefined") return DEFAULT_INTERVAL;
+    try {
+      const stored = localStorage.getItem(INTERVAL_KEY);
+      return stored ? asChartInterval(stored) : DEFAULT_INTERVAL;
+    } catch {
+      return DEFAULT_INTERVAL;
+    }
+  });
+  const setChartInterval = useCallback((iv: ChartInterval) => {
+    setChartIntervalRaw(iv);
+    try {
+      localStorage.setItem(INTERVAL_KEY, iv);
+    } catch {
+      /* private mode — the choice just does not survive the tab */
+    }
+  }, []);
+
+  // Candles are fetched HERE, not inside LiveToken, so the request leaves in
+  // parallel with the detail assembly instead of serialised behind it. The
+  // demo tape ticks every 10s; a live one re-polls each minute. A demo mint is
+  // pinned to hourly — its tape IS hourly, and asking finer would probe
+  // Jupiter with a mint that does not exist on every 10-second poll.
+  const effectiveInterval = data?.mode === "demo" ? "1h" : chartInterval;
+  const candles = useApi<CandlePayload>(
+    mint ? `/api/tokens/${mint}/candles?interval=${effectiveInterval}` : null,
+    data?.mode === "demo" ? 10_000 : 60_000,
+  );
+
+  // The switcher highlights what is actually PLOTTED, not what was pressed.
+  // Derived, not synced: a finer ask that degraded to hourly (or an hourly ask
+  // served as 4h bars — see measuredInterval) lights the bucket on screen, and
+  // the provenance note explains why it is not the one that was clicked.
+  const plottedInterval = candles.data?.interval ?? chartInterval;
 
   if (!mint || error) {
     return (
@@ -113,41 +172,267 @@ function TokenInner() {
       </Empty>
     );
   }
-  if (!data) return <Empty>{loading ? "ANALYZING TOKEN…" : "NO DATA"}</Empty>;
+  if (!data) {
+    if (!loading) return <Empty>NO DATA</Empty>;
+    // The detail assembly takes ~2.4s of provider work on a cold load
+    // (measured: search → RPC → rugcheck → chain flow). The page's furniture —
+    // and usually the finished chart, whose bars come back first — renders
+    // through that wait instead of a bare caption.
+    return (
+      <TokenSkeleton
+        candles={candles}
+        interval={plottedInterval}
+        onInterval={setChartInterval}
+      />
+    );
+  }
   // Branching at a component boundary rather than inside one: the two halves
   // need different hooks, and hooks cannot be called conditionally.
-  return data.mode === "live" ? <LiveToken detail={data} /> : <DemoToken detail={data} mint={mint} />;
+  return data.mode === "live" ? (
+    <LiveToken detail={data} candles={candles} interval={plottedInterval} onInterval={setChartInterval} />
+  ) : (
+    <DemoToken detail={data} mint={mint} candles={candles} />
+  );
+}
+
+// ---------------------------------------------------------------- chart panel
+
+/** The switcher's order on screen, finest first, like every reference chart. */
+const INTERVAL_CHOICES = Object.keys(NAMED_INTERVALS) as ChartInterval[];
+
+/** Time windows a reader can clamp the tape to. Spans, not bar counts, so the
+ *  same buttons mean the same thing at every granularity. */
+const WINDOW_CHOICES: { label: string; spanMs: number }[] = [
+  { label: "1h", spanMs: 3_600_000 },
+  { label: "6h", spanMs: 6 * 3_600_000 },
+  { label: "24h", spanMs: 86_400_000 },
+  { label: "7d", spanMs: 7 * 86_400_000 },
+  { label: "all", spanMs: 0 },
+];
+
+/**
+ * The price panel: interval switcher, window clamp, log axis, provenance chip.
+ *
+ * The caption prints the PAYLOAD's measured interval, never the button that
+ * was pressed — the two differ whenever a finer ask degraded (the switcher
+ * snaps back a beat later, see TokenInner) — and the shimmer state is a blank
+ * block: a placeholder chart with invented bars would be the forbidden
+ * rendering, in the panel where it would do the most damage.
+ */
+function ChartPanel({
+  candles,
+  interval,
+  onInterval,
+  markers = [],
+  freshTs,
+  children,
+}: {
+  candles: CandleHook;
+  interval: ChartInterval;
+  onInterval: (iv: ChartInterval) => void;
+  markers?: ChartMarker[];
+  freshTs?: number;
+  children?: React.ReactNode;
+}) {
+  const [logScale, setLogScale] = useState(false);
+  const [spanMs, setSpanMs] = useState(0);
+  const payload = candles.data;
+
+  const shown = useMemo(() => {
+    const all = payload?.candles ?? [];
+    if (spanMs === 0 || all.length === 0) return all;
+    const cutoff = all[all.length - 1].t - spanMs;
+    return all.filter((c) => c.t >= cutoff);
+  }, [payload, spanMs]);
+
+  // A 7d button over ~115 hourly bars (~4.8d of history) stayed lit and
+  // silently showed less than it promised. The button is an ask; when the
+  // source's history starts inside the window, the shortfall gets a sentence.
+  const shortfallDays = useMemo(() => {
+    const all = payload?.candles ?? [];
+    if (spanMs === 0 || all.length < 2) return null;
+    const covered = all[all.length - 1].t - all[0].t;
+    if (covered >= spanMs) return null;
+    return covered / 86_400_000;
+  }, [payload, spanMs]);
+
+  return (
+    <div className="panel">
+      <div className="flex items-center justify-between px-3 pt-2.5 gap-2 flex-wrap">
+        <span className="panel-title">
+          Price
+          {payload?.interval ? (
+            <span> · {payload.interval} bars</span>
+          ) : payload && payload.candles.length > 0 && payload.candles.length < 3 ? (
+            // Too few steps to measure a spacing. Naming the requested bucket
+            // here would caption an ask, not a measurement — so the caption
+            // says what it counted instead of going silently mute.
+            <span>
+              {" "}
+              · {payload.candles.length} bar{payload.candles.length === 1 ? "" : "s"} — too few to
+              measure a granularity
+            </span>
+          ) : null}
+        </span>
+        <span className="flex items-center gap-2 flex-wrap">
+          <span className="flex items-center gap-0.5" role="group" aria-label="bar interval">
+            {INTERVAL_CHOICES.map((iv) => (
+              <button
+                key={iv}
+                className={`btn text-[10px] px-1.5 py-0.5 ${interval === iv ? "btn-primary" : ""}`}
+                onClick={() => onInterval(iv)}
+                title={`${iv} bars`}
+              >
+                {iv}
+              </button>
+            ))}
+          </span>
+          <span className="w-px h-[14px] bg-[var(--border)]" aria-hidden="true" />
+          <span className="flex items-center gap-0.5" role="group" aria-label="time window">
+            {WINDOW_CHOICES.map((w) => (
+              <button
+                key={w.label}
+                className={`btn text-[10px] px-1.5 py-0.5 ${spanMs === w.spanMs ? "btn-primary" : ""}`}
+                onClick={() => setSpanMs(w.spanMs)}
+              >
+                {w.label}
+              </button>
+            ))}
+          </span>
+          <button
+            className={`btn text-[10px] px-1.5 py-0.5 ${logScale ? "btn-primary" : ""}`}
+            onClick={() => setLogScale((x) => !x)}
+            title="logarithmic price axis"
+          >
+            log
+          </button>
+          {/* A dead chart must not wear a live chip. During a candle failure
+              the previous payload's source and "updated Ns ago" kept rendering
+              beside a body reporting the outage — two adjacent claims about the
+              same panel, one of them false. */}
+          {payload?.provenance && !candles.error && (
+            <span
+              className={`chip ${payload.provenance.real ? "chip-accent" : "chip-warn"}`}
+              title={payload.provenance.note ?? "real market data"}
+            >
+              {payload.provenance.real ? payload.provenance.source.toUpperCase() : "SIMULATED"}
+            </span>
+          )}
+          {freshTs !== undefined && !candles.error && <Freshness ts={freshTs} />}
+        </span>
+      </div>
+      <div className="px-2 pb-2">
+        {candles.error ? (
+          <div className="h-[340px] flex items-center justify-center faint text-[11px] px-8 text-center leading-relaxed">
+            No price history for this mint — {candles.error}. The rest of this page does not
+            depend on it: the score never read these bars.
+          </div>
+        ) : payload ? (
+          shown.length > 0 ? (
+            <>
+              <PriceChart candles={shown} markers={markers} height={340} logScale={logScale} />
+              {shortfallDays !== null && (
+                <div className="px-1 pt-1 text-[9.5px] faint">
+                  the source&rsquo;s history covers {shortfallDays.toFixed(1)} days — less than the
+                  window selected
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="h-[340px] flex items-center justify-center faint text-[11px] px-8 text-center">
+              No bars in this range. {payload.provenance?.note ?? "The history source returned nothing."}
+            </div>
+          )
+        ) : (
+          <div className="h-[340px] pt-2">
+            <span className="skel" style={{ width: "100%", height: "100%" }} aria-label="loading price history" />
+          </div>
+        )}
+      </div>
+      {children && <div className="px-3 pb-2 text-[10px] faint leading-snug">{children}</div>}
+    </div>
+  );
+}
+
+/**
+ * The page while the detail assembly is still out. Structure and shimmer only —
+ * except the chart, which renders REAL bars the moment its (parallel, faster)
+ * fetch lands. Nothing here prints a number nobody measured.
+ */
+function TokenSkeleton({
+  candles,
+  interval,
+  onInterval,
+}: {
+  candles: CandleHook;
+  interval: ChartInterval;
+  onInterval: (iv: ChartInterval) => void;
+}) {
+  return (
+    <div className="p-3 flex flex-col gap-3">
+      <div className="panel px-4 py-3 flex items-center gap-4 flex-wrap">
+        <Skel w={38} h={38} round />
+        <div className="flex flex-col gap-2">
+          <span className="flex items-center gap-2">
+            <Skel w={72} h={14} />
+            <Skel w={120} />
+          </span>
+          <Skel w={300} h={8} />
+        </div>
+        <div className="flex items-center gap-5 ml-auto">
+          {Array.from({ length: 5 }, (_, i) => (
+            <span key={i} className="flex flex-col gap-1.5 items-end">
+              <Skel w={40} h={7} />
+              <Skel w={56} h={12} />
+            </span>
+          ))}
+        </div>
+        <span className="w-full text-[10px] faint">
+          ANALYZING TOKEN — reading the mint account, holder set, risk report and recent chain flow…
+        </span>
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-3">
+        <ChartPanel candles={candles} interval={interval} onInterval={onInterval} />
+        <div className="flex flex-col gap-3">
+          {Array.from({ length: 2 }, (_, i) => (
+            <div key={i} className="panel p-3 flex flex-col gap-2.5">
+              <Skel w={110} h={8} />
+              <Skel w={230} />
+              <Skel w={180} />
+              <Skel w={210} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------- live token
 
-function LiveToken({ detail }: { detail: LiveTokenDetail }) {
+function LiveToken({
+  detail,
+  candles,
+  interval,
+  onInterval,
+}: {
+  detail: LiveTokenDetail;
+  candles: CandleHook;
+  interval: ChartInterval;
+  onInterval: (iv: ChartInterval) => void;
+}) {
   const d = detail;
   const { info, snapshot: snap, signal, risk } = d;
-  // The error matters as much as the data. A mint with no pool on the history
-  // source used to leave this panel on "LOADING CHART…" indefinitely, which is
-  // the chart-shaped version of rendering an unmeasured field as a zero: an
-  // absence wearing the appearance of something still on its way.
-  const { data: candleData, error: candleError } = useApi<CandlePayload>(
-    `/api/tokens/${info.mint}/candles`,
-    60_000,
-  );
-  const [logScale, setLogScale] = useState(false);
-  const [bars, setBars] = useState<24 | 168 | 720 | 0>(0);
   const [copied, setCopied] = useState(false);
 
-  const shown = useMemo(() => {
-    const all = candleData?.candles ?? [];
-    return bars === 0 ? all : all.slice(-bars);
-  }, [candleData, bars]);
-
-  // The wallets that actually moved size, on the chart. Only the ones inside the
-  // bars being shown — a marker at a timestamp off the left edge is invisible
-  // and counts as a promise the chart did not keep.
+  // The wallets that actually moved size, on the chart — placed on the newest
+  // bar, which every window slice keeps, so this can be computed against the
+  // full tape.
   const markers = useMemo<ChartMarker[]>(() => {
     const movers = d.flow?.movers ?? [];
-    if (!movers.length || shown.length === 0) return [];
-    const at = shown[shown.length - 1].t;
+    const all = candles.data?.candles ?? [];
+    if (!movers.length || all.length === 0) return [];
+    const at = all[all.length - 1].t;
     return movers
       .filter((m) => Math.abs(m.usd) >= 5_000)
       .slice(0, 12)
@@ -156,7 +441,7 @@ function LiveToken({ detail }: { detail: LiveTokenDetail }) {
         kind: m.usd >= 0 ? ("whale_buy" as const) : ("whale_sell" as const),
         text: `${m.usd >= 0 ? "▲" : "▼"} ${fmtUsd(Math.abs(m.usd))}`,
       }));
-  }, [d.flow, shown]);
+  }, [d.flow, candles.data]);
 
   const unmeasured = snap.unmeasured ?? [];
   const absent = (f: UnmeasuredField) => unmeasured.includes(f);
@@ -335,69 +620,13 @@ function LiveToken({ detail }: { detail: LiveTokenDetail }) {
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-3">
         <div className="flex flex-col gap-3 min-w-0">
           {/* chart */}
-          <div className="panel">
-            <div className="flex items-center justify-between px-3 pt-2.5 gap-2 flex-wrap">
-              <span className="panel-title">Price · hourly bars</span>
-              <span className="flex items-center gap-2">
-                {([
-                  [24, "24h"],
-                  [168, "7d"],
-                  [720, "30d"],
-                  [0, "all"],
-                ] as const).map(([n, label]) => (
-                  <button
-                    key={label}
-                    className={`btn text-[10px] px-1.5 py-0.5 ${bars === n ? "btn-primary" : ""}`}
-                    onClick={() => setBars(n)}
-                  >
-                    {label}
-                  </button>
-                ))}
-                <button
-                  className={`btn text-[10px] px-1.5 py-0.5 ${logScale ? "btn-primary" : ""}`}
-                  onClick={() => setLogScale((x) => !x)}
-                  title="logarithmic price axis"
-                >
-                  log
-                </button>
-                {candleData?.provenance && (
-                  <span
-                    className={`chip ${candleData.provenance.real ? "chip-accent" : "chip-warn"}`}
-                    title={candleData.provenance.note ?? "real market data"}
-                  >
-                    {candleData.provenance.real ? candleData.provenance.source.toUpperCase() : "SIMULATED"}
-                  </span>
-                )}
-                <Freshness ts={snap.ts} />
-              </span>
-            </div>
-            <div className="px-2 pb-2">
-              {candleError ? (
-                <div className="h-[340px] flex items-center justify-center faint text-[11px] px-8 text-center leading-relaxed">
-                  No price history for this mint — {candleError}. The rest of this page does not
-                  depend on it: the score never read these bars.
-                </div>
-              ) : candleData ? (
-                shown.length > 0 ? (
-                  <PriceChart candles={shown} markers={markers} height={340} logScale={logScale} />
-                ) : (
-                  <div className="h-[340px] flex items-center justify-center faint text-[11px] px-8 text-center">
-                    No hourly bars in this range.{" "}
-                    {candleData.provenance?.note ?? "The history source returned nothing."}
-                  </div>
-                )
-              ) : (
-                <div className="h-[340px] flex items-center justify-center faint text-[11px]">LOADING CHART…</div>
-              )}
-            </div>
-            <div className="px-3 pb-2 text-[10px] faint leading-snug">
-              Markers are the wallets in the flow panel below, placed on the newest bar — the flow
-              window is ten minutes, not the life of the chart, so they say <b>who moved recently</b>,
-              not when. The score above does not read these bars: with no candles in its vector it
-              takes momentum from {d.source}&rsquo;s published 1h and 24h change, which the audit
-              names.
-            </div>
-          </div>
+          <ChartPanel candles={candles} interval={interval} onInterval={onInterval} markers={markers} freshTs={snap.ts}>
+            Markers are the wallets in the flow panel below, placed on the newest bar — the flow
+            window is ten minutes, not the life of the chart, so they say <b>who moved recently</b>,
+            not when. The score above does not read these bars: with no candles in its vector it
+            takes momentum from {d.source}&rsquo;s published 1h and 24h change, which the audit
+            names.
+          </ChartPanel>
 
           <ActivityPanel detail={d} />
           <ScoreAuditPanel detail={d} />
@@ -1317,10 +1546,12 @@ function Attributed({
 
 // ---------------------------------------------------------------- demo token
 
-function DemoToken({ detail, mint }: { detail: DemoTokenDetail; mint: string }) {
+function DemoToken({ detail, mint, candles }: { detail: DemoTokenDetail; mint: string; candles: CandleHook }) {
   const data = detail;
   const { info, snapshot: snap, signal, risk } = data;
-  const { data: candleData } = useApi<CandlePayload>(`/api/tokens/${mint}/candles`, 10_000);
+  // Owned by TokenInner now, like the live half — one subscription, started in
+  // parallel with the detail fetch.
+  const candleData = candles.data;
   const { data: paper } = useApi<{ portfolios: { id: string; name: string; cashUsd: number }[] }>("/api/paper");
   const [tradeMsg, setTradeMsg] = useState<string | null>(null);
   const [tradeUsd, setTradeUsd] = useState("250");
@@ -1416,7 +1647,11 @@ function DemoToken({ detail, mint }: { detail: DemoTokenDetail; mint: string }) 
         <div className="flex flex-col gap-3 min-w-0">
           <div className="panel">
             <div className="flex items-center justify-between px-3 pt-2.5">
-              <span className="panel-title">Price · hourly · whale markers ≥ $8K</span>
+              {/* The measured label, not an assumed "hourly" — the simulator
+                  does plot hourly bars, and this is how the caption knows. */}
+              <span className="panel-title">
+                Price{candleData?.interval ? ` · ${candleData.interval}` : ""} · whale markers ≥ $8K
+              </span>
               <span className="flex items-center gap-2">
                 {/* Per-panel provenance. The global SIMULATED DATA chip in the
                     nav describes the app; this describes THIS chart, which is

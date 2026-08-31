@@ -84,7 +84,7 @@ export function TopBar({ onOpenPalette, onOpenNav }: { onOpenPalette: () => void
         <button
           onClick={onOpenPalette}
           className="btn text-[11px]"
-          title="Command palette"
+          title="Command palette — press / or ⌘K anywhere"
           aria-label="Search and commands"
         >
           <span aria-hidden="true" className="sm:hidden">⌕</span>

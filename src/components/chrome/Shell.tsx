@@ -19,6 +19,17 @@ export function Shell({ children }: { children: React.ReactNode }) {
         e.preventDefault();
         setPaletteOpen((o) => !o);
       }
+      // "/" opens search the way every reference terminal does — but never
+      // while the reader is typing in a field, where "/" is just a slash.
+      if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const t = e.target as HTMLElement | null;
+        const typing =
+          t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+        if (!typing) {
+          e.preventDefault();
+          setPaletteOpen(true);
+        }
+      }
       if (e.key === "Escape") setNavOpen(false);
     };
     window.addEventListener("keydown", onKey);

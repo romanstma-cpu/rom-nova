@@ -41,11 +41,11 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 
 | # | Stream | Reference to beat | State |
 |---|---|---|---|
-| W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | 🟢 round 3 FAIL (narrow) · full fail-list closed same hour · round-4 confirm running |
+| W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | ✅ **PASS** — round 4 confirmed all five defects closed, no regressions |
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **PASS** — round 4 confirmed the last defect closed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
-| W4 | UI/UX + performance craft | Axiom & Photon density and latency | ⏸ until W1–W3 pass |
-| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | ⏸ until W1–W3 pass |
+| W4 | UI/UX + performance craft | Axiom & Photon density and latency | ✅ **PASS round 1** — merged to main, post-PASS list closed same hour |
+| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🟠 round 1 FAIL (narrow, all keyless-fixable) — builder closing the list |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
 
 ## Round 3 dispatched — both confirmation critics in flight (2026-08-31)
@@ -116,6 +116,117 @@ One honest residual it correctly declined to count: with the local clock
 negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
+
+## W5 round 1: FAIL — the honesty held; the scale seams didn't
+
+The critic verified the machinery against the outside world and it all
+held: a launch alert fired **2.2s after on-chain pool creation** with its
+claimed event time matching the mint's oldest signature **to the second**;
+a SOL price cross verified **to the cent** against independent candles; the
+already-true rule refused to invent a crossing; the hidden-tab gap opened
+and closed with real times; the wallet watermark claimed zero pre-arming
+fills across a 399-signature baseline; adding five rules at once produced
+no vendor burst. Its own sentence: the per-alert honesty "is better than
+anything either reference product shows a user."
+
+Then it failed the round where the unit tests don't reach: the 400-key
+launch dedupe cap uses insertion-order eviction, and against a 30-minute
+feed that produced **41 proven duplicate alerts in five minutes** — and
+the duplicate flood then silently evicted the inbox's own verified
+records, on a page that calls the inbox "the record". Plus a paused
+hidden tab that keeps renewing the evaluation lease and starves the
+visible tab, a dataAsOf stamped `now` over a 45s cache, a PDA
+wallet-rule that watches forever for what can never fire, and four
+smaller wording/label items. Nine (a)-items total, severity-ordered, all
+keyless-fixable. The builder is back on them — first merging main (W4
+landed since its base), then fixing with tests that reach the seams that
+failed. Report: `W5-ROUND1-REPORT.md`.
+
+## ✅ W4 round 1: PASS — the first stream to clear on its first review
+
+The critic re-measured everything itself and could not break it: first
+canvas with real 15m bars at 477/609/548ms cold (three runs, DOM
+sentinels), skeleton DOM containing zero fabricated digits, every
+interval's bar spacing payload-verified (1m = exactly 60s deltas ×360,
+1h = exactly 3600s ×115), CLS 0.000 on the token page, and under a forced
+total vendor outage the chart refused simulated bars for a real mint with
+the full reason chain. It even confirmed the launch feed caught this
+machine's slow clock. Regression sweep clean: Raydium authority still
+refused, all 20 live flow movers pass the curve filter.
+
+**Merged to main (`c6439b1`), and its five fixable notes closed same hour
+(`ef9ae58`)**: a dead chart no longer wears the previous payload's live
+chip; a two-bar chart says "too few to measure a granularity" instead of
+going mute; watchlists banner their simulation at panel level; screener
+placeholders read "any · e.g. 50000" so an empty field stops looking
+filtered; an over-asking window button gets a shortfall sentence. One nit
+stays open honestly: identical change figures across windows on a token
+younger than the windows needs an age source the detail payload does not
+carry. The reference gap that remains is structural: Axiom/Photon lead
+with 1s/15s bars off streaming servers; Nova's floor is 1m because a 1s
+tape on a 10s poll would be a liveness claim the poll cannot keep.
+
+## W4 built — the chart got fast by measuring, not by claiming (2026-08-31)
+
+Branch `w4/ui-craft` (d33711f, five commits, 485/485 tests, tsc clean),
+now under blind review. The headline, DOM-sentinel-timed on the static
+build: **token-page first chart canvas 5.4s → 0.49–1.26s** — candles
+hoisted parallel to detail and served from datapi's sub-hour buckets,
+probed live before any claim (1m/5m/15m all answer keylessly; the
+ms-vs-seconds trap re-confirmed on the way).
+
+The honest part: the chart caption states the interval **measured from
+median bar spacing, never echoed from the request** — which exposed that
+the old "hourly" caption was already false whenever the fallback served
+4h bars. Finer-bar failures degrade to hourly with the reason in the
+provenance note; a real GeckoTerminal throttle during the build exercised
+that path live. Also: skeletons that shimmer bars and never digits, the
+missing `.hint` CSS class four pages referenced, `/`-to-palette with
+selection that scrolls into view, sticky headers on radar/screener.
+Rejected with measurements in the notes: hoisting the hourly fetch (would
+have pushed the verdict header toward ~4.5s), 1s buckets (a liveness
+claim a 10s poll can't keep).
+
+## W5 built — alerts that admit what they didn't see (2026-08-31)
+
+Branch `w5/alerts` (dd9b5e3, 503/503 tests, build clean), now under blind
+review. Six rule types: launch-filter match, watched-token graduation,
+price cross, liquidity floor (a MEASURED zero fires; unmeasured never
+does), signal-band cross, watched-wallet fills. One monitor loop per
+browser via a localStorage heartbeat lease — a second tab idles and says
+so — riding the app's existing self-gating fetch seams, no new vendor
+polling classes.
+
+The part the references don't attempt, because their alerts run on servers
+and Nova's cannot: every rule wears its achieved cadence and a NOT
+EVALUATED chip with the verbatim skip reason; every event separates
+firedAt / dataAsOf / on-chain time (claimed only when a source supplied
+it); a rule armed after a condition is already true says the crossing was
+never observed instead of inventing one; hidden tabs disclose the pause;
+gaps get a ledger. Verified live during the build: real pump.fun launches
+fired within seconds of arming, two met-dbc graduations caught live.
+
+## 🚢 1.6.0 SHIPPED — the campaign's core is clear (2026-08-31)
+
+**W1 ✅ · W2 ✅ · W3 ✅ — every stream now holds a blind-review PASS.**
+
+W1's round-4 critic verified all five fixes live with an ed25519 checker it
+wrote itself (own base58 + RFC 8032 — not the app's): all 47 flow-table
+addresses across three live tokens on-curve, burn address absent, a real
+ATA rendered as a token account with a working owner link, the Raydium
+authority still refused, 44 z's told the truth, symbols on every listed
+position. 468/468 green. Two cosmetic leftovers (net-flat wallets
+unreconciled in the flow caption; "USDCcash" text concatenation) fixed
+before tagging.
+
+Release: tag `v1.6.0` at `42d9268`, CI published, **SHA256
+`7c11a113…f9c67` verified against GitHub's own digest and SHA256SUMS.txt**,
+latest.yml reads 1.6.0 (the trader update feed is live), site copy
+mirrored to romapps.xyz/nova/ with both version strings bumped.
+
+W4 (UI/performance craft) and W5 (honest client-side alerts) builders
+dispatched into their own worktrees the same hour. Blind critics follow
+when they land.
 
 ## W1 round 3 — the arithmetic survived its second independent audit
 

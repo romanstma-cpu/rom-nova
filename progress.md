@@ -41,11 +41,11 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 
 | # | Stream | Reference to beat | State |
 |---|---|---|---|
-| W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | 🟢 round 3 FAIL (narrow) · full fail-list closed same hour · round-4 confirm running |
+| W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | ✅ **PASS** — round 4 confirmed all five defects closed, no regressions |
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **PASS** — round 4 confirmed the last defect closed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
-| W4 | UI/UX + performance craft | Axiom & Photon density and latency | ⏸ until W1–W3 pass |
-| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | ⏸ until W1–W3 pass |
+| W4 | UI/UX + performance craft | Axiom & Photon density and latency | 🔵 UNLOCKED — builder running (cold load, chart granularity, density) |
+| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🔵 UNLOCKED — builder running (client-side alerts with honest coverage gaps) |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
 
 ## Round 3 dispatched — both confirmation critics in flight (2026-08-31)
@@ -116,6 +116,28 @@ One honest residual it correctly declined to count: with the local clock
 negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
+
+## 🚢 1.6.0 SHIPPED — the campaign's core is clear (2026-08-31)
+
+**W1 ✅ · W2 ✅ · W3 ✅ — every stream now holds a blind-review PASS.**
+
+W1's round-4 critic verified all five fixes live with an ed25519 checker it
+wrote itself (own base58 + RFC 8032 — not the app's): all 47 flow-table
+addresses across three live tokens on-curve, burn address absent, a real
+ATA rendered as a token account with a working owner link, the Raydium
+authority still refused, 44 z's told the truth, symbols on every listed
+position. 468/468 green. Two cosmetic leftovers (net-flat wallets
+unreconciled in the flow caption; "USDCcash" text concatenation) fixed
+before tagging.
+
+Release: tag `v1.6.0` at `42d9268`, CI published, **SHA256
+`7c11a113…f9c67` verified against GitHub's own digest and SHA256SUMS.txt**,
+latest.yml reads 1.6.0 (the trader update feed is live), site copy
+mirrored to romapps.xyz/nova/ with both version strings bumped.
+
+W4 (UI/performance craft) and W5 (honest client-side alerts) builders
+dispatched into their own worktrees the same hour. Blind critics follow
+when they land.
 
 ## W1 round 3 — the arithmetic survived its second independent audit
 

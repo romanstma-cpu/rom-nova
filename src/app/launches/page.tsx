@@ -131,6 +131,26 @@ const SOURCE_FLOOR_MS = 2_300;
 const NEAR_GRADUATION = 0.8;
 
 /**
+ * The expanded panel's sighting sentence. Exported for the regression test.
+ *
+ * A promoted row — first seen on the bonding curve, later seen graduated —
+ * keeps its curve-era `firstSeenAt` while the graduation source re-dates
+ * `poolCreatedAt` to the migrated pool's creation. Raw firstSeenAt arithmetic
+ * on such a row renders "seen -116.7s after the source's pool-creation time":
+ * a fabricated negative, reproduced live on exactly the rows gradSeenAt was
+ * added to fix, because this line was written before promotion existed and
+ * never learned about it. Graduation rows therefore anchor on the graduation
+ * sighting, the same quantity gradLagOf feeds the header statistic.
+ */
+export function sightingLine(l: TokenLaunch): string {
+  const secs = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+  if (l.event === "graduation") {
+    return `graduation seen ${secs((l.gradSeenAt ?? l.firstSeenAt) - l.poolCreatedAt)} after the source's pool-creation time`;
+  }
+  return `seen ${secs(l.firstSeenAt - l.poolCreatedAt)} after the source's pool-creation time`;
+}
+
+/**
  * Evidence that this machine's clock is FLATTERING the figures above.
  *
  * WHICH DIRECTION A NEGATIVE LAG ACTUALLY PROVES, because the first version of
@@ -507,7 +527,9 @@ export default function LaunchesPage() {
             title={
               "Median lag for GRADUATIONS — a launchpad curve completing into a real AMM pool.\n\n" +
               `From ${feed.gradLagSamples} graduation${feed.gradLagSamples === 1 ? "" : "s"} that happened after the ` +
-              "graduation sweep started.\n\n" +
+              "graduation sweep started. A row this feed was already watching on the curve when it graduated " +
+              "measures from the moment the graduation itself was first seen, not from the row's first " +
+              "sighting — the two differ by the curve's whole lifetime.\n\n" +
               "This used to be the slow half of the feed by an order of magnitude — around two minutes, because " +
               "GeckoTerminal's new-pool index was the only graduation source wired in and it runs 18-94s behind " +
               "the chain before any polling interval is added. Jupiter's own pool API publishes a graduated list " +
@@ -837,8 +859,7 @@ export default function LaunchesPage() {
                             </div>
                           ))}
                           <div className="faint pt-1.5 text-[10px]">
-                            {l.mint} · seen {((l.firstSeenAt - l.poolCreatedAt) / 1000).toFixed(1)}s after the source&rsquo;s
-                            pool-creation time · via {l.source}
+                            {l.mint} · {sightingLine(l)} · via {l.source}
                           </div>
                         </div>
                       </td>

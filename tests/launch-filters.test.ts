@@ -3,8 +3,9 @@
 // already saying correctly one cell away.
 
 import { describe, it, expect } from "vitest";
-import { clockSkewHint } from "@/app/launches/page";
+import { clockSkewHint, sightingLine } from "@/app/launches/page";
 import type { LaunchFeed } from "@/lib/api/launches";
+import type { TokenLaunch } from "@/lib/types";
 
 /** A feed with the lag fields under test and inert defaults elsewhere. */
 function feed(over: Partial<LaunchFeed>): LaunchFeed {
@@ -130,5 +131,48 @@ describe("the near-graduation filter", () => {
     // The same rule the min-liquidity filter follows: an absent measurement is
     // dropped, never filtered as though it were a small one.
     expect(matchesNearGraduation({ event: "mint" })).toBe(false);
+  });
+});
+
+// Round 3 reproduced the −90.2s-class fabrication a THIRD time, relocated to
+// the expanded detail panel: a promoted row rendered "seen -116.7s after the
+// source's pool-creation time". Every display of this quantity has now been
+// wrong once, which is why the sentence is a single exported function.
+
+/** The three timestamps under test; everything else inert. */
+function sightingRow(over: Partial<TokenLaunch>): TokenLaunch {
+  return {
+    mint: "3bfjYG89vn6auJ7idZGUXuhZJu6zqFAzAH6goSwP4LPd",
+    event: "pool",
+    firstSeenAt: 0,
+    poolCreatedAt: 0,
+    ...over,
+  } as TokenLaunch;
+}
+
+describe("sightingLine — the expanded panel's lag sentence", () => {
+  it("never renders a negative on a promoted row", () => {
+    // The live reproduction: curve sighting 116.7s before the graduation
+    // source's re-dated poolCreatedAt, graduation seen 3.3s after it.
+    const l = sightingRow({
+      event: "graduation",
+      firstSeenAt: 1_000_000,
+      poolCreatedAt: 1_116_700,
+      gradSeenAt: 1_120_000,
+    });
+    expect(sightingLine(l)).toBe("graduation seen 3.3s after the source's pool-creation time");
+    expect(sightingLine(l)).not.toMatch(/-\d/);
+  });
+
+  it("anchors a first-sight graduation on its only sighting", () => {
+    // gradSeenAt is absent by design when the row was ALREADY graduated at
+    // first sight — firstSeenAt is the graduation sighting there.
+    const l = sightingRow({ event: "graduation", firstSeenAt: 5_200, poolCreatedAt: 1_000 });
+    expect(sightingLine(l)).toBe("graduation seen 4.2s after the source's pool-creation time");
+  });
+
+  it("keeps curve rows on firstSeenAt", () => {
+    const l = sightingRow({ event: "pool", firstSeenAt: 8_400, poolCreatedAt: 1_000 });
+    expect(sightingLine(l)).toBe("seen 7.4s after the source's pool-creation time");
   });
 });

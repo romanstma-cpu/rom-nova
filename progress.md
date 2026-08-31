@@ -45,7 +45,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **PASS** — round 4 confirmed the last defect closed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | 🔵 UNLOCKED — builder running (cold load, chart granularity, density) |
-| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🔵 UNLOCKED — builder running (client-side alerts with honest coverage gaps) |
+| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🔵 built (`w5/alerts` @ dd9b5e3, 503 tests) — round-1 blind critic running |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
 
 ## Round 3 dispatched — both confirmation critics in flight (2026-08-31)
@@ -116,6 +116,25 @@ One honest residual it correctly declined to count: with the local clock
 negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
+
+## W5 built — alerts that admit what they didn't see (2026-08-31)
+
+Branch `w5/alerts` (dd9b5e3, 503/503 tests, build clean), now under blind
+review. Six rule types: launch-filter match, watched-token graduation,
+price cross, liquidity floor (a MEASURED zero fires; unmeasured never
+does), signal-band cross, watched-wallet fills. One monitor loop per
+browser via a localStorage heartbeat lease — a second tab idles and says
+so — riding the app's existing self-gating fetch seams, no new vendor
+polling classes.
+
+The part the references don't attempt, because their alerts run on servers
+and Nova's cannot: every rule wears its achieved cadence and a NOT
+EVALUATED chip with the verbatim skip reason; every event separates
+firedAt / dataAsOf / on-chain time (claimed only when a source supplied
+it); a rule armed after a condition is already true says the crossing was
+never observed instead of inventing one; hidden tabs disclose the pause;
+gaps get a ledger. Verified live during the build: real pump.fun launches
+fired within seconds of arming, two met-dbc graduations caught live.
 
 ## 🚢 1.6.0 SHIPPED — the campaign's core is clear (2026-08-31)
 

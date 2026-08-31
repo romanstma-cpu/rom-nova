@@ -750,7 +750,12 @@ function FlowPanelView({ detail }: { detail: LiveTokenDetail }) {
         {f.complete ? "" : " — byte budget reached, window truncated"} ·{" "}
         <span className="num">{f.movements}</span> balance changes across{" "}
         <span className="num">{f.wallets}</span> wallets ({f.buyers} accumulating, {f.sellers}{" "}
-        distributing) · <span className="num">{f.touchedNotMoved}</span> rows were accounts merely
+        distributing
+        {/* The remainder is real and would otherwise read as a counting error:
+            a wallet that bought and sold back to flat inside the window is
+            neither side, but it did move. */}
+        {f.wallets - f.buyers - f.sellers > 0 ? `, ${f.wallets - f.buyers - f.sellers} round-tripped to flat` : ""}
+        ) · <span className="num">{f.touchedNotMoved}</span> rows were accounts merely
         touched by a transaction and discarded. Pool vaults, program authorities and the burn
         address are not counted or listed — the pool side of a swap moves size by definition.
         Every address below is real and checkable.

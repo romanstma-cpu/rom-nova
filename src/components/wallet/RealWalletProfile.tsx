@@ -205,6 +205,8 @@ function PositionRow({ h }: { h: WalletHolding }) {
         <Link href={`/token?m=${h.mint}`} className="hover:text-[var(--accent)] num text-[11.5px]">
           {h.symbol ?? quote ?? shortAddr(h.mint)}
         </Link>
+        {/* Real whitespace, not margin: without it copied text reads "USDCcash". */}
+        {quote && " "}
         {quote && (
           <span className="chip ml-1.5 faint" title="a quote asset — what this wallet trades WITH, not a position it took">
             cash

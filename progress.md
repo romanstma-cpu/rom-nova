@@ -45,7 +45,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **PASS** — round 4 confirmed the last defect closed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ✅ **PASS round 1** — merged to main, post-PASS list closed same hour |
-| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🔵 built (`w5/alerts` @ dd9b5e3, 503 tests) — round-1 blind critic running |
+| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🟠 round 1 FAIL (narrow, all keyless-fixable) — builder closing the list |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
 
 ## Round 3 dispatched — both confirmation critics in flight (2026-08-31)
@@ -116,6 +116,31 @@ One honest residual it correctly declined to count: with the local clock
 negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
+
+## W5 round 1: FAIL — the honesty held; the scale seams didn't
+
+The critic verified the machinery against the outside world and it all
+held: a launch alert fired **2.2s after on-chain pool creation** with its
+claimed event time matching the mint's oldest signature **to the second**;
+a SOL price cross verified **to the cent** against independent candles; the
+already-true rule refused to invent a crossing; the hidden-tab gap opened
+and closed with real times; the wallet watermark claimed zero pre-arming
+fills across a 399-signature baseline; adding five rules at once produced
+no vendor burst. Its own sentence: the per-alert honesty "is better than
+anything either reference product shows a user."
+
+Then it failed the round where the unit tests don't reach: the 400-key
+launch dedupe cap uses insertion-order eviction, and against a 30-minute
+feed that produced **41 proven duplicate alerts in five minutes** — and
+the duplicate flood then silently evicted the inbox's own verified
+records, on a page that calls the inbox "the record". Plus a paused
+hidden tab that keeps renewing the evaluation lease and starves the
+visible tab, a dataAsOf stamped `now` over a 45s cache, a PDA
+wallet-rule that watches forever for what can never fire, and four
+smaller wording/label items. Nine (a)-items total, severity-ordered, all
+keyless-fixable. The builder is back on them — first merging main (W4
+landed since its base), then fixing with tests that reach the seams that
+failed. Report: `W5-ROUND1-REPORT.md`.
 
 ## ✅ W4 round 1: PASS — the first stream to clear on its first review
 

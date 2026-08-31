@@ -994,6 +994,24 @@ export interface LaunchObservation {
   decimals: number;
   poolCreatedAt: number;
   firstSeenAt: number;
+  /**
+   * When the GRADUATION was first sighted, for rows that graduate.
+   *
+   * Distinct from `firstSeenAt` because a watched curve mint that later
+   * graduates keeps its original sighting time — that is the feed's whole
+   * reliability story — while `poolCreatedAt` is re-dated to the graduation.
+   * Computing graduation lag as `firstSeenAt - poolCreatedAt` on such a
+   * promoted row therefore produced a NEGATIVE lag the size of the curve's
+   * lifetime (observed live at -90.2s and -158.8s), which contaminated the
+   * clock-skew check: on a machine with an accurate clock, one promoted
+   * graduation would have fired "clock behind" with a fabricated magnitude.
+   *
+   * Stamped at promotion time, this is a real sample — how long after the
+   * graduation the feed noticed it — instead of an excluded one. Absent means
+   * the row was a graduation at first sight, and `firstSeenAt` already IS the
+   * graduation sighting.
+   */
+  gradSeenAt?: number;
   /** "pool" for a fresh mint, "graduation" when a launchpad curve completed. */
   event: "pool" | "graduation";
   /** The AMM or launchpad that hosts the pool, when the source names it. */

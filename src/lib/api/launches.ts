@@ -348,6 +348,14 @@ export function mergeLaunch(
     ...obs,
     // Never moved by a later sighting.
     firstSeenAt: existing.firstSeenAt,
+    // The graduation's OWN sighting time, stamped once at promotion. A watched
+    // curve mint keeps its original firstSeenAt when it graduates, while
+    // poolCreatedAt is re-dated to the graduation — so the lag statistic read
+    // firstSeenAt - poolCreatedAt and got a negative number the size of the
+    // curve's lifetime (-90.2s and -158.8s observed live), which the clock-skew
+    // check then reported as an impossible clock. This makes the promoted row a
+    // real latency sample instead of a poisoned one.
+    gradSeenAt: existing.gradSeenAt ?? (!wasGrad && isGrad ? now : undefined),
     /**
      * WHICH MOMENT THE ROW IS ABOUT, which stopped being obvious the moment a
      * second graduation source arrived.
@@ -776,12 +784,19 @@ export async function launchFeed(): Promise<LaunchFeed | null> {
   // The headline then described the fast half of the feed while appearing to
   // describe all of it.
   const lagOf = (l: TokenLaunch) => l.firstSeenAt - l.poolCreatedAt;
+  // A promoted row — watched as a curve mint, then graduating — keeps its
+  // original firstSeenAt while poolCreatedAt is re-dated to the graduation, so
+  // measuring it with `lagOf` produced a negative lag the size of the curve's
+  // lifetime and fed the clock-skew check a fabricated impossibility. The
+  // graduation's own sighting time is the honest sample: how long after the
+  // event the feed noticed it.
+  const gradLagOf = (l: TokenLaunch) => (l.gradSeenAt ?? l.firstSeenAt) - l.poolCreatedAt;
   const pools = launches.filter((l) => l.event === "pool" && l.poolCreatedAt > state.startedAt);
   const grads = launches.filter(
     (l) => l.event === "graduation" && state.sweepStartedAt > 0 && l.poolCreatedAt > state.sweepStartedAt,
   );
   const lags = pools.map(lagOf).sort((a, b) => a - b);
-  const gradLags = grads.map(lagOf).sort((a, b) => a - b);
+  const gradLags = grads.map(gradLagOf).sort((a, b) => a - b);
   const now = Date.now();
   const lastMinute = launches.filter((l) => now - l.poolCreatedAt <= 60_000).length;
   const stale = state.lastSuccessAt === 0 || now - state.lastSuccessAt > STALE_AFTER_MS;

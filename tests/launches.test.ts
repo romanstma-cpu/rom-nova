@@ -165,6 +165,45 @@ describe("merging a re-sighting", () => {
     expect(m.get(first.mint)!.event).toBe("graduation");
   });
 
+  it("stamps the graduation's own sighting time at promotion", () => {
+    // A watched curve mint keeps its original firstSeenAt when it graduates,
+    // while poolCreatedAt is re-dated to the graduation. Measuring the lag as
+    // firstSeenAt - poolCreatedAt on such a row produced a NEGATIVE number the
+    // size of the curve's lifetime — observed live at -90.2s and -158.8s — and
+    // the clock-skew check then reported an impossible clock with a fabricated
+    // magnitude. On an accurate machine, one promoted graduation would have
+    // fired "clock behind" spuriously.
+    const m = rows();
+    mergeLaunch(m, first, undefined, SEEN);
+    const gradAt = first.poolCreatedAt + 120_000; // curve completes 2 min later
+    const noticedAt = gradAt + 3_000; // and the feed sees it 3s after that
+    mergeLaunch(
+      m,
+      { ...first, event: "graduation", venue: "pumpswap", poolCreatedAt: gradAt },
+      undefined,
+      noticedAt,
+    );
+    const row = m.get(first.mint)!;
+    expect(row.event).toBe("graduation");
+    expect(row.poolCreatedAt).toBe(gradAt);
+    // The poisoned sample this replaces: firstSeenAt predates the graduation.
+    expect(row.firstSeenAt - row.poolCreatedAt).toBeLessThan(0);
+    // The honest one: when did the feed notice the graduation.
+    expect(row.gradSeenAt).toBe(noticedAt);
+    expect((row.gradSeenAt ?? row.firstSeenAt) - row.poolCreatedAt).toBe(3_000);
+    // And it is stamped ONCE — a later re-sighting must not move it.
+    mergeLaunch(m, { ...first, event: "graduation", poolCreatedAt: gradAt }, undefined, noticedAt + 60_000);
+    expect(m.get(first.mint)!.gradSeenAt).toBe(noticedAt);
+  });
+
+  it("leaves gradSeenAt absent when the row was a graduation at first sight", () => {
+    // There firstSeenAt already IS the graduation sighting, and the lag
+    // fallback reads it.
+    const m = rows();
+    mergeLaunch(m, { ...first, event: "graduation" }, undefined, SEEN);
+    expect(m.get(first.mint)!.gradSeenAt).toBeUndefined();
+  });
+
   it("does not lose a finding when the row is re-triaged on refreshed numbers", () => {
     // Triage is a pure function of (observation, risk), and the row is
     // re-triaged on every poll because its price changes. Re-triaging without

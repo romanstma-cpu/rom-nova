@@ -174,6 +174,14 @@ export function clockSkewHint(feed: LaunchFeed | null | undefined): { label: str
   if (feed.gradLagMinMs !== null && feed.gradLagSamples >= 3) candidates.push(feed.gradLagMinMs);
   if (candidates.length === 0) return null;
   const observed = Math.min(...candidates);
+  // The floor below was measured on the MINT source and belongs only to it.
+  // The graduation pipeline's own measured minimum is 1.0s, well under it, so
+  // running the below-floor test on the combined minimum made a genuinely fast
+  // graduation read as evidence of a slow clock. Negative stays a combined
+  // test — an impossible reading is impossible whichever pipeline produced it —
+  // but "suspiciously fast" is only meaningful against the floor of the
+  // pipeline that was measured.
+  const mintObserved = feed.lagMinMs !== null && feed.lagSamples >= 3 ? feed.lagMinMs : null;
   const tail =
     "\n\nThe opposite direction — a clock running ahead — inflates these figures instead, and cannot be " +
     "detected here at all: it never produces an impossible reading, only a pessimistic one.\n\n" +
@@ -190,11 +198,11 @@ export function clockSkewHint(feed: LaunchFeed | null | undefined): { label: str
         tail,
     };
   }
-  if (observed < SOURCE_FLOOR_MS) {
+  if (mintObserved !== null && mintObserved >= 0 && mintObserved < SOURCE_FLOOR_MS) {
     return {
       label: "clock may be behind",
       title:
-        `The fastest row on this page was seen ${(observed / 1000).toFixed(1)}s after its pool was created, ` +
+        `The fastest row on this page was seen ${(mintObserved / 1000).toFixed(1)}s after its pool was created, ` +
         `which is under the ${(SOURCE_FLOOR_MS / 1000).toFixed(1)}s floor this source was measured at over a ` +
         "sustained run. It cannot publish a pool it has not indexed yet, so the likeliest explanation is a " +
         "local clock running behind the source's — which subtracts itself from every figure above." +

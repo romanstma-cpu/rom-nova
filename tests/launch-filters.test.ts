@@ -76,6 +76,23 @@ describe("clockSkewHint — the graduation pipeline crosses zero first", () => {
     expect(clockSkewHint(feed({}))).toBeNull();
     expect(clockSkewHint(null)).toBeNull();
   });
+
+  it("does not read a genuinely fast graduation as a slow clock", () => {
+    // The below-floor test was applied to the COMBINED minimum, but the 2.3s
+    // floor was measured on the MINT source; the graduation pipeline's own
+    // measured minimum is 1.0s. A fast graduation is a fast graduation, not
+    // evidence about the clock.
+    expect(
+      clockSkewHint(
+        feed({ lagMinMs: 6_000, lagSamples: 8, gradLagMinMs: 1_000, gradLagSamples: 5 }),
+      ),
+    ).toBeNull();
+  });
+
+  it("still flags a suspiciously fast MINT, where the floor was measured", () => {
+    const h = clockSkewHint(feed({ lagMinMs: 400, lagSamples: 8 }));
+    expect(h?.label).toBe("clock may be behind");
+  });
 });
 
 // --------------------------------------------------------- near-graduation

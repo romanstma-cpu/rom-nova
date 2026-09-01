@@ -117,6 +117,45 @@ negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
 
+## W5 round 9 — the last word, and it was a good one
+
+Landed after 1.7.0 shipped. It changed nothing a user sees: the rendered
+copy was verified true again (the /status note, the provenance line "12 of
+12 movements carry no price, for several different reasons — each one
+states its own beside the fill", the UNMEASURED entry, all checked against
+a real chain read), and every regression held — 74 launch rows, zero
+repeated mints, all twelve movements rendering OUT and never SELL.
+
+It failed the guard once more, and named the failure exactly: **the scope
+test had been fixed to the LETTER of round 8's wording rather than to what
+it meant.** Six sweeping claims appended to a source file, guard clean.
+
+- **The share proved proximity, not scope.** Two words back was the rule,
+  so *"46% of wallets had movements with no quote leg"* passed — the
+  percentage governing *wallets* while the claim swept *movements*. The
+  protected sentence contains both nouns; moving the share one noun left
+  is the drift its own history is made of. Now an allowlist of adjectives.
+- **The vocabulary knew one phrasing.** "Movements lack a quote leg", "No
+  movement had a quote leg", "All token movements are unpriced" — the ways
+  a person actually writes it — all walked past a test named "nothing
+  over-claims".
+- 80 characters of intervening text was the ceiling, on a note that is a
+  single 1,000-character string. The cap was measuring prettier's line
+  width, not meaning.
+- The exemption keyed on BASENAME, so `src/lib/wallet-profile.test.ts`
+  could claim it by being named after the guard.
+- The count vocabulary stopped at "eight" and ignored digits, while the
+  reader emits six reason strings today.
+
+All eight exploits replayed and caught, including the impostor-named file.
+And the honesty note this half had been missing: **it matches phrasings,
+not meanings** — a floor on vigilance, not a proof. The names changed to
+match ("the known over-claims stay dead", "finds no known over-claim"),
+because a guard that overstates its coverage is the bug it looks for.
+
+570 tests, tsc clean, build clean. `0c8e441`, no release needed — test and
+comments only.
+
 ## 🚢 1.7.0 SHIPPED — all five streams delivered (2026-09-01)
 
 `w5/alerts` merged to main, tagged `v1.7.0` at `dc1d896`, CI published,

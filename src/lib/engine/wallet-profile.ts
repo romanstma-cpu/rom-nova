@@ -481,7 +481,8 @@ function provenanceLines(
     out.push(
       `${stats.unpricedFills} of ${stats.pricedFills + stats.unpricedFills} movements carry no price — transfers and ` +
         `claims (no quote leg), token-for-token rotations (one leg belonging to both sides), pool deposits and ` +
-        `withdrawals (both legs the same way), and swaps with no SOL/USD bar covering the hour`,
+        `withdrawals (both legs the same way), swaps with no SOL/USD bar covering the hour, and movements whose ` +
+        `SOL residue is too small to tell a purchase from account rent. Each fill says which`,
     );
   }
   if (stats.unmatchedSellMints > 0) {

@@ -395,6 +395,35 @@ describe("assembleProfile — what reaches the screen", () => {
   });
 });
 
+// "No quote leg" was corrected in the provenance line and then found still
+// standing, verbatim, on two other surfaces gated on the same counter — a
+// claim fixed in one place and left in three. `unpriced` covers four causes:
+// no quote leg (transfers, claims), one leg belonging to both sides
+// (rotations), both legs moving the same way (pool deposits), and a swap with
+// a perfectly good quote leg and no SOL/USD bar for its hour.
+describe("nothing claims every unpriced movement lacked a quote leg", () => {
+  it("holds across every surface that describes the count", async () => {
+    const sources = await Promise.all([
+      import("node:fs/promises").then((fs) =>
+        fs.readFile(new URL("../src/lib/engine/wallet-profile.ts", import.meta.url), "utf8"),
+      ),
+      import("node:fs/promises").then((fs) =>
+        fs.readFile(new URL("../src/components/wallet/RealWalletProfile.tsx", import.meta.url), "utf8"),
+      ),
+      import("node:fs/promises").then((fs) =>
+        fs.readFile(new URL("../src/lib/providers/registry.ts", import.meta.url), "utf8"),
+      ),
+    ]);
+    for (const src of sources) {
+      // The phrase may appear as ONE cause among several; what it may never do
+      // is quantify over all of them.
+      expect(src).not.toMatch(/movements have no quote leg/i);
+      expect(src).not.toMatch(/movements — tokens moved with no quote leg/i);
+      expect(src).not.toMatch(/movements had no quote leg/i);
+    }
+  });
+});
+
 // The display tier below what eight fraction digits can show. A real 5.2e-9
 // balance rendered "0" — the same forbidden zero the 0.0016 cbBTC fix cured
 // one tier up, surviving for true dust.

@@ -465,7 +465,13 @@ export type FillPricing =
   | "wsol"
   /** Paid or received in a stablecoin, taken at one dollar. */
   | "stable"
-  /** Tokens moved; nothing this wallet owned moved against them. */
+  /**
+   * No price could be established. NOT the same as "nothing moved against
+   * them": a rotation's quote leg belongs to both sides, a pool deposit's
+   * moves the same way, and a swap can have a perfectly good quote leg with no
+   * SOL/USD bar covering its hour. `unpricedReason` says which, and
+   * `classification` says whether it was a trade at all.
+   */
   | "unpriced";
 
 /**
@@ -473,9 +479,11 @@ export type FillPricing =
  *
  * Deliberately not `WalletTrade`. A trade has a price by definition and this
  * frequently does not — 46% of the token movements measured across five real
- * wallets had no quote leg belonging to the wallet at all, because they were
- * transfers, claims, or token-for-token rotations routed entirely through
- * pools. Those are real events a reader should see; they are not fills at a
+ * wallets came back unpriced. Not all for the same reason, which is a
+ * distinction this comment used to collapse: transfers and claims have no
+ * quote leg, rotations have one that belongs to both sides, pool deposits move
+ * both legs the same way, and some swaps simply have no SOL/USD bar for their
+ * hour. All are real events a reader should see; none of them are fills at a
  * price, and the type says so.
  */
 export interface WalletFill {

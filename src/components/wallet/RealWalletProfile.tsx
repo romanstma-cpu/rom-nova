@@ -312,7 +312,11 @@ const UNMEASURED_COPY: Record<string, string> = {
     "point at anyone's address",
   costBasis: "cost basis on some positions — acquired outside the window or without an observable price",
   realizedPnl: "part of realized PnL — some sells had no observed buy and are excluded rather than counted as profit",
-  fillPrice: "the price of some movements — tokens moved with no quote leg belonging to this wallet",
+  // Not "no quote leg": an LP deposit reaches this state BECAUSE the quote leg
+  // moved, and a swap with no SOL/USD bar had one all along. The count is
+  // every movement without a price; the causes differ and each fill names its
+  // own.
+  fillPrice: "the price of some movements — see each fill's own reason",
 };
 
 export function RealWalletProfile({ p }: { p: WalletProfile }) {

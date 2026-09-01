@@ -294,7 +294,17 @@ export function markEvaluated(s: RuleEvalState, now: number): RuleEvalState {
   };
 }
 
-export function markSkipped(s: RuleEvalState, now: number, reason: string): RuleEvalState {
+/**
+ * Record that a pass could not evaluate this rule, and why.
+ *
+ * `settled` marks an answer that will never change — a rule whose subject was
+ * identified and can never be a token. Those keep the attempt time they
+ * actually had: the monitor has stopped asking, so advancing the clock would
+ * date a request nobody made. Nothing renders it for a settled rule today, but
+ * a stored value that is wrong is a defect waiting for its first reader.
+ */
+export function markSkipped(s: RuleEvalState, now: number, reason: string, settled = false): RuleEvalState {
+  if (settled) return { ...s, lastAttemptAt: s.lastAttemptAt ?? now, lastSkipReason: reason };
   return { ...s, lastAttemptAt: now, lastSkipReason: reason };
 }
 

@@ -192,10 +192,16 @@ export function AlertMonitor() {
       pushToasts(events);
     };
 
-    const skipAll = (rules: LiveAlertRule[], states: Record<string, RuleEvalState>, now: number, reason: string) => {
+    const skipAll = (
+      rules: LiveAlertRule[],
+      states: Record<string, RuleEvalState>,
+      now: number,
+      reason: string,
+      settled = false,
+    ) => {
       dispatch(
         rules,
-        rules.map((r) => ({ state: markSkipped(stateFor(states, r), now, reason), fires: [] })),
+        rules.map((r) => ({ state: markSkipped(stateFor(states, r), now, reason, settled), fires: [] })),
       );
     };
 
@@ -295,9 +301,10 @@ export function AlertMonitor() {
       const already = settled.current.get(key);
       if (already !== undefined) {
         // The source line says "answered", not "failing (8m ago)": nothing is
-        // being attempted, so nothing should be dated as an attempt.
+        // being attempted, so nothing is dated as an attempt — here or in the
+        // rule state, which keeps the time of the attempt it really had.
         noteSourcePass({ key, ok: false, settled: true, note: already });
-        skipAll(rules, states, now, already);
+        skipAll(rules, states, now, already, true);
         return;
       }
       try {

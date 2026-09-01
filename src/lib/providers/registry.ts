@@ -518,8 +518,10 @@ export function providerHealth(): ProviderHealth[] {
             "days and paging further returned nothing), and it is the ONLY keyless endpoint that " +
             "answers the method at all — mainnet-beta, Ankr, drpc, solflare, onfinality and " +
             "BlockPI all refuse. So this is a WINDOW, never a lifetime, and every figure built on " +
-            "it carries its coverage. 46% of token movements have no quote leg belonging to the " +
-            "wallet (transfers, claims, token-for-token rotations) and are recorded UNPRICED",
+            "it carries its coverage. 46% of token movements are recorded UNPRICED, for four " +
+            "different reasons — no quote leg at all (transfers, claims), one leg belonging to " +
+            "both sides (rotations), both legs moving the same way (pool deposits), or no SOL/USD " +
+            "bar covering the hour — and each movement states which of them applies to it",
         }
       : {
           ...demoHealth("solana-rpc-wallet"),

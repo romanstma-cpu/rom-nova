@@ -453,7 +453,10 @@ export async function handleWalletProfile(address: string, stage: "balances" | "
       "Solana could not be reached to read this wallet. The public RPC may be rate-limiting; try again shortly.",
     );
   }
-  return { profile: sourced.data, provenance: sourced.provenance, demo: false };
+  // `builtAt` travels so a consumer can date the READING rather than the
+  // response: this path is cached for 45 seconds, and anything that stamps its
+  // own clock on a cached profile overstates how fresh the chain read was.
+  return { profile: sourced.data, provenance: sourced.provenance, builtAt: sourced.builtAt, demo: false };
 }
 
 export function handleWalletDetail(store: DemoStore, address: string) {

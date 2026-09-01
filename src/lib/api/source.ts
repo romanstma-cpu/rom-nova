@@ -54,6 +54,19 @@ export interface Provenance {
 export interface Sourced<T> {
   data: T;
   provenance: Provenance;
+  /**
+   * When this payload was actually ASSEMBLED, as opposed to when it was handed
+   * to the current caller.
+   *
+   * Set by the caching seams and preserved across cache hits, which is the
+   * entire point: a wallet profile served from the 45-second cache is a
+   * reading of the chain from up to 45 seconds ago, and a consumer that stamps
+   * its own clock on it overstates the freshness of everything derived from
+   * it. The alert monitor learned this the hard way — its wallet alerts
+   * claimed "data as of" the moment the alert fired, for fills that had been
+   * sitting in a cached profile since before the pass began.
+   */
+  builtAt?: number;
 }
 
 export const DEMO: Provenance = {
@@ -560,7 +573,14 @@ export async function walletProfile(
   const job = buildWalletProfile(address, stage).finally(() => walletInFlight.delete(key));
   walletInFlight.set(key, job);
   const fresh = await job;
-  if (fresh) walletCache.set(key, { at: Date.now(), value: fresh });
+  // Stamped once, at assembly, and carried by the cached copy from then on —
+  // so a consumer can always tell how old the READING is rather than how
+  // recently it was handed the answer.
+  if (fresh) {
+    const at = Date.now();
+    fresh.builtAt = at;
+    walletCache.set(key, { at, value: fresh });
+  }
   // A failed refresh serves the last good profile rather than dropping to the
   // simulator, on the same reasoning as the token list: stale real beats fresh
   // fake, and the coverage block already carries the timestamps.

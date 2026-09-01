@@ -158,7 +158,21 @@ export const TICK_VISIBLE_MS = 10_000;
  */
 export const TICK_HIDDEN_MS = 60_000;
 export const SCANNER_EVERY_MS = 20_000;
-export const LAUNCHES_EVERY_MS = 5_000;
+/**
+ * The launch pass's gate, equal to the visible tick ON PURPOSE.
+ *
+ * It was 5s, which the 10s tick can never satisfy: the gate opened every
+ * other tick at best, so the page printed a target of ~5s beside an achieved
+ * cadence of ~11s that was in fact the fastest the loop can go. A target no
+ * amount of healthy operation can reach is not a target, it is a permanent
+ * accusation against a working monitor — and it teaches a reader to ignore the
+ * one number on the page that says whether coverage is keeping up.
+ *
+ * Nothing is lost by aligning them. The feed module refuses to poll its own
+ * vendors faster than its measured ceilings regardless of how often it is
+ * asked, so asking twice as often was never buying fresher launches.
+ */
+export const LAUNCHES_EVERY_MS = TICK_VISIBLE_MS;
 export const DETAIL_EVERY_MS = 60_000;
 /** A full wallet read is up to ~400 RPC calls; four minutes keeps one watched
  *  wallet an order of magnitude cheaper than an open wallet page. */
@@ -200,7 +214,69 @@ export function expectedCadenceMs(c: LiveAlertCondition): number {
 // ------------------------------------------------------------- bookkeeping
 
 const EVAL_RING = 20;
-const SEEN_CAP = 400;
+
+/**
+ * How many dedupe keys one rule remembers.
+ *
+ * THIS NUMBER IS AN INVARIANT, NOT A PREFERENCE, and getting it wrong shipped
+ * the worst defect in this feature's first review: 41 duplicate launch alerts
+ * proven in five minutes, with the median fired alert describing a row it had
+ * already fired on 176 seconds earlier — over half the alert stream was
+ * re-fires.
+ *
+ * The mechanism was 400 keys evicted in insertion order against a feed that
+ * keeps rows for THIRTY MINUTES. On a busy pump.fun afternoon (15-25 matches a
+ * minute) 400 keys churn in well under thirty minutes, so eviction started
+ * dropping keys whose rows were still sitting in the feed. Each dropped key's
+ * row re-matched on the very next pass, re-fired, and its re-added key evicted
+ * another — a rolling duplicate loop that gets worse the busier the feed is,
+ * which is precisely when a launch alert matters.
+ *
+ * So the cap must exceed what the FEED can hold, because "still in the feed"
+ * is exactly the condition under which a key must never be forgotten. The feed
+ * caps itself at FEED_MAX_ROWS = 400 rows, and one mint can legitimately
+ * occupy two keys (its pool and its later graduation), so 800 keys is the
+ * ceiling of what live rows can possibly claim. 1,000 leaves headroom above
+ * that ceiling and still costs about 45KB of the origin's quota per launch
+ * rule at ~45 bytes a key.
+ *
+ * `pruneSeen` below enforces the invariant a second way, so a future change to
+ * the feed's own limits cannot silently reintroduce this.
+ */
+export const SEEN_CAP = 1_000;
+
+/**
+ * Drop dedupe keys the feed no longer holds, before any that it does.
+ *
+ * Insertion order is the wrong axis entirely: what makes a key safe to forget
+ * is that its ROW IS GONE, not that the key is old. A key whose row is still in
+ * the feed will re-match on the next pass the instant it is forgotten, so those
+ * are evicted last and only if the absent ones did not free enough — which,
+ * with SEEN_CAP set above the feed's own capacity, cannot happen in practice.
+ *
+ * Pruning only fires ABOVE the cap, and that bound is load-bearing for a
+ * different failure: after a page reload the feed's in-memory state resets and
+ * rebuilds from a thirty-row page, so almost every remembered key is briefly
+ * "absent". Pruning eagerly there would forget hundreds of rows that are about
+ * to be re-listed by the graduation and pool sweeps with freshly stamped
+ * sighting times, and every one of them would re-fire — the reload duplicates
+ * the review also caught.
+ */
+export function pruneSeen(seen: Iterable<string>, liveKeys: ReadonlySet<string>): string[] {
+  const keys = [...seen];
+  if (keys.length <= SEEN_CAP) return keys;
+  const excess = keys.length - SEEN_CAP;
+  const doomed = new Set<string>();
+  for (const k of keys) {
+    if (doomed.size >= excess) break;
+    if (!liveKeys.has(k)) doomed.add(k);
+  }
+  const kept = keys.filter((k) => !doomed.has(k));
+  // Still over only if the live feed itself exceeds the cap, which the cap is
+  // chosen to prevent. Oldest-first is the least-bad answer if it ever happens.
+  return kept.length > SEEN_CAP ? kept.slice(kept.length - SEEN_CAP) : kept;
+}
+
 /** How many events one rule may emit in one pass before the rest collapse
  *  into a single summary row. A busy launch minute matching a broad filter is
  *  real, but forty separate notifications about it help nobody. */
@@ -311,6 +387,9 @@ export function evaluateLaunchRule(rule: LiveAlertRule, state: RuleEvalState, ob
   const armedBefore = state.armedAt !== undefined;
   const seen = new Set(state.seenKeys ?? []);
   const fires: FiredAlert[] = [];
+  // The keys the feed can still produce a match from. Everything the dedupe
+  // memory must not forget while it is being trimmed.
+  const liveKeys = new Set(obs.rows.map(launchKey));
 
   if (!armedBefore) {
     // Arming consumes the backfill. Every row already in the feed happened
@@ -319,7 +398,7 @@ export function evaluateLaunchRule(rule: LiveAlertRule, state: RuleEvalState, ob
     // and fires on nothing.
     for (const row of obs.rows) seen.add(launchKey(row));
     return {
-      state: { ...markEvaluated(state, now), seenKeys: [...seen].slice(-SEEN_CAP) },
+      state: { ...markEvaluated(state, now), seenKeys: pruneSeen(seen, liveKeys) },
       fires: [],
     };
   }
@@ -339,7 +418,15 @@ export function evaluateLaunchRule(rule: LiveAlertRule, state: RuleEvalState, ob
       firedAt: now,
       dataAsOf: obs.dataAsOf,
       eventAt: row.poolCreatedAt,
-      eventAtNote: `source claim — the pool-creation time ${row.source} published, not a chain read by this app`,
+      // Named for what the row's OWN event is. `poolCreatedAt` is re-dated to
+      // the migrated pool when a curve graduates (see types.ts), so calling it
+      // "the pool-creation time" on a graduation row put the right timestamp
+      // under the wrong claim — the dedicated graduation rule got this right
+      // and the filter rule did not.
+      eventAtNote:
+        row.event === "graduation"
+          ? `source claim — the graduation time ${row.source} published, not a chain read by this app`
+          : `source claim — the pool-creation time ${row.source} published, not a chain read by this app`,
       measurement: describeLaunch(row),
       gapNote: gap,
       headline: `LAUNCH MATCH · ${row.symbol || shortMint(row.mint)}`,
@@ -369,7 +456,7 @@ export function evaluateLaunchRule(rule: LiveAlertRule, state: RuleEvalState, ob
   }
 
   return {
-    state: { ...markEvaluated(state, now), seenKeys: [...seen].slice(-SEEN_CAP) },
+    state: { ...markEvaluated(state, now), seenKeys: pruneSeen(seen, liveKeys) },
     fires,
   };
 }
@@ -400,7 +487,8 @@ export function evaluateGraduationRule(rule: LiveAlertRule, state: RuleEvalState
     : `graduation observed — ${liq}${row.venue ? `, pool on ${row.venue}` : ""}`;
 
   return {
-    state: { ...next, seenKeys: [...seen].slice(-SEEN_CAP) },
+    // Exactly one key for the life of the rule, so there is nothing to prune.
+    state: { ...next, seenKeys: [...seen] },
     fires: [
       {
         ruleId: rule.id,
@@ -691,6 +779,11 @@ export function evaluateWalletRule(rule: LiveAlertRule, state: RuleEvalState, ob
       if (f.ts > watermark) watermark = f.ts;
     }
     return {
+      // Plain truncation is safe HERE and nowhere else in this file: the
+      // block-clock watermark below rejects anything at or before the newest
+      // consumed fill, so a forgotten signature cannot re-fire the way a
+      // forgotten launch key could. That asymmetry is what the launch rule's
+      // `pruneSeen` exists to close.
       state: { ...markEvaluated(state, now), seenKeys: [...seen].slice(-SEEN_CAP), watermarkTs: watermark },
       fires: [],
     };

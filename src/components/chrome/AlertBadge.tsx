@@ -15,21 +15,32 @@ import { alertsRaw, alertsRawServer, parseAlerts, subscribeAlerts } from "@/lib/
 
 export function AlertBadge() {
   const raw = useSyncExternalStore(subscribeAlerts, alertsRaw, alertsRawServer);
-  const unread = useMemo(() => parseAlerts(raw).events.filter((e) => !e.read).length, [raw]);
+  const { unread, truncated } = useMemo(() => {
+    const blob = parseAlerts(raw);
+    return {
+      unread: blob.events.filter((e) => !e.read).length,
+      // The count can only ever describe the alerts still HELD. Once the inbox
+      // has evicted anything, it is a floor rather than a total, and a bare
+      // number would quietly saturate at the cap while claiming precision.
+      truncated: Object.values(blob.dropped ?? {}).reduce((a, b) => a + b, 0) > 0,
+    };
+  }, [raw]);
 
+  const count = `${unread}${truncated ? "+" : ""}`;
   return (
     <Link
       href="/alerts"
       className="btn text-[11px] flex items-center gap-1.5"
       title={
         unread > 0
-          ? `${unread} unread live alert${unread === 1 ? "" : "s"} — fired by this browser's client-side monitor`
+          ? `${count} unread live alert${unread === 1 ? "" : "s"} — fired by this browser's client-side monitor.` +
+            (truncated ? " The inbox has evicted older alerts, so this is a floor, not a total." : "")
           : "Live alerts — client-side monitoring, evaluated in this tab"
       }
-      aria-label={`Alerts${unread > 0 ? `, ${unread} unread` : ""}`}
+      aria-label={`Alerts${unread > 0 ? `, ${count} unread` : ""}`}
     >
       <span aria-hidden="true">◬</span>
-      {unread > 0 && <span className="chip chip-accent text-[10px] num px-1.5">{unread}</span>}
+      {unread > 0 && <span className="chip chip-accent text-[10px] num px-1.5">{count}</span>}
     </Link>
   );
 }

@@ -37,9 +37,72 @@ export interface AlertsBlob {
   events: LiveAlertEvent[];
   states: Record<string, RuleEvalState>;
   settings: AlertSettings;
+  /**
+   * How many events have been evicted, per rule id.
+   *
+   * The inbox calls itself "the record" in two places, and a record that
+   * quietly deletes its own contents is worse than one that admits a limit.
+   * The first review watched an externally-verified SOL price-crossing alert
+   * disappear inside ten minutes, evicted by launch spam, while the page went
+   * on calling itself the record — so eviction now leaves a countable scar the
+   * UI is obliged to print.
+   */
+  dropped: Record<string, number>;
 }
 
-const EMPTY: AlertsBlob = { rules: [], events: [], states: {}, settings: { backgroundWatch: false } };
+const EMPTY: AlertsBlob = { rules: [], events: [], states: {}, settings: { backgroundWatch: false }, dropped: {} };
+
+/**
+ * Trim the inbox to MAX_EVENTS by taking from whichever rule is hogging it.
+ *
+ * Oldest-first across the whole inbox — the obvious policy, and the one that
+ * shipped — makes every rule's history hostage to the noisiest rule on the
+ * page. A launch rule on a busy afternoon emits an event every few seconds and
+ * will churn 200 slots in about four minutes, so a price-crossing alert that
+ * fires once a day is guaranteed to be gone before its owner looks at it. The
+ * rules are not interchangeable and their events are not fungible.
+ *
+ * So the victim is chosen by CENSUS, not by age: the rule with the most events
+ * in the inbox loses its oldest one, repeatedly, until the inbox fits. A rule
+ * holding a single precious alert can only be evicted once every other rule
+ * has been cut down to that same depth, which is the fairest reading of "the
+ * record" that a bounded store allows.
+ */
+export function boundEvents(
+  events: LiveAlertEvent[],
+  dropped: Record<string, number>,
+  cap = MAX_EVENTS,
+): { events: LiveAlertEvent[]; dropped: Record<string, number> } {
+  if (events.length <= cap) return { events, dropped };
+  const counts = new Map<string, number>();
+  for (const e of events) counts.set(e.ruleId, (counts.get(e.ruleId) ?? 0) + 1);
+  const nextDropped = { ...dropped };
+  const doomed = new Set<LiveAlertEvent>();
+
+  while (events.length - doomed.size > cap) {
+    let fattestRule = "";
+    let fattestCount = -1;
+    for (const [ruleId, n] of counts) {
+      if (n > fattestCount) {
+        fattestCount = n;
+        fattestRule = ruleId;
+      }
+    }
+    // Newest first in this array, so the last surviving entry for that rule is
+    // its oldest — the one a reader is least likely to be waiting on.
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (e.ruleId === fattestRule && !doomed.has(e)) {
+        doomed.add(e);
+        break;
+      }
+    }
+    counts.set(fattestRule, fattestCount - 1);
+    nextDropped[fattestRule] = (nextDropped[fattestRule] ?? 0) + 1;
+  }
+
+  return { events: events.filter((e) => !doomed.has(e)), dropped: nextDropped };
+}
 
 function storage(): Storage | null {
   try {
@@ -89,7 +152,13 @@ export function parseAlerts(raw: string | null): AlertsBlob {
     const settings: AlertSettings = {
       backgroundWatch: parsed.settings?.backgroundWatch === true,
     };
-    return { rules, events, states, settings };
+    const dropped: Record<string, number> = {};
+    if (parsed.dropped && typeof parsed.dropped === "object") {
+      for (const [k, v] of Object.entries(parsed.dropped)) {
+        if (typeof v === "number" && Number.isFinite(v) && v > 0) dropped[k] = v;
+      }
+    }
+    return { rules, events, states, settings, dropped };
   } catch {
     return EMPTY;
   }
@@ -108,18 +177,28 @@ export function loadAlerts(): AlertsBlob {
 function save(blob: AlertsBlob): void {
   const s = storage();
   if (!s) return;
+  // Quota-aware rather than oldest-first, and the count of what was taken
+  // travels with it so the inbox can print its own scar.
+  const trimmed = boundEvents(blob.events, blob.dropped ?? {});
   const bounded: AlertsBlob = {
     ...blob,
     rules: blob.rules.slice(0, MAX_RULES),
-    events: blob.events.slice(0, MAX_EVENTS),
+    events: trimmed.events,
+    dropped: trimmed.dropped,
   };
   try {
     s.setItem(KEY, JSON.stringify(bounded));
   } catch {
-    // Most likely quota. Events are the bulk; halving them keeps the rules
-    // and watermarks, which are what monitoring actually needs to go on.
+    // Most likely the storage quota rather than our own cap. Events are the
+    // bulk; halving them keeps the rules and watermarks, which are what
+    // monitoring actually needs to go on. Counted like any other eviction —
+    // a write that fails silently is the same lie as a cap that hides.
+    const half = Math.floor(bounded.events.length / 2);
+    const cut = bounded.events.slice(0, half);
+    const dropped = { ...bounded.dropped };
+    for (const e of bounded.events.slice(half)) dropped[e.ruleId] = (dropped[e.ruleId] ?? 0) + 1;
     try {
-      s.setItem(KEY, JSON.stringify({ ...bounded, events: bounded.events.slice(0, Math.floor(bounded.events.length / 2)) }));
+      s.setItem(KEY, JSON.stringify({ ...bounded, events: cut, dropped }));
     } catch {
       /* storage unavailable — monitoring continues without a saved record */
     }
@@ -163,7 +242,10 @@ export function markAllRead(): void {
 
 export function clearEvents(): void {
   const blob = loadAlerts();
-  save({ ...blob, events: [] });
+  // The drop counters go with them. They exist to explain a hole in the
+  // record, and a record the reader deliberately emptied has no hole to
+  // explain — leaving them would report the user's own click as data loss.
+  save({ ...blob, events: [], dropped: {} });
 }
 
 export function setBackgroundWatch(on: boolean): void {
@@ -178,10 +260,13 @@ export function setBackgroundWatch(on: boolean): void {
  */
 export function applyEvaluation(states: Record<string, RuleEvalState>, fired: LiveAlertEvent[]): void {
   const blob = loadAlerts();
+  // No slice here: `save` bounds the inbox by rule census so one noisy rule
+  // cannot evict another's history. Truncating to the cap first would throw
+  // away the very events that policy exists to protect.
   save({
     ...blob,
     states: { ...blob.states, ...states },
-    events: [...fired, ...blob.events].slice(0, MAX_EVENTS),
+    events: [...fired, ...blob.events],
   });
 }
 
@@ -265,6 +350,16 @@ export interface MonitorStatus {
   leader: boolean;
   visible: boolean;
   backgroundWatch: boolean;
+  /**
+   * This tab is hidden with background watch off, so it evaluates nothing.
+   *
+   * Its own field because the status line must branch on it FIRST. Reading
+   * "not the leader" as the headline let a tab that had just released the
+   * lease (or was still holding a stale one from before a reload) announce
+   * "another tab is monitoring" when the truth was simply that this tab had
+   * stopped — a coverage claim about a tab that may not exist.
+   */
+  paused: boolean;
   startedAt?: number;
   lastTickAt?: number;
   sources: Record<string, SourcePassInfo>;
@@ -281,6 +376,7 @@ let status: MonitorStatus = {
   leader: false,
   visible: true,
   backgroundWatch: false,
+  paused: false,
   sources: {},
   gaps: [],
   notifDelivered: 0,
@@ -350,7 +446,54 @@ export function monitorStatusServer(): MonitorStatus {
 // idle and say so.
 
 const LOCK_KEY = "rom-nova.live-alerts.lock";
-export const LOCK_STALE_MS = 45_000;
+/**
+ * How long an unrenewed lease stays believed.
+ *
+ * The holder renews on every tick, so 2.5 ticks of silence means the holder is
+ * gone — crashed, navigated, or reloaded. It was 45 seconds, chosen when
+ * nothing depended on the number; the cost of that generosity is a window in
+ * which a tab reports that "another tab is monitoring" when the other tab is
+ * its own pre-reload ghost. `pagehide` closes that window in a real browser by
+ * handing the lease back on unload, but unload events are not guaranteed to
+ * run, so the timeout is the backstop that must not be loose.
+ */
+export const LOCK_STALE_MS = 25_000;
+
+/** Age of the current lease in ms, or null when nobody holds one. */
+export function leaseAgeMs(now = Date.now()): number | null {
+  const s = storage();
+  if (!s) return null;
+  try {
+    const raw = s.getItem(LOCK_KEY);
+    if (!raw) return null;
+    const lock = JSON.parse(raw) as { ts: number };
+    return typeof lock.ts === "number" ? now - lock.ts : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether this tab intends to evaluate, decided BEFORE the lease is touched.
+ *
+ * Extracted from the monitor's tick because the bug it fixes was one of
+ * ORDER, not of arithmetic, and order is invisible to a test that only pokes
+ * the lock primitives. The shipped tick renewed the lease at the top of every
+ * pass and only then asked whether it was paused, so a hidden tab with
+ * background watch off held the lock while evaluating nothing — and a visible
+ * tab in the same browser sat idle for minutes announcing that another tab
+ * was monitoring on its behalf.
+ *
+ * `holdLease` is therefore exactly `!paused`: a tab that is not watching must
+ * not hold the right to watch.
+ */
+export function watchDecision(
+  visible: boolean,
+  backgroundWatch: boolean,
+): { paused: boolean; holdLease: boolean } {
+  const paused = !visible && !backgroundWatch;
+  return { paused, holdLease: !paused };
+}
 
 export function acquireLease(tabId: string, now = Date.now()): boolean {
   const s = storage();

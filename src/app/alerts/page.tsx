@@ -35,7 +35,9 @@ import {
   alertsRawServer,
   clearEvents,
   deleteRule,
+  LOCK_STALE_MS,
   markAllRead,
+  MAX_EVENTS,
   monitorStatus,
   monitorStatusServer,
   nextAlertId,
@@ -326,29 +328,64 @@ export default function AlertsPage() {
   const unread = blob.events.filter((e) => !e.read).length;
   const sources = Object.values(status.sources);
   const openGapNow = status.gaps.find((g) => g.to === undefined);
+  const dropped = blob.dropped ?? {};
+  const totalDropped = Object.values(dropped).reduce((a, b) => a + b, 0);
+  const nameOf = (ruleId: string) => blob.rules.find((r) => r.id === ruleId)?.name ?? "a deleted rule";
 
   return (
     <div className="p-3 flex flex-col gap-3">
       <div className="flex items-center gap-3 flex-wrap">
         <h1 className="text-[15px] font-semibold tracking-wide">ALERT CENTER</h1>
-        {unread > 0 && <span className="chip chip-accent">{unread} unread</span>}
+        {unread > 0 && (
+          <span
+            className="chip chip-accent"
+            title={
+              totalDropped > 0
+                ? `${unread} unread of the alerts still held. The inbox keeps at most ${MAX_EVENTS}; ${totalDropped} older alert${totalDropped === 1 ? " has" : "s have"} been evicted, so this count is a floor, not a total.`
+                : `${unread} unread`
+            }
+          >
+            {unread}
+            {totalDropped > 0 ? "+" : ""} unread
+          </span>
+        )}
         <span className="flex items-center gap-1.5 text-[10.5px] num dim">
-          {status.running && status.leader && status.visible ? (
+          {/* Paused is checked FIRST. A paused tab releases its lease, so
+              asking "am I the leader" before "am I even watching" let a tab
+              that had just stood down announce that some other tab was
+              covering for it — including, for up to 45s after a reload, a tab
+              that was simply its own former self. */}
+          {!status.running ? (
+            <span className="faint">monitor starting…</span>
+          ) : status.paused ? (
+            <span className="warn" title="This tab is hidden and background watch is off, so nothing is being evaluated here. The lease has been released, so any visible Nova tab can take over immediately.">
+              ■ paused — tab hidden
+            </span>
+          ) : !status.leader ? (
+            // States what is actually KNOWN — that the lock is held — rather
+            // than asserting that evaluation is happening somewhere. The two
+            // are not the same, and after a reload the holder can briefly be
+            // this tab's own ghost, monitoring nothing at all.
+            <span
+              className="warn"
+              title={
+                "Another Nova tab in this browser holds the evaluation lease, so this tab is not evaluating. " +
+                `If that holder has stopped, its lease expires after ${Math.round(LOCK_STALE_MS / 1000)}s and this ` +
+                "tab takes over on the next tick — briefly after a reload, the holder can be this tab's own " +
+                "previous page. Whether rules are actually being evaluated is per-rule, below: anything not " +
+                "evaluated says NOT EVALUATED."
+              }
+            >
+              ◌ another tab holds the monitor lease
+            </span>
+          ) : status.visible ? (
             <>
               <span className="live-dot" /> monitoring in this tab
             </>
-          ) : status.running && status.leader && status.backgroundWatch ? (
+          ) : (
             <>
               <span className="live-dot" /> background watch (throttled by the browser)
             </>
-          ) : status.running && !status.leader ? (
-            <span title="Another Nova tab in this browser holds the evaluation lease; rules are evaluated there and shared here.">
-              ◌ another tab is monitoring
-            </span>
-          ) : status.running ? (
-            <span className="warn">■ paused — tab hidden</span>
-          ) : (
-            <span className="faint">monitor starting…</span>
           )}
         </span>
         <div className="ml-auto flex items-center gap-2">
@@ -516,6 +553,24 @@ export default function AlertsPage() {
               when a source actually claimed one
             </span>
           </div>
+          {/* The inbox says it is the record, so it has to own its own limit.
+              It used to evict oldest-first and silently, which meant a busy
+              launch rule could erase every other rule's history inside a few
+              minutes — a verified price-crossing alert vanished that way. What
+              was taken is now counted per rule and printed. */}
+          {totalDropped > 0 && (
+            <div className="px-3 py-1.5 border-b border-[rgba(27,35,51,0.5)] text-[10.5px] warn">
+              History truncated: {totalDropped} older alert{totalDropped === 1 ? "" : "s"} dropped to stay inside the{" "}
+              {MAX_EVENTS}-alert inbox —{" "}
+              {Object.entries(dropped)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 4)
+                .map(([ruleId, n]) => `${n} from "${nameOf(ruleId)}"`)
+                .join(", ")}
+              . Eviction takes from whichever rule holds the most, so a noisy rule cannot delete a quiet one&apos;s
+              record.
+            </div>
+          )}
           <div className="max-h-[560px] overflow-y-auto">
             {blob.events.map((e) => (
               <Link

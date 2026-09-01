@@ -60,6 +60,7 @@ import {
   openGap,
   releaseLease,
   updateMonitorStatus,
+  watchDecision,
 } from "@/lib/alerts/store";
 import { deliverNotification } from "@/lib/alerts/notify";
 
@@ -72,11 +73,30 @@ interface DetailResp {
 
 interface ProfileResp {
   profile: WalletProfile;
+  /** When the profile was assembled — absent on payloads that predate it. */
+  builtAt?: number;
   demo: boolean;
 }
 
 function stateFor(states: Record<string, RuleEvalState>, rule: LiveAlertRule): RuleEvalState {
   return states[rule.id] ?? { ruleId: rule.id };
+}
+
+/**
+ * A token rule's skip reason, said in the language of tokens.
+ *
+ * The chain's own answer for an address with no account is phrased for a
+ * wallet lookup — "no system account exists at this address — it holds no
+ * SOL" — which is true, useful on the wallet page, and nearly unreadable as
+ * the explanation for why a price rule on a mint is not evaluating. The
+ * underlying sentence is kept, because it is the source's actual words and a
+ * reader may want them; it is just no longer the whole message.
+ */
+export function mintSkipReason(message: string): string {
+  if (/no system account exists|no account exists/i.test(message)) {
+    return `no token exists at this mint address on Solana, so there is nothing to price — ${message}`;
+  }
+  return `token detail unreachable — ${message}`;
 }
 
 /** Fold one pass's results into id-keyed states + concrete events. */
@@ -241,7 +261,7 @@ export function AlertMonitor() {
           ),
         );
       } catch (err) {
-        const why = `token detail unreachable — ${err instanceof Error ? err.message : String(err)}`;
+        const why = mintSkipReason(err instanceof Error ? err.message : String(err));
         noteSourcePass({ key, lastAttemptAt: now, ok: false, note: why });
         skipAll(rules, states, now, why);
       }
@@ -253,7 +273,30 @@ export function AlertMonitor() {
       try {
         const body = await apiGet<ProfileResp>(`/api/wallets/${wallet}/profile`);
         const p = body.profile;
-        noteSourcePass({ key, lastAttemptAt: now, lastSuccessAt: now, dataAsOf: p.coverage.newestTs || undefined, ok: true });
+
+        // An address that cannot have fills of its own must not wear the same
+        // WATCHING chip as a healthy rule.
+        //
+        // A PDA, a program, or a token mint returns a perfectly successful
+        // profile with an empty fill list, which the evaluator read as a clean
+        // pass: zero fills, evaluated just now, forever. The app's own wallet
+        // page has always refused these addresses in as many words ("PROGRAM
+        // OWNED … its activity is a protocol's, not a trader's") while the
+        // alert rule beside it implied it was standing guard over something.
+        // Silence from a rule that CAN never fire is the purest form of the
+        // all-clear this whole feature exists to refuse.
+        if (p.identity && p.identity.profilable === false) {
+          const why = `this address cannot have fills of its own — ${p.identity.detail}`;
+          noteSourcePass({ key, lastAttemptAt: now, ok: false, note: why });
+          skipAll(rules, states, now, why);
+          return;
+        }
+
+        // The moment the profile was ASSEMBLED, not the moment this pass ran.
+        // The seam caches for 45 seconds, so `now` would have claimed a
+        // freshness the chain read never had.
+        const dataAsOf = body.builtAt ?? now;
+        noteSourcePass({ key, lastAttemptAt: now, lastSuccessAt: now, dataAsOf, ok: true });
         dispatch(
           rules,
           rules.map((r) =>
@@ -272,9 +315,7 @@ export function AlertMonitor() {
                 })),
                 newestTs: p.coverage.newestTs,
                 windowHours: p.coverage.windowHours,
-                // The read finished now, possibly from the profile seam's 45s
-                // cache; the fills' own block times carry the on-chain moment.
-                dataAsOf: now,
+                dataAsOf,
                 sourceName: p.coverage.source,
               },
               now,
@@ -297,19 +338,32 @@ export function AlertMonitor() {
       const { rules, states, settings } = loadAlerts();
       const enabled = rules.filter((r) => r.enabled);
 
-      // One evaluating tab per browser profile. The lease is a heartbeat in
-      // localStorage; a crashed leader goes stale in 45s and any tab takes
-      // over on its next tick.
-      const leader = acquireLease(tabId, now);
+      // Whether this tab is watching AT ALL is decided before the lease is
+      // touched, and that order is the fix for a real starvation bug.
+      //
+      // The lease was renewed at the top of every tick, unconditionally. A
+      // hidden tab with background watch off therefore kept the lock alive
+      // every ten seconds while evaluating precisely nothing, and a VISIBLE
+      // tab in the same browser sat locked out for minutes displaying
+      // "another tab is monitoring" — a coverage claim on behalf of a tab that
+      // had no intention of covering anything. The per-rule chips fell to NOT
+      // EVALUATED, which was the only honest thing on that screen.
+      //
+      // A paused tab now releases the lease instead of renewing it, so the
+      // handoff is immediate rather than waiting out the 45s staleness window.
+      const { paused, holdLease } = watchDecision(visible, settings.backgroundWatch);
+      const leader = holdLease ? acquireLease(tabId, now) : false;
+      if (!holdLease) releaseLease(tabId);
+
       updateMonitorStatus({
         running: true,
         leader,
         visible,
+        paused,
         backgroundWatch: settings.backgroundWatch,
         lastTickAt: now,
       });
 
-      const paused = !visible && !settings.backgroundWatch;
       if (paused) openGap(now, "tab hidden — monitoring paused (background watch is off)");
       else closeGap(now);
 
@@ -377,13 +431,26 @@ export function AlertMonitor() {
       }
     };
 
+    // Hand the lease back when the page goes away, so a reload does not leave
+    // its own ghost holding the lock.
+    //
+    // React's cleanup does not reliably run on a navigation or a reload, and
+    // the lease outlives the tab that took it by up to LOCK_STALE_MS. The
+    // symptom is a tab telling the user that "another tab is monitoring" when
+    // the other tab is its own former self, forty seconds dead. `pagehide` is
+    // the event that actually fires in that path (`beforeunload` does not,
+    // reliably, and blocks the bfcache when it does).
+    const onPageHide = () => releaseLease(tabId);
+
     void tick();
     document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", onPageHide);
     return () => {
       dead = true;
       if (timer) clearTimeout(timer);
       for (const t of toastTimers) clearTimeout(t);
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", onPageHide);
       releaseLease(tabId);
       updateMonitorStatus({ running: false, leader: false });
     };

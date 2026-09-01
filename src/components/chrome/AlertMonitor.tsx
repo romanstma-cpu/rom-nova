@@ -167,7 +167,11 @@ export function AlertMonitor() {
           skipAll(rules, states, now, why);
           return;
         }
-        noteSourcePass({ key: "scanner", lastAttemptAt: now, lastSuccessAt: now, dataAsOf: body.asOf, ok: true });
+        // The evaluation clock is read after the fetch returns, not at the tick
+        // that started it — see the wallet pass for what stamping the earlier
+        // reading did to the record.
+        const at = Date.now();
+        noteSourcePass({ key: "scanner", lastAttemptAt: now, lastSuccessAt: at, dataAsOf: body.asOf, ok: true });
         dispatch(
           rules,
           rules.map((r) =>
@@ -182,7 +186,7 @@ export function AlertMonitor() {
                 dataTs: row.dataTs,
               })),
               body.asOf,
-              now,
+              at,
             ),
           ),
         );
@@ -215,14 +219,15 @@ export function AlertMonitor() {
           skipAll(rules, states, now, why);
           return;
         }
-        noteSourcePass({ key: "launches", lastAttemptAt: now, lastSuccessAt: now, dataAsOf: feed.lastSuccessAt, ok: true });
+        const at = Date.now();
+        noteSourcePass({ key: "launches", lastAttemptAt: now, lastSuccessAt: at, dataAsOf: feed.lastSuccessAt, ok: true });
         const obs = { rows: feed.launches, dataAsOf: feed.lastSuccessAt, sourceName: feed.provenance.source };
         dispatch(
           rules,
           rules.map((r) =>
             r.condition.kind === "graduation"
-              ? evaluateGraduationRule(r, stateFor(states, r), obs, now)
-              : evaluateLaunchRule(r, stateFor(states, r), obs, now),
+              ? evaluateGraduationRule(r, stateFor(states, r), obs, at)
+              : evaluateLaunchRule(r, stateFor(states, r), obs, at),
           ),
         );
       } catch (err) {
@@ -244,7 +249,8 @@ export function AlertMonitor() {
           return;
         }
         const dataAsOf = body.snapshot.ts ?? body.asOf ?? now;
-        noteSourcePass({ key, lastAttemptAt: now, lastSuccessAt: now, dataAsOf, ok: true });
+        const at = Date.now();
+        noteSourcePass({ key, lastAttemptAt: now, lastSuccessAt: at, dataAsOf, ok: true });
         const obs = {
           priceUsd: body.snapshot.priceUsd,
           liquidityUsd: body.snapshot.liquidityUsd,
@@ -256,8 +262,8 @@ export function AlertMonitor() {
           rules,
           rules.map((r) =>
             r.condition.kind === "price_cross"
-              ? evaluatePriceRule(r, stateFor(states, r), obs, now)
-              : evaluateLiquidityRule(r, stateFor(states, r), obs, now),
+              ? evaluatePriceRule(r, stateFor(states, r), obs, at)
+              : evaluateLiquidityRule(r, stateFor(states, r), obs, at),
           ),
         );
       } catch (err) {
@@ -296,7 +302,12 @@ export function AlertMonitor() {
         // The seam caches for 45 seconds, so `now` would have claimed a
         // freshness the chain read never had.
         const dataAsOf = body.builtAt ?? now;
-        noteSourcePass({ key, lastAttemptAt: now, lastSuccessAt: now, dataAsOf, ok: true });
+        // And the evaluation happens HERE, after the read returned — up to
+        // 15.6s after the tick that started it. Stamping fires with the tick
+        // clock printed a record whose data was newer than the evaluation
+        // that produced it, which reads as a causality error.
+        const at = Date.now();
+        noteSourcePass({ key, lastAttemptAt: now, lastSuccessAt: at, dataAsOf, ok: true });
         dispatch(
           rules,
           rules.map((r) =>
@@ -312,13 +323,17 @@ export function AlertMonitor() {
                   tokens: f.tokens,
                   valueUsd: f.valueUsd,
                   unpricedReason: f.unpricedReason,
+                  // Carried, not dropped: without it the evaluator has no basis
+                  // for the trade side it stamps, and a transfer went out as
+                  // "sold" in a headline and an OS notification.
+                  classification: f.classification,
                 })),
                 newestTs: p.coverage.newestTs,
                 windowHours: p.coverage.windowHours,
                 dataAsOf,
                 sourceName: p.coverage.source,
               },
-              now,
+              at,
             ),
           ),
         );

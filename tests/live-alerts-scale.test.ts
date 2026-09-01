@@ -445,3 +445,87 @@ describe("skip reasons are phrased for the rule that failed (D8)", () => {
     expect(mintSkipReason("HTTP 429")).toBe("token detail unreachable — HTTP 429");
   });
 });
+
+// ------------------------------------------- round 2: a transfer is not a sale
+
+describe("wallet alerts do not promote a transfer to a trade", () => {
+  const WALLET = "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9";
+  const MINT = "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN";
+  const rule: LiveAlertRule = {
+    id: "wt",
+    name: "wallet",
+    condition: { kind: "wallet_fills", wallet: WALLET },
+    enabled: true,
+    notify: true,
+    createdAt: T0 - 1_000,
+  };
+  const armed = () =>
+    evaluateWalletRule(
+      rule,
+      { ruleId: "wt" },
+      { fills: [], newestTs: T0 - 60_000, windowHours: 48, dataAsOf: T0 - 60_000, sourceName: "solana-rpc" },
+      T0 - 30_000,
+    ).state;
+
+  const fireWith = (classification: "transfer" | "reduce") =>
+    evaluateWalletRule(
+      rule,
+      armed(),
+      {
+        fills: [
+          {
+            signature: "sigT",
+            ts: T0 - 5_000,
+            mint: MINT,
+            side: "sell",
+            tokens: 1_000,
+            unpricedReason: "no quote leg — tokens moved without this wallet paying or receiving",
+            classification,
+          },
+        ],
+        newestTs: T0 - 5_000,
+        windowHours: 48,
+        dataAsOf: T0 - 1_000,
+        sourceName: "solana-rpc",
+      },
+      T0,
+    ).fires[0];
+
+  // The exact alert the review captured: headline WALLET SELL, detail "sold",
+  // for a movement wallet-chain had already tagged `transfer` and the wallet
+  // page prints as OUT. The headline is also the OS notification title.
+  it("never says sold for a movement nobody paid for", () => {
+    const f = fireWith("transfer");
+    expect(f.detail).not.toMatch(/\bsold\b/);
+    expect(f.headline).not.toMatch(/SELL/);
+    expect(f.headline).toContain("OUT");
+    expect(f.detail).toMatch(/sent/);
+    expect(f.detail).toMatch(/a transfer, not a trade/);
+  });
+
+  it("still says sold for a real priced exit", () => {
+    const f = fireWith("reduce");
+    expect(f.headline).toContain("SELL");
+    expect(f.detail).toMatch(/\bsold\b/);
+    expect(f.detail).not.toMatch(/not a trade/);
+  });
+
+  // An older stored fill, or any producer that predates the field, must not
+  // silently become a transfer — absence is not evidence of one.
+  it("treats an unclassified fill as the trade it is labelled", () => {
+    const f = evaluateWalletRule(
+      rule,
+      armed(),
+      {
+        fills: [{ signature: "sigU", ts: T0 - 5_000, mint: MINT, side: "buy", tokens: 5, valueUsd: 50 }],
+        newestTs: T0 - 5_000,
+        windowHours: 48,
+        dataAsOf: T0 - 1_000,
+        sourceName: "solana-rpc",
+      },
+      T0,
+    ).fires[0];
+    expect(f.headline).toContain("BUY");
+    expect(f.detail).toMatch(/bought/);
+  });
+});

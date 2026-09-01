@@ -24,7 +24,7 @@
 //    "price was found above $2 after 190 seconds nobody was looking" are
 //    different claims, and Cielo/Photon render both as the first one.
 
-import type { LaunchVerdict, TokenLaunch } from "../types";
+import type { LaunchVerdict, TokenLaunch, TradeClassification } from "../types";
 
 /** Base58, 32-44 chars — same shape gate the API handlers apply. Local copy
  *  so the rule form can validate without dragging the handler graph along. */
@@ -748,6 +748,17 @@ export interface WalletFillObs {
   tokens: number;
   valueUsd?: number;
   unpricedReason?: string;
+  /**
+   * What the movement WAS, as the chain read classified it.
+   *
+   * `side` alone is a direction, not a trade: tokens arriving by airdrop or by
+   * someone else's purchase have `side: "buy"` and `classification: "transfer"`,
+   * and the wallet page has always printed those as IN/OUT for exactly that
+   * reason. The alert path dropped this field on the way in and then asserted
+   * "sold" into a headline, a toast and an OS notification title — the app's
+   * loudest surface making the one claim its own pipeline had already refused.
+   */
+  classification?: TradeClassification;
 }
 
 export interface WalletObs {
@@ -805,6 +816,12 @@ export function evaluateWalletRule(rule: LiveAlertRule, state: RuleEvalState, ob
   for (const f of fresh.slice(0, MAX_FILL_FIRES)) {
     const what = f.symbol || shortMint(f.mint);
     const value = f.valueUsd !== undefined ? usd(f.valueUsd) : `unpriced${f.unpricedReason ? ` — ${f.unpricedReason}` : ""}`;
+    // A movement nobody paid for is a direction, not a trade. The wallet page
+    // prints these IN/OUT; the alert says the same thing in its own words
+    // rather than promoting a transfer to a sale.
+    const moved = f.classification === "transfer";
+    const word = moved ? (f.side === "buy" ? "received" : "sent") : f.side === "buy" ? "bought" : "sold";
+    const label = moved ? (f.side === "buy" ? "IN" : "OUT") : f.side.toUpperCase();
     fires.push({
       ruleId: rule.id,
       ruleName: rule.name,
@@ -813,11 +830,12 @@ export function evaluateWalletRule(rule: LiveAlertRule, state: RuleEvalState, ob
       dataAsOf: obs.dataAsOf,
       eventAt: f.ts,
       eventAtNote: "block time — when the fill actually landed on chain",
-      measurement: `${f.side.toUpperCase()} ${what} ${value}`,
+      measurement: `${label} ${what} ${value}`,
       gapNote: gap,
-      headline: `WALLET ${f.side.toUpperCase()} · ${short}`,
+      headline: `WALLET ${label} · ${short}`,
       detail:
-        `${short} ${f.side === "buy" ? "bought" : "sold"} ${what} (${value}). ` +
+        `${short} ${word} ${what} (${value})` +
+        (moved ? " — a transfer, not a trade: nothing was paid or received for it. " : ". ") +
         `Fill landed at block time; this tab noticed it ${Math.max(0, Math.round((now - f.ts) / 1000))}s later by its own clock.`,
       mint: f.mint,
       symbol: f.symbol,

@@ -189,10 +189,10 @@ function save(blob: AlertsBlob): void {
   try {
     s.setItem(KEY, JSON.stringify(bounded));
   } catch {
-    // Most likely the storage quota rather than our own cap. Events are the
-    // bulk; halving them keeps the rules and watermarks, which are what
-    // monitoring actually needs to go on. Counted like any other eviction —
-    // a write that fails silently is the same lie as a cap that hides.
+    // Most likely the storage quota rather than our own cap. Halving the
+    // events keeps the rules and watermarks, which are what monitoring
+    // actually needs to go on. Counted like any other eviction — a write that
+    // fails silently is the same lie as a cap that hides.
     const half = Math.floor(bounded.events.length / 2);
     const cut = bounded.events.slice(0, half);
     const dropped = { ...bounded.dropped };
@@ -200,7 +200,21 @@ function save(blob: AlertsBlob): void {
     try {
       s.setItem(KEY, JSON.stringify({ ...bounded, events: cut, dropped }));
     } catch {
-      /* storage unavailable — monitoring continues without a saved record */
+      // Events were never the bulk: dedupe keys are, at ~53 bytes each and up
+      // to a thousand per launch rule — megabytes against the events' hundred
+      // kilobytes. So the last resort sheds THOSE, keeping each rule's newest
+      // keys (the rows still in the feed, which are the ones that would
+      // re-fire). Giving up here instead would persist nothing at all, and a
+      // dedupe set that stops persisting is the duplicate storm returning.
+      const states: typeof bounded.states = {};
+      for (const [id, st] of Object.entries(bounded.states)) {
+        states[id] = st.seenKeys ? { ...st, seenKeys: st.seenKeys.slice(-100) } : st;
+      }
+      try {
+        s.setItem(KEY, JSON.stringify({ ...bounded, events: cut, dropped, states }));
+      } catch {
+        /* storage unavailable — monitoring continues without a saved record */
+      }
     }
   }
   bump();

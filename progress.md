@@ -45,7 +45,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **PASS** — round 4 confirmed the last defect closed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ✅ **PASS round 1** — merged to main, post-PASS list closed same hour |
-| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🟢 round 6 FAIL (1 item) — enumerations dropped, guard now self-finding (@ 037877d) · round-7 confirm running |
+| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🟢 round 7 FAIL (guard only — copy clean) — guard now normalises wrapped text (@ 55abc9a, 561 tests) · round-8 confirm running |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
 
 ## Round 3 dispatched — both confirmation critics in flight (2026-08-31)
@@ -116,6 +116,52 @@ One honest residual it correctly declined to count: with the local clock
 negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
+
+## W5 round 7: FAIL — the guard couldn't read the copy it guards
+
+**The rendered surfaces are clean** — the critic read all 25 unpriced rows'
+tooltips on a live wallet and every one stated its own reason; the
+provenance line, the UNMEASURED tooltip and the /status note all true, no
+closed lists, 46% correctly labelled at all four sites. Every regression
+passed, including the settled rule freezing `lastAttemptAt` across 260s of
+live ticks.
+
+It failed the guard itself, for the third round running and sharper each
+time. **The guard searched RAW source, and every long string here is
+wrapped** — `"…" + "…"` across lines, JSDoc asterisks, runs of `//`. So it
+only ever matched inside a fragment. Proved both ways: /status really does
+render "movements had no quote leg", and the guard missed it purely
+because prettier broke the line mid-phrase — one reflow from failing on
+correct copy — while a flatly false claim wrapped across two comment lines
+passed 27/27.
+
+### The guard now reads what a reader reads
+
+It normalises first: joins adjacent literals the way the runtime does,
+strips comment furniture, collapses whitespace, then matches. **Its
+normaliser is itself tested on all three wrappings**, because if that
+cannot reconstruct a sentence, everything downstream is theatre.
+
+It also learned the difference between a measurement and a claim. "46% of
+token movements had no quote leg" is the measurement and must stay
+sayable; the same phrase quantifying the whole unpriced set is the defect.
+So the patterns are exempt when scoped by a measured share — and that
+exemption, the guard's one soft spot, is tested in both directions rather
+than trusted.
+
+Three counts it immediately caught, all **de-quantified rather than
+corrected**, because a number in prose about a growing list is a defect
+with a delay: "refuses in three cases" (five), "six distinct reason
+strings" (seven), "three distinguishable causes" (four).
+
+The walk now covers `tests/` too — the previous guard could not read
+itself while its own preamble closed a four-cause list. Exempt is one
+explicitly marked, greppable region: the patterns, the normaliser's
+documentation (which must quote the offending phrase to explain it), and
+the strings proving they fire. Verified by injection — a false claim
+wrapped across two comment lines now fails by file and pattern.
+
+561 tests, tsc clean, build clean.
 
 ## W5 round 6: FAIL — and the guard had committed the same sin
 

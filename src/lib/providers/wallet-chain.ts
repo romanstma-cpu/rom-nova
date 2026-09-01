@@ -386,7 +386,9 @@ const toUnits = (raw: bigint, decimals: number): number => Number(raw) / 10 ** d
 /**
  * One transaction to at most one fill.
  *
- * Refuses in three cases, all of them honestly:
+ * Refuses to price several kinds of movement, all of them honestly — the list
+ * below is illustrative, not closed, because it has grown twice since it was
+ * written and the count in this sentence did not follow either time:
  *
  *  - No non-quote token moved: this is a SOL or stablecoin transfer, not a
  *    position change.
@@ -467,8 +469,8 @@ export function fillsFromTx(
   }
 
   if (quoteMint === undefined) {
-    // Three distinguishable causes, and a reader should be told which. The
-    // third is the one that surprises: a wallet whose ANSEM balance grew four
+    // Distinguishable causes, and a reader should be told which. The one that
+    // surprises: a wallet whose ANSEM balance grew four
     // times with no SOL leaving it, because a Jupiter swap signed and PAID FOR
     // by a different wallet delivered the tokens. Terminal bots and desks work
     // that way. The tokens are real and the cost belongs to someone else's

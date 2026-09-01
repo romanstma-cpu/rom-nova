@@ -478,12 +478,12 @@ function provenanceLines(
     // SOL/USD bar covering the hour, and pool movements where both legs went
     // the same way — the same four-into-one collapse the classification had.
     // The count is right; the reason had to stop being a single claim.
-    // No enumeration. Every prose list of the causes has drifted out of date
-    // within a round of being written — the chain reader emits six distinct
-    // reason strings and gains one whenever a new case is told apart, while a
-    // sentence like this one is updated only when somebody notices. The fills
-    // each carry their own reason; this line reports the count and points at
-    // them.
+    // No enumeration, and no count of the enumeration either. Every prose list
+    // of these causes has drifted out of date within a round of being written:
+    // the chain reader gains a reason string whenever a new case is told
+    // apart, while a sentence like this one is updated only when somebody
+    // notices. The fills each carry their own reason; this line reports how
+    // many there are and points at them.
     out.push(
       `${stats.unpricedFills} of ${stats.pricedFills + stats.unpricedFills} movements carry no price, for several ` +
         `different reasons — each one states its own beside the fill`,

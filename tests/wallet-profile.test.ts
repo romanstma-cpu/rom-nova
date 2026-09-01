@@ -395,29 +395,89 @@ describe("assembleProfile — what reaches the screen", () => {
   });
 });
 
-// "No quote leg" was corrected in the provenance line and then found still
-// standing, verbatim, on two other surfaces gated on the same counter — a
-// claim fixed in one place and left in three. `unpriced` covers four causes:
-// no quote leg (transfers, claims), one leg belonging to both sides
-// (rotations), both legs moving the same way (pool deposits), and a swap with
-// a perfectly good quote leg and no SOL/USD bar for its hour.
-describe("nothing claims every unpriced movement lacked a quote leg", () => {
-  // The first version of this guard read three files and passed while the
-  // banned phrase sat in a fourth — the same "fixed where it was quoted"
-  // failure it exists to prevent, committed by the guard itself. It now reads
-  // every file in src/ that mentions the unpriced set at all, discovered
-  // rather than listed, so a new surface cannot be added outside its reach.
-  const BANNED = [
-    /movements have no quote leg/i,
+// A claim about the unpriced set was corrected where it had been quoted and
+// left standing on the surfaces beside it, three rounds running. This guard is
+// the third attempt at stopping that, and the first two failed in instructive
+// ways: version one read three files from a hand-written array while the
+// phrase sat in a fourth, and version two searched raw source — which cannot
+// see a sentence written the way every sentence here is written.
+describe("nothing over-claims about the unpriced set", () => {
+  /* guard-fixture:start — the guard's machinery: the normaliser (whose own
+     documentation has to QUOTE the offending phrase to explain it), the
+     pattern lists, and the strings that prove they fire. All three would
+     otherwise be reported as offences by the check they define. Everything
+     outside this pair is scanned like any other surface, this file's prose
+     included — version two of the guard could not read itself, and its
+     preamble was closing a four-cause list while forbidding exactly that. */
+  /**
+   * Source as a READER sees it, not as a compiler does.
+   *
+   * Every long string in this codebase is wrapped: `"…" + "…"` across lines,
+   * JSDoc with a leading asterisk per line, `//` comment runs. A regex over
+   * raw source therefore only ever matches inside one fragment. The /status
+   * note really does render "movements had no quote leg" and version two of
+   * this guard passed anyway, because prettier happened to break the line
+   * mid-phrase — one reflow away from failing on correct copy, and blind to a
+   * false claim wrapped across two comment lines (both demonstrated).
+   */
+  const normalise = (src: string): string =>
+    src
+      // Join adjacent literals in a concatenation, the way the runtime does.
+      .replace(/(["'`])\s*\+\s*\1/g, "")
+      // Strip comment furniture so a wrapped sentence reads as one line.
+      .replace(/^[ \t]*(\/\/+|\*\/|\/\*+|\*)/gm, " ")
+      .replace(/\s+/g, " ");
+
+  // Claims about the composition of the unpriced set. Each is FINE when
+  // scoped by a measured share ("46% of token movements had no quote leg" is
+  // the measurement) and wrong when left to quantify over all of them — which
+  // is the difference `SCOPED` below tests for, and the difference three
+  // rounds of this defect turned on.
+  const NEEDS_SCOPE = [
+    /movements (have|had|with|lack|lacked) no quote leg/i,
     /movements — tokens moved with no quote leg/i,
-    /movements had no quote leg/i,
     /movements .{0,40}came back unpriced/i,
   ];
+  /** A measured share immediately before the claim, e.g. "46% of token ". */
+  const SCOPED = /\d+%\s+of\s+[\w\s]*$/;
 
-  it("holds across every file in src that describes the unpriced set", async () => {
+  // Closing a list of causes the code keeps adding to. No scope makes these
+  // acceptable: the count is wrong the moment a new case is told apart, and it
+  // has been wrong twice.
+  const NEVER = [/(two|three|four|five|six|seven) (different |distinguishable |distinct )?(reasons|causes|cases)/i];
+
+  // The normaliser is the whole guard: if it cannot reconstruct a wrapped
+  // sentence, everything below is theatre.
+  it("reads a wrapped sentence as one sentence", () => {
+    const wrapped = `const note =\n  "46% of token movements " +\n  "had no quote leg belonging to the wallet";`;
+    expect(normalise(wrapped)).toMatch(/movements had no quote leg/i);
+    const jsdoc = `/**\n * Some movements\n * had no quote leg at all.\n */`;
+    expect(normalise(jsdoc)).toMatch(/movements had no quote leg/i);
+    const lineRun = `// 46% of token movements\n// had no quote leg belonging to this wallet.`;
+    expect(normalise(lineRun)).toMatch(/movements had no quote leg/i);
+  });
+
+  // The scope exemption is the guard's one soft spot, so it is tested in both
+  // directions rather than trusted.
+  it("permits the measured claim and refuses the unquantified one", () => {
+    const measured = normalise(`"Measured across five real wallets, 46% of token " + "movements had no quote leg"`);
+    const sweeping = normalise(`"the " + "movements had no quote leg belonging to this wallet"`);
+    const scopeOf = (s: string) => {
+      const m = s.match(/movements (have|had) no quote leg/i);
+      return m ? SCOPED.test(s.slice(Math.max(0, (m.index ?? 0) - 60), m.index)) : null;
+    };
+    expect(scopeOf(measured)).toBe(true);
+    expect(scopeOf(sweeping)).toBe(false);
+  });
+  /* guard-fixture:end */
+
+  it("holds across every file that describes the unpriced set", async () => {
     const fs = await import("node:fs/promises");
     const path = await import("node:path");
-    const root = new URL("../src/", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+    const here = new URL("./", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+    // src/ AND tests/: version two could not read itself, and its own preamble
+    // was closing a four-cause list while it forbade exactly that.
+    const roots = [path.join(here, "..", "src"), here];
 
     const walk = async (dir: string): Promise<string[]> => {
       const out: string[] = [];
@@ -429,14 +489,26 @@ describe("nothing claims every unpriced movement lacked a quote leg", () => {
       return out;
     };
 
-    const files = await walk(root);
+    const files = (await Promise.all(roots.map(walk))).flat();
     expect(files.length).toBeGreaterThan(20);
     const offenders: string[] = [];
     for (const file of files) {
-      const src = await fs.readFile(file, "utf8");
-      if (!/unpriced/i.test(src)) continue;
-      for (const re of BANNED) {
+      let raw = await fs.readFile(file, "utf8");
+      // Explicitly marked fixture regions are cut; nothing else is exempt, and
+      // the marker is greppable so an exemption cannot be added quietly.
+      raw = raw.replace(/guard-fixture:start[\s\S]*?guard-fixture:end/g, " ");
+      // Deliberately loose: any file discussing pricing at all gets read, not
+      // only ones that happen to use the word "unpriced".
+      if (!/unpriced|no price|quote leg/i.test(raw)) continue;
+      const src = normalise(raw);
+      for (const re of NEVER) {
         if (re.test(src)) offenders.push(`${path.basename(file)} :: ${re}`);
+      }
+      for (const re of NEEDS_SCOPE) {
+        for (const m of src.matchAll(new RegExp(re.source, re.flags.replace("g", "") + "g"))) {
+          const before = src.slice(Math.max(0, m.index - 60), m.index);
+          if (!SCOPED.test(before)) offenders.push(`${path.basename(file)} :: unscoped ${re}`);
+        }
       }
     }
     expect(offenders).toEqual([]);

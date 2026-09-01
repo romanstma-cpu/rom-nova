@@ -44,8 +44,8 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 | W1 | Real wallet tracking | GMGN wallet page, Cielo, Nansen Profiler | ✅ **PASS** — round 4 confirmed all five defects closed, no regressions |
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **PASS** — round 4 confirmed the last defect closed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
-| W4 | UI/UX + performance craft | Axiom & Photon density and latency | ✅ **PASS round 1** — merged to main, post-PASS list closed same hour |
-| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🟢 round 8 FAIL (guard only — copy clean) — five exploits closed (@ d2d2572, 566 tests) · round-9 confirm running |
+| W4 | UI/UX + performance craft | Axiom & Photon density and latency | ✅ **PASS round 1** — merged, post-PASS list closed same hour |
+| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | ✅ **shipped** — copy verified true from round 8; nine review rounds |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
 
 ## Round 3 dispatched — both confirmation critics in flight (2026-08-31)
@@ -116,6 +116,40 @@ One honest residual it correctly declined to count: with the local clock
 negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
+
+## 🚢 1.7.0 SHIPPED — all five streams delivered (2026-09-01)
+
+`w5/alerts` merged to main, tagged `v1.7.0` at `dc1d896`, CI published,
+**SHA256 `9e613857…ae9b` verified against GitHub's own digest and
+SHA256SUMS.txt**, `latest.yml` reads 1.7.0 (the update feed existing
+installs pull from is live), site mirrored to romapps.xyz — both version
+strings bumped, zero stale 1.6.0 strings, `/nova/` and `/nova/alerts/`
+both serving the new build. 566 tests, tsc clean, build clean, middleware
+verified tracked in the tag tree.
+
+**The campaign scoreboard: W1 ✅ W2 ✅ W3 ✅ W4 ✅ W5 ✅.**
+
+What shipped in this release: the alerts system (six rule types, one
+monitor per browser, no new vendor traffic, no server) with the honesty
+layer the server-side references do not attempt — achieved cadence beside
+every rule, NOT EVALUATED chips carrying the verbatim reason, firedAt /
+dataAsOf / on-chain time kept as three separate claims, coverage gaps
+disclosed rather than papered over, and an inbox that evicts from the
+noisiest rule and prints what it took. Plus W4's craft: first chart canvas
+5.4s → ~0.5s with the caption stating the MEASURED interval, skeletons
+that shimmer bars and never digits, CLS 0.000.
+
+And a run of honesty repairs found by the critics themselves: a transfer
+no longer announced as a sale, a rotation distinguished from a transfer
+and an LP deposit from both, a sub-rent-floor SOL residue read by
+direction, an identified address no longer called "unreachable", and no
+surface claiming every unpriced movement lacked a quote leg — with a
+regression guard that reads the copy the way a reader does rather than
+the way prettier stored it.
+
+**Nine review rounds on W5 alone.** Round 8 confirmed the rendered copy
+true; rounds 7–9 were spent hardening the test that protects it, which is
+the right place for the last mile of effort to go.
 
 ## W5 round 8: FAIL — the exemption is where a guard lives or dies
 

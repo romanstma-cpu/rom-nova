@@ -45,7 +45,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **PASS** — round 4 confirmed the last defect closed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ✅ **PASS round 1** — merged to main, post-PASS list closed same hour |
-| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🟠 round 1 FAIL (narrow, all keyless-fixable) — builder closing the list |
+| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🔵 all nine closed (`w5/alerts` @ a4ca6de, 543 tests) — round-2 critic running |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
 
 ## Round 3 dispatched — both confirmation critics in flight (2026-08-31)
@@ -116,6 +116,39 @@ One honest residual it correctly declined to count: with the local clock
 negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
+
+## W5 round 2 — nine closed, and the fix argued back
+
+Branch `w5/alerts` at `a4ca6de` (merged main first — W4's chart/skeleton
+work auto-merged clean — 543 tests, tsc and build clean), under blind
+review. Live re-measurement of the headline defect: **85 alerts, 85
+unique, zero duplicates** across 15 passes and 167 tracked keys, against
+round 1's 41 duplicates in five minutes.
+
+The reasoning is the good part. The dedupe defect was never the cap size,
+it was the eviction **axis**: a key is safe to forget when its ROW is
+gone, not when the key is old. So eviction now drops only keys absent
+from the current feed, and only above the cap — which is also what stops
+a post-reload rebuild from forgetting hundreds of rows about to be
+re-listed. The builder **declined the watermark alternative I offered**,
+with the right reason: a filter rule can legitimately match a row later
+than first sighting (liquidity rising past the threshold), and a
+watermark would silently suppress that. The reasoning lives in the code.
+
+The inbox now evicts by census — the fattest rule loses its oldest,
+repeatedly — so a rule holding one alert is untouched until every other
+rule is cut to the same depth, with a truncation row naming what went
+and from where. The lease bug was line ORDER (renew before the pause
+decision), invisible to a test that only pokes the lock, so the decision
+was extracted ahead of it; a non-leader tab now says another tab "holds
+the monitor lease" — a fact about the lock — instead of asserting
+monitoring is happening. `Sourced.builtAt` carries a profile's real build
+time into `dataAsOf`. A wallet rule on a PDA refuses with the identity's
+own sentence.
+
+**Both critical tests were verified to FAIL against the old code** — the
+old dedupe fires 2,164 alerts for 600 launches where the new one fires
+exactly 600 — because a test that passes both ways is worthless.
 
 ## W5 round 1: FAIL — the honesty held; the scale seams didn't
 

@@ -28,13 +28,20 @@
 // or moves native lamports, never both — so taking whichever is present cannot
 // double-count.
 //
-// The second is that 46% of token movements have NO quote leg belonging to
-// this wallet. They are transfers in, claims, and token-for-token rotations
-// routed entirely through pool accounts. There is no price to recover from
-// them, because nothing this wallet owned moved against the tokens. They are
-// recorded as movements with `pricing: "unpriced"` and they never enter a PnL
-// figure. Guessing a price for them — from the token's price now, say — would
-// fabricate 46% of every number on the page.
+// The second is that 46% of token movements (the NEITHER row) had no quote
+// source at all: nothing this wallet owned moved against the tokens, so there
+// is no price to recover. They are recorded `pricing: "unpriced"` and never
+// enter a PnL figure. Guessing a price for them — from the token's price now,
+// say — would fabricate 46% of every number on the page.
+//
+// THAT 46% IS A FLOOR ON `unpriced`, NOT ITS RATE, and this comment used to
+// say otherwise. It counts one cause. A movement can have a perfectly good
+// quote leg and still be unpriceable: a rotation's belongs to two sides at
+// once, a pool deposit's moves the same way as the base, and a swap can want
+// a SOL/USD bar that does not exist for its hour. Each fill carries its own
+// `unpricedReason` and its own `classification` precisely so that no summary
+// anywhere has to guess which applied — the enumerations that tried drifted
+// out of date twice.
 //
 // TWO DEPTHS, NOT ONE — SEE rpc-endpoint.ts FOR THE MEASUREMENTS
 //
@@ -55,7 +62,7 @@
 // stays at ~2 days in every runtime, and this file says which of the two
 // numbers a reader is looking at.
 
-import type { WalletCoverage, WalletFill } from "../types";
+import type { TradeClassification, WalletCoverage, WalletFill } from "../types";
 import { getSolBars, solUsdAt, type SolBar } from "./sol-history";
 import { resolveRpcRoute, TX_RETENTION_DAYS, type RpcRoute } from "./rpc-endpoint";
 import { identifyAccount, type AccountIdentity } from "./account-kind";
@@ -379,7 +386,9 @@ const toUnits = (raw: bigint, decimals: number): number => Number(raw) / 10 ** d
 /**
  * One transaction to at most one fill.
  *
- * Refuses in three cases, all of them honestly:
+ * Refuses to price several kinds of movement, all of them honestly — the list
+ * below is illustrative, not closed, because it has grown twice since it was
+ * written and the count in this sentence did not follow either time:
  *
  *  - No non-quote token moved: this is a SOL or stablecoin transfer, not a
  *    position change.
@@ -405,7 +414,20 @@ export function fillsFromTx(
   const quotes = deltas.filter((d) => isQuoteMint(d.mint));
   const nativeLamports = nativeQuoteLamports(tx, wallet, deltas);
 
-  const unpriced = (d: MintDelta, reason: string): WalletFill => ({
+  // UNPRICED IS NOT ONE THING, and calling it all "transfer" was a lie of
+  // convenience. Four different situations reach this helper — a rotation, a
+  // pool deposit, a genuine transfer, an ambiguity — and only one of them is a
+  // movement nobody paid for. The union has had `rotate` and `lp` all along.
+  //
+  // Nothing surfaced the collapse while `classification` was only a faint
+  // column on two tables. The moment an alert started SAYING what it meant,
+  // it said "a transfer, not a trade: nothing was paid or received for it"
+  // over a token-for-token swap, contradicting the reason printed beside it.
+  const unpriced = (
+    d: MintDelta,
+    reason: string,
+    classification: TradeClassification = "transfer",
+  ): WalletFill => ({
     signature,
     slot: tx.slot,
     ts,
@@ -416,14 +438,16 @@ export function fillsFromTx(
     tokens: Math.abs(toUnits(d.delta, d.decimals)),
     pricing: "unpriced",
     unpricedReason: reason,
-    classification: "transfer",
+    classification,
   });
 
   // A rotation: the wallet swapped one token straight into another. Real, and
   // unpriceable here — nothing keyless publishes what either token was worth at
   // that moment, and the quote leg (if any) belongs to both sides at once.
   if (base.length > 1) {
-    return base.map((d) => unpriced(d, "token-for-token rotation — no single quote leg to price against"));
+    return base.map((d) =>
+      unpriced(d, "token-for-token rotation — no single quote leg to price against", "rotate"),
+    );
   }
 
   const b = base[0];
@@ -445,8 +469,8 @@ export function fillsFromTx(
   }
 
   if (quoteMint === undefined) {
-    // Three distinguishable causes, and a reader should be told which. The
-    // third is the one that surprises: a wallet whose ANSEM balance grew four
+    // Distinguishable causes, and a reader should be told which. The one that
+    // surprises: a wallet whose ANSEM balance grew four
     // times with no SOL leaving it, because a Jupiter swap signed and PAID FOR
     // by a different wallet delivered the tokens. Terminal bots and desks work
     // that way. The tokens are real and the cost belongs to someone else's
@@ -454,7 +478,36 @@ export function fillsFromTx(
     // borrowing the pool price would be inventing one.
     const keys = tx.transaction.message.accountKeys.map(keyAt);
     if (Math.abs(nativeLamports) > 0) {
-      return [unpriced(b, "no quote leg — SOL movement too small to separate from account rent")];
+      // A sub-rent-floor SOL residue means two opposite things depending on
+      // WHICH WAY THE TOKENS WENT, and calling both "transfer" asserted
+      // certainty on top of a reason that admits ambiguity — the sentence
+      // said "too small to separate from account rent" and the label said
+      // "nothing was paid or received for it".
+      //
+      //   tokens OUT: the residue is the 2,039,280 lamports of ATA rent the
+      //     SENDER pays to open the RECIPIENT's account. Rent-explainable, and
+      //     the dominant case — sampled live, 2 of 3 such fills on one wallet
+      //     were plain `transferChecked` sends whose entire residue was that.
+      //
+      //   tokens IN: nothing about receiving tokens obliges this wallet to pay
+      //     rent for someone else, so a residue is NOT rent-explainable. It
+      //     may be a genuine micro-purchase — an ordinary pump.fun buy is
+      //     0.002 SOL, below this floor — and announcing "nothing was paid"
+      //     over a purchase is the same class of lie as selling a transfer.
+      //
+      // The honest label for the second case already existed and was
+      // unreachable: `unknown` says the price could not be determined without
+      // claiming there was none.
+      const inbound = b.delta > ZERO;
+      return [
+        unpriced(
+          b,
+          inbound
+            ? "no quote leg — a SOL residue too small to separate from account rent, so a micro-purchase and a transfer look identical here"
+            : "no quote leg — SOL movement too small to separate from account rent",
+          inbound ? "unknown" : "transfer",
+        ),
+      ];
     }
     return [
       unpriced(
@@ -470,7 +523,7 @@ export function fillsFromTx(
   // happened — a liquidity deposit, a two-sided mint — and the ratio of the two
   // numbers would not be a price.
   if (Math.sign(baseUnits) === Math.sign(quoteUnits) || quoteUnits === 0) {
-    return [unpriced(b, "base and quote moved the same way — not a swap")];
+    return [unpriced(b, "base and quote moved the same way — not a swap", "lp")];
   }
 
   const quoteAmount = Math.abs(quoteUnits);

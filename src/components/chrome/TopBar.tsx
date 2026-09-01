@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useApi, fmtUsd, fmtPct, fmtNum } from "@/lib/client";
+import { AlertBadge } from "./AlertBadge";
 import { DataModeChip } from "./DataModeChip";
 import type { MarketState } from "@/lib/types";
 
@@ -74,6 +75,7 @@ export function TopBar({ onOpenPalette, onOpenNav }: { onOpenPalette: () => void
       </div>
 
       <div className="ml-auto flex items-center gap-3">
+        <AlertBadge />
         <DataModeChip className="hidden sm:inline-flex" />
         {/* On a 390px screen the full label and its shortcut ran off the right
             edge — the header read "search / c" with the rest clipped, and a

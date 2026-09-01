@@ -218,7 +218,8 @@ export function getProviders(): ProviderSet {
     // keyless chain reader does not implement `WalletDataProvider` at all.
     //
     // That interface promises `WalletTrade[]`, and a WalletTrade requires a
-    // price — but 46% of a real wallet's movements have none, and the adapter
+    // price — but at least 46% of a real wallet's movements have none (that is
+    // the measured no-quote-leg rate; the unpriced set is larger), and the adapter
     // that satisfied the interface did so by silently dropping them and
     // labelling every remaining fill `dex: "Raydium"` because the union has no
     // honest member. Nothing called it. The real reader is reached through
@@ -518,8 +519,11 @@ export function providerHealth(): ProviderHealth[] {
             "days and paging further returned nothing), and it is the ONLY keyless endpoint that " +
             "answers the method at all — mainnet-beta, Ankr, drpc, solflare, onfinality and " +
             "BlockPI all refuse. So this is a WINDOW, never a lifetime, and every figure built on " +
-            "it carries its coverage. 46% of token movements have no quote leg belonging to the " +
-            "wallet (transfers, claims, token-for-token rotations) and are recorded UNPRICED",
+            "it carries its coverage. Measured across five real wallets, 46% of token movements " +
+            "had no quote leg belonging to the wallet at all and are recorded UNPRICED; the " +
+            "unpriced set is larger than that, because a movement can have a quote leg and still " +
+            "be unpriceable. Every movement states its own reason rather than being counted under " +
+            "a summary that guesses",
         }
       : {
           ...demoHealth("solana-rpc-wallet"),

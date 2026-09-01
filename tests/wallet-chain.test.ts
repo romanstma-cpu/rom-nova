@@ -226,8 +226,21 @@ describe("fillsFromTx — a price, or an honest absence of one", () => {
   // Measured on real wallets: 46% of token movements look like this. The tokens
   // arrived and nothing this wallet owned went the other way.
   it("refuses to price a movement with no quote leg", () => {
+    // The lamport line is explicit here, and has to be: the factory's default
+    // is balances 0 → 0 WITH a 5,000 fee, which describes a wallet that gained
+    // exactly what it spent. `nativeQuoteLamports` adds the fee back for the
+    // payer, so that fixture produced a phantom +5,000 residue no real
+    // transaction has — and a residue on an inbound movement is now a real
+    // signal (see "a SOL residue below the rent floor" below). A genuine
+    // inbound transfer pays the fee and nothing else: balance drops by exactly
+    // the fee, the residue nets to zero.
     const fills = fillsFromTx(
-      tx({ post: [{ idx: 1, mint: TOKEN, owner: WALLET, amount: "500000000", decimals: 6 }] }),
+      tx({
+        keys: [WALLET],
+        fee: 5000,
+        lamports: { 0: [10_000_000, 10_000_000 - 5000] },
+        post: [{ idx: 1, mint: TOKEN, owner: WALLET, amount: "500000000", decimals: 6 }],
+      }),
       WALLET,
       BARS,
     );
@@ -269,6 +282,75 @@ describe("fillsFromTx — a price, or an honest absence of one", () => {
     expect(fills).toHaveLength(2);
     expect(fills.every((f) => f.pricing === "unpriced")).toBe(true);
     expect(fills.every((f) => f.priceUsd === undefined)).toBe(true);
+    // UNPRICED IS NOT UNTRADED. All four unpriceable situations used to be
+    // stamped "transfer", which read as "nobody paid for this" the moment
+    // anything said the classification out loud — over a swap.
+    expect(fills.every((f) => f.classification === "rotate")).toBe(true);
+  });
+
+  // A sub-rent-floor SOL residue means opposite things by direction, and one
+  // label for both asserted certainty on top of a reason that admits
+  // ambiguity ("too small to SEPARATE from account rent" + "nothing was paid
+  // or received for it"). An ordinary pump.fun buy is 0.002 SOL — below this
+  // floor — so the inbound case was announcing "nothing was paid" over
+  // purchases.
+  describe("a SOL residue below the rent floor", () => {
+    const residue = MIN_SOL_LEG_LAMPORTS - 1;
+
+    it("stays a transfer when tokens went OUT — the residue is the recipient's ATA rent", () => {
+      const fills = fillsFromTx(
+        tx({
+          keys: [WALLET],
+          fee: 0,
+          lamports: { 0: [10_000_000, 10_000_000 - residue] },
+          pre: [{ idx: 1, mint: TOKEN, owner: WALLET, amount: "500000000", decimals: 6 }],
+        }),
+        WALLET,
+        BARS,
+      );
+      expect(fills[0].side).toBe("sell");
+      expect(fills[0].classification).toBe("transfer");
+    });
+
+    it("refuses to call an inbound one a transfer — a micro-purchase looks identical", () => {
+      // Nothing about RECEIVING tokens obliges this wallet to pay rent for
+      // someone else, so the residue is not rent-explainable here.
+      const fills = fillsFromTx(
+        tx({
+          keys: [WALLET],
+          fee: 0,
+          lamports: { 0: [10_000_000, 10_000_000 - residue] },
+          post: [{ idx: 1, mint: TOKEN, owner: WALLET, amount: "500000000", decimals: 6 }],
+        }),
+        WALLET,
+        BARS,
+      );
+      expect(fills[0].side).toBe("buy");
+      expect(fills[0].classification).toBe("unknown");
+      expect(fills[0].unpricedReason).toMatch(/micro-purchase and a transfer look identical/);
+    });
+  });
+
+  it("calls a same-direction pair a pool movement, not a transfer", () => {
+    // Base and quote both leaving is a deposit, not a swap: the ratio of the
+    // two numbers is not a price, and neither is it a gift.
+    const fills = fillsFromTx(
+      tx({
+        pre: [
+          { idx: 1, mint: TOKEN, owner: WALLET, amount: "500000000", decimals: 6 },
+          { idx: 2, mint: WSOL, owner: WALLET, amount: "2000000000", decimals: 9 },
+        ],
+        post: [
+          { idx: 1, mint: TOKEN, owner: WALLET, amount: "100000000", decimals: 6 },
+          { idx: 2, mint: WSOL, owner: WALLET, amount: "1000000000", decimals: 9 },
+        ],
+      }),
+      WALLET,
+      BARS,
+    );
+    expect(fills).toHaveLength(1);
+    expect(fills[0].classification).toBe("lp");
+    expect(fills[0].pricing).toBe("unpriced");
   });
 
   // Rent is 0.00204 SOL. A leg below the floor is mostly rent, and a price

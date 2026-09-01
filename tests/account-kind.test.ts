@@ -105,6 +105,41 @@ describe("the curve verdict inside classifyAccount", () => {
   });
 });
 
+// A branch went missing from the mint-side answer list unnoticed, so an
+// address the chain had reached AND identified surfaced to the reader as
+// "token detail unreachable — unknown mint". Every kind is pinned here now.
+describe("addressAnswer — one identity, one sentence", () => {
+  it("refuses a program-derived address permanently, not as a transport failure", async () => {
+    const { addressAnswer } = await import("@/lib/api/handlers");
+    const id = classifyAccount({ owner: SYSTEM, executable: false }, RAYDIUM_AUTHORITY_V4);
+    const said = addressAnswer(id, RAYDIUM_AUTHORITY_V4);
+    expect(said).toBeTruthy();
+    expect(said).not.toMatch(/unreachable/i);
+    expect(said).toMatch(/not a token mint/i);
+    expect(said).toMatch(/none ever will/i);
+  });
+
+  it("answers for every kind the chain can identify", async () => {
+    const { addressAnswer } = await import("@/lib/api/handlers");
+    const A = REAL_KEYPAIRS[0];
+    expect(addressAnswer(classifyAccount({ owner: SYSTEM, executable: false }, A), A)).toMatch(/WALLET/);
+    expect(addressAnswer(classifyAccount(null, A), A)).toMatch(/no system account/i);
+    expect(addressAnswer(classifyAccount(undefined, "z".repeat(44)), "z".repeat(44))).toMatch(/not a valid/i);
+    const mint = classifyAccount(
+      { owner: TOKEN_PROGRAM, executable: false, data: { parsed: { type: "mint", info: {} } } },
+      A,
+    );
+    expect(addressAnswer(mint, A)).toMatch(/IS a token mint/);
+  });
+
+  // A failed lookup is not evidence about the address, so it gets no sentence
+  // and the caller keeps its own error.
+  it("says nothing when the lookup itself failed", async () => {
+    const { addressAnswer } = await import("@/lib/api/handlers");
+    expect(addressAnswer({ kind: "unknown", detail: "…", profilable: true }, REAL_KEYPAIRS[0])).toBeNull();
+  });
+});
+
 describe("known constants and the empty copy", () => {
   it("names the burn address as what it is", () => {
     // The movers list showed it receiving $10.4K; one click later the wallet

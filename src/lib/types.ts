@@ -453,9 +453,13 @@ export type UnmeasuredWalletField =
    */
   | "reputation"
   /**
-   * The price of at least one observed movement. Tokens moved, no SOL or
-   * stablecoin leg belonged to this wallet in that transaction, so there is
-   * nothing to divide by.
+   * The price of at least one observed movement could not be established.
+   *
+   * NOT always for want of a quote leg, which is what this said and what the
+   * tooltip beside it said: a rotation's leg belongs to two sides, a pool
+   * deposit's moves the same way as the base, and a swap can want a SOL/USD
+   * bar that does not exist for its hour. The fill's own `unpricedReason`
+   * carries which — this flag says only that the price is absent.
    */
   | "fillPrice";
 
@@ -465,18 +469,26 @@ export type FillPricing =
   | "wsol"
   /** Paid or received in a stablecoin, taken at one dollar. */
   | "stable"
-  /** Tokens moved; nothing this wallet owned moved against them. */
+  /**
+   * No price could be established. NOT the same as "nothing moved against
+   * them": a rotation's quote leg belongs to both sides, a pool deposit's
+   * moves the same way, and a swap can have a perfectly good quote leg with no
+   * SOL/USD bar covering its hour. `unpricedReason` says which, and
+   * `classification` says whether it was a trade at all.
+   */
   | "unpriced";
 
 /**
  * One observed change in a wallet's holding of one token.
  *
  * Deliberately not `WalletTrade`. A trade has a price by definition and this
- * frequently does not — 46% of the token movements measured across five real
- * wallets had no quote leg belonging to the wallet at all, because they were
- * transfers, claims, or token-for-token rotations routed entirely through
- * pools. Those are real events a reader should see; they are not fills at a
- * price, and the type says so.
+ * frequently does not: 46% of the token movements measured across five real
+ * wallets had no quote leg belonging to the wallet, and the unpriced set is
+ * larger still, because a movement can have a quote leg and remain
+ * unpriceable. That 46% is a floor, not the rate — three separate comments
+ * relabelled it as the rate before anyone noticed the two are different
+ * numbers. Which cause applied to a given movement is on the movement, in
+ * `unpricedReason` and `classification`; no summary has to guess.
  */
 export interface WalletFill {
   signature: string;
@@ -891,7 +903,7 @@ export interface RiskFlag {
 /**
  * The outcome of one triage check on a brand-new launch.
  *
- * Six states rather than a boolean, because a launch feed is the place where
+ * Several states rather than a boolean, because a launch feed is the place where
  * "we looked and it is fine" and "nobody has looked yet" are hardest to tell
  * apart and most expensive to confuse. A token forty seconds old has had no
  * time to accumulate findings, so an empty risk list is almost always silence

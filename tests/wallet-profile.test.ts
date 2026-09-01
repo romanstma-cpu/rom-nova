@@ -395,6 +395,211 @@ describe("assembleProfile — what reaches the screen", () => {
   });
 });
 
+// A claim about the unpriced set was corrected where it had been quoted and
+// left standing on the surfaces beside it, three rounds running. This guard is
+// the third attempt at stopping that, and the first two failed in instructive
+// ways: version one read three files from a hand-written array while the
+// phrase sat in a fourth, and version two searched raw source — which cannot
+// see a sentence written the way every sentence here is written.
+describe("nothing over-claims about the unpriced set", () => {
+  /* guard-fixture:start — the guard's machinery: the normaliser (whose own
+     documentation has to QUOTE the offending phrase to explain it), the
+     pattern lists, and the strings that prove they fire. All three would
+     otherwise be reported as offences by the check they define. Everything
+     outside this pair is scanned like any other surface, this file's prose
+     included — version two of the guard could not read itself, and its
+     preamble was closing a four-cause list while forbidding exactly that. */
+  /**
+   * Source as a READER sees it, not as a compiler does.
+   *
+   * Every long string in this codebase is wrapped: `"…" + "…"` across lines,
+   * JSDoc with a leading asterisk per line, `//` comment runs. A regex over
+   * raw source therefore only ever matches inside one fragment. The /status
+   * note really does render "movements had no quote leg" and version two of
+   * this guard passed anyway, because prettier happened to break the line
+   * mid-phrase — one reflow away from failing on correct copy, and blind to a
+   * false claim wrapped across two comment lines (both demonstrated).
+   */
+  const normalise = (src: string): string =>
+    src
+      // Join adjacent literals in a concatenation, the way the runtime does.
+      .replace(/(["'`])\s*\+\s*\1/g, "")
+      // Strip comment furniture so a wrapped sentence reads as one line.
+      .replace(/^[ \t]*(\/\/+|\*\/|\/\*+|\*)/gm, " ")
+      .replace(/\s+/g, " ");
+
+  // Claims about the composition of the unpriced set. Each is FINE when
+  // scoped by a measured share ("46% of token movements had no quote leg" is
+  // the measurement) and wrong when left to quantify over all of them — which
+  // is the difference `SCOPED` below tests for, and the difference four rounds
+  // of this defect turned on.
+  //
+  // The verb is NOT required to follow "movements" immediately: version three
+  // demanded that, so "movements measured across five real wallets had no
+  // quote leg" — one of the three places the claim actually lives — matched
+  // nothing, and a test named "holds across every file" held across one.
+  const CLAIM = "(have|has|had|with|lack|lacks|lacked|carry|carries|carried) no quote (leg|source)";
+  // Plural, or singular UNDER A UNIVERSAL QUANTIFIER — "every movement had no
+  // quote leg" is the same sweeping claim in different grammar. Bare singular
+  // is left alone: "refuses to price a movement with no quote leg" describes
+  // one case truthfully, and a guard that flags correct copy teaches people to
+  // widen its exemptions.
+  const NEEDS_SCOPE = [
+    new RegExp(`movements\\b[^.;]{0,80}?\\b${CLAIM}`, "i"),
+    new RegExp(`(every|each|all|any)\\s+movement\\b[^.;]{0,80}?\\b${CLAIM}`, "i"),
+    /movements? — tokens moved with no quote (leg|source)/i,
+    /movements?[^.;]{0,40}came back unpriced/i,
+  ];
+  /**
+   * A measured share that actually SCOPES the claim: "46% of token movements".
+   *
+   * At most two words may sit between "of" and the claim, because a percentage
+   * merely nearby proves nothing. Version three took any digit-percent in the
+   * preceding sixty characters, and "although only 3% of wallets were sampled,
+   * every one of their token movements had no quote leg" walked straight
+   * through — sweeping, false, and the exact class this exists to catch.
+   */
+  const SCOPED = /\d+%\s+of\s+(the\s+)?(\w+\s+){0,2}$/;
+
+  // Closing a list the code keeps adding to. No scope redeems these: the count
+  // is wrong the moment a new case is told apart, and it has been wrong four
+  // times.
+  //
+  // DELIBERATELY NOT A CODEBASE-WIDE COUNT CHECK. Applied globally this
+  // pattern flags honest prose — "two measured reasons" for a chart default,
+  // "the three states distinct: REVOKED, LIVE, UNVERIFIED" — which enumerate
+  // themselves and cannot drift. A guard that claims more coverage than it has
+  // is the exact failure under review here, so the count check is scoped to
+  // the pricing vocabulary this guard is actually about, and `reason strings`
+  // is global because that phrasing has drifted twice on its own.
+  const COUNT = "\\b(two|three|four|five|six|seven|eight)\\b (different |distinguishable |distinct )?";
+  const NEVER_ANYWHERE = [new RegExp(`${COUNT}reason strings?\\b`, "i")];
+  const NEVER_NEAR_PRICING = [new RegExp(`${COUNT}(reasons?|causes?|cases?|states?|kinds?|branches?)\\b`, "i")];
+  /** How close a count must sit to the pricing copy to be this guard's business. */
+  const NEAR = 220;
+  const PRICING = /unpriced|quote leg|quote source|no price/i;
+
+  // The normaliser is the whole guard: if it cannot reconstruct a wrapped
+  // sentence, everything below is theatre.
+  it("reads a wrapped sentence as one sentence", () => {
+    const wrapped = `const note =\n  "46% of token movements " +\n  "had no quote leg belonging to the wallet";`;
+    expect(normalise(wrapped)).toMatch(/movements had no quote leg/i);
+    const jsdoc = `/**\n * Some movements\n * had no quote leg at all.\n */`;
+    expect(normalise(jsdoc)).toMatch(/movements had no quote leg/i);
+    const lineRun = `// 46% of token movements\n// had no quote leg belonging to this wallet.`;
+    expect(normalise(lineRun)).toMatch(/movements had no quote leg/i);
+  });
+
+  // The scope exemption is the guard's one soft spot, so it is tested in both
+  // directions rather than trusted — including the exploit that beat version
+  // three, where a percentage merely NEARBY bought a sweeping false claim its
+  // way past.
+  /** Every offence in one normalised body of text, as `pattern` labels. */
+  const offencesIn = (src: string): string[] => {
+    const hits: string[] = [];
+    for (const re of NEVER_ANYWHERE) if (re.test(src)) hits.push(String(re));
+    for (const re of NEVER_NEAR_PRICING) {
+      for (const m of src.matchAll(new RegExp(re.source, re.flags.replace("g", "") + "g"))) {
+        const around = src.slice(Math.max(0, m.index - NEAR), m.index + NEAR);
+        if (PRICING.test(around)) hits.push(String(re));
+      }
+    }
+    for (const re of NEEDS_SCOPE) {
+      for (const m of src.matchAll(new RegExp(re.source, re.flags.replace("g", "") + "g"))) {
+        if (!SCOPED.test(src.slice(Math.max(0, m.index - 60), m.index))) hits.push(`unscoped ${re}`);
+      }
+    }
+    return hits;
+  };
+
+  const offends = (text: string): boolean => offencesIn(normalise(text)).length > 0;
+
+  it("permits the measured claim and refuses the unquantified one", () => {
+    expect(offends(`"Measured across five real wallets, 46% of token " + "movements had no quote leg"`)).toBe(false);
+    expect(offends(`"the " + "movements had no quote leg belonging to this wallet"`)).toBe(true);
+  });
+
+  it("is not fooled by a percentage that scopes something else", () => {
+    // Beat version three exactly as written.
+    expect(
+      offends(`"although only 3% of wallets were sampled, every one of their token movements had no quote leg"`),
+    ).toBe(true);
+  });
+
+  it("sees a claim with words between the noun and the verb", () => {
+    // The form living in types.ts, which version three could not match.
+    expect(offends(`"movements measured across five real wallets had no quote leg"`)).toBe(true);
+    expect(offends(`"46% of token movements measured across five real wallets had no quote leg"`)).toBe(false);
+  });
+
+  it("counts a list however the list is worded", () => {
+    // "reason strings" is the phrase an earlier round de-quantified, and the
+    // first version of this check could not see it. Global, because that
+    // phrasing has drifted on its own twice.
+    expect(offends(`"the chain reader emits six distinct reason strings"`)).toBe(true);
+    expect(offends(`"emits several reason strings, each stated on the fill"`)).toBe(false);
+    // Near the pricing copy, any closed count is this guard's business.
+    expect(offends(`"unpriced covers four different reasons, and each movement says which"`)).toBe(true);
+    expect(offends(`"Refuses in three cases: no quote leg, a rotation, an LP deposit"`)).toBe(true);
+  });
+
+  it("distinguishes a universal claim from a single true case", () => {
+    expect(offends(`"every movement had no quote leg belonging to this wallet"`)).toBe(true);
+    // A test name describing one case, which an over-eager singular pattern
+    // flagged. True, specific, and not a claim about the set.
+    expect(offends(`it("refuses to price a movement with no quote leg", () => {`)).toBe(false);
+  });
+
+  it("leaves honest prose about other things alone", () => {
+    // Both were flagged by an over-broad version and both are true, closed,
+    // and self-enumerating. A guard that cries wolf on correct copy teaches
+    // people to widen its exemptions, which is how guards die.
+    expect(offends(`"First visit defaults to 15-minute bars, not hourly, for two measured reasons."`)).toBe(false);
+    expect(
+      offends(`"Declaring them makes the three states distinct: REVOKED is measured good, LIVE measured bad, UNVERIFIED neither"`),
+    ).toBe(false);
+  });
+  /* guard-fixture:end */
+
+  it("holds across every file that describes the unpriced set", async () => {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const here = new URL("./", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+    // src/ AND tests/: version two could not read itself, and its own preamble
+    // was closing a four-cause list while it forbade exactly that.
+    const roots = [path.join(here, "..", "src"), here];
+
+    const walk = async (dir: string): Promise<string[]> => {
+      const out: string[] = [];
+      for (const e of await fs.readdir(dir, { withFileTypes: true })) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) out.push(...(await walk(full)));
+        else if (/\.tsx?$/.test(e.name)) out.push(full);
+      }
+      return out;
+    };
+
+    const files = (await Promise.all(roots.map(walk))).flat();
+    expect(files.length).toBeGreaterThan(20);
+    const offenders: string[] = [];
+    for (const file of files) {
+      let raw = await fs.readFile(file, "utf8");
+      // The fixture cut applies to THIS FILE ONLY. Version three ran it over
+      // every scanned file, which made the marker self-serve: any source file
+      // could exempt itself by pasting the comment, which is not a guard, it
+      // is an honour system. Greppable was true; enforced was not.
+      if (path.basename(file) === "wallet-profile.test.ts") {
+        raw = raw.replace(/guard-fixture:start[\s\S]*?guard-fixture:end/g, " ");
+      }
+      // Deliberately loose: any file discussing pricing at all gets read, not
+      // only ones that happen to use the word "unpriced".
+      if (!/unpriced|no price|quote leg/i.test(raw)) continue;
+      for (const hit of offencesIn(normalise(raw))) offenders.push(`${path.basename(file)} :: ${hit}`);
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
 // The display tier below what eight fraction digits can show. A real 5.2e-9
 // balance rendered "0" — the same forbidden zero the 0.0016 cbBTC fix cured
 // one tier up, surviving for true dust.

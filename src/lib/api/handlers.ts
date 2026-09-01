@@ -23,7 +23,7 @@ import type { ChartInterval } from "../providers/jupiter-chart";
 import { liveTokenDetail } from "./detail";
 import { isPlausibleAddress } from "../providers/wallet-chain";
 import { resolveRpcRoute } from "../providers/rpc-endpoint";
-import { identifyAccount, isOnCurve, KNOWN_ADDRESSES } from "../providers/account-kind";
+import { identifyAccount, isOnCurve, KNOWN_ADDRESSES, type AccountIdentity } from "../providers/account-kind";
 import { launchFeed, type LaunchFeed } from "./launches";
 import { dataMode, providerHealth } from "../providers/registry";
 import type { AlertCondition, BacktestConfig, StrategyProfileId } from "../types";
@@ -235,22 +235,40 @@ async function whatIsThisAddress(address: string): Promise<string | null> {
     if (!route?.transactions) return null;
     // The same endpoint `walletProfile` identifies against, so the two pages
     // cannot disagree about what an address is.
-    const id = await identifyAccount(address, route.transactions);
-    if (id.kind === "wallet") {
-      return `that is a WALLET, not a token mint — open it on the wallet page instead: /whale?a=${address}`;
-    }
-    if (id.kind === "token-account") {
-      return `${id.detail}. A token account is not a mint and not a wallet; the owner named above is the address to look up.`;
-    }
-    if (id.kind === "program" || id.kind === "empty" || id.kind === "invalid") return id.detail;
-    // A real mint that nothing lists is the honest original answer, said better.
-    if (id.kind === "mint") {
-      return "this IS a token mint, but no source in this stack lists it — no pool, no price, no history. That is an absence of coverage, not a verdict on the token.";
-    }
-    return null;
+    return addressAnswer(await identifyAccount(address, route.transactions), address);
   } catch {
     return null;
   }
+}
+
+/**
+ * One identified address to one sentence, or null when nothing can be said.
+ *
+ * Split from the fetch so the suite can prove every branch — and because a
+ * branch went MISSING from this list unnoticed: `program-owned` fell through
+ * to null, so an address the chain had reached AND identified surfaced as
+ * "token detail unreachable — unknown mint". A transport failure claimed for a
+ * lookup that succeeded, and a retry suggested for an answer that can never
+ * change.
+ */
+export function addressAnswer(id: AccountIdentity, address: string): string | null {
+  if (id.kind === "wallet") {
+    return `that is a WALLET, not a token mint — open it on the wallet page instead: /whale?a=${address}`;
+  }
+  if (id.kind === "token-account") {
+    return `${id.detail}. A token account is not a mint and not a wallet; the owner named above is the address to look up.`;
+  }
+  if (id.kind === "program" || id.kind === "empty" || id.kind === "invalid") return id.detail;
+  if (id.kind === "program-owned") {
+    return `${id.detail}. It is not a token mint, so no token page exists for it and none ever will.`;
+  }
+  // A real mint that nothing lists is the honest original answer, said better.
+  if (id.kind === "mint") {
+    return "this IS a token mint, but no source in this stack lists it — no pool, no price, no history. That is an absence of coverage, not a verdict on the token.";
+  }
+  // `unknown` only: the lookup itself failed, and a failed lookup is not
+  // evidence about the address.
+  return null;
 }
 
 function demoTokenDetail(store: DemoStore, mint: string, asOf?: number, profile: StrategyProfileId = "balanced") {
@@ -453,7 +471,10 @@ export async function handleWalletProfile(address: string, stage: "balances" | "
       "Solana could not be reached to read this wallet. The public RPC may be rate-limiting; try again shortly.",
     );
   }
-  return { profile: sourced.data, provenance: sourced.provenance, demo: false };
+  // `builtAt` travels so a consumer can date the READING rather than the
+  // response: this path is cached for 45 seconds, and anything that stamps its
+  // own clock on a cached profile overstates how fresh the chain read was.
+  return { profile: sourced.data, provenance: sourced.provenance, builtAt: sourced.builtAt, demo: false };
 }
 
 export function handleWalletDetail(store: DemoStore, address: string) {

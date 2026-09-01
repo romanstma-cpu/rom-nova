@@ -45,7 +45,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **PASS** — round 4 confirmed the last defect closed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ✅ **PASS round 1** — merged to main, post-PASS list closed same hour |
-| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🟢 round 5 FAIL (1 item) — closed on all four surfaces (@ 73331d8, 559 tests) · round-6 confirm running |
+| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🟢 round 6 FAIL (1 item) — enumerations dropped, guard now self-finding (@ 037877d) · round-7 confirm running |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
 
 ## Round 3 dispatched — both confirmation critics in flight (2026-08-31)
@@ -116,6 +116,44 @@ One honest residual it correctly declined to count: with the local clock
 negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
+
+## W5 round 6: FAIL — and the guard had committed the same sin
+
+The settled-rule clock and the mutation-verified regression test both
+confirmed. Then item 1 failed again, three ways, all fair:
+
+My fix had swapped one over-quantification for another — `/status` claimed
+unpriced had **"four different reasons"** when the chain reader emits six
+reason strings, which made its own closing promise ("each movement states
+which of them applies") false for the two it never listed. **Every prose
+enumeration of these causes has drifted out of date within a round of
+being written**, because the code gains a reason whenever a new case is
+told apart and a sentence is updated only when somebody notices. So the
+enumerations are gone: the count is reported, and the fills carry their
+own reasons, which they already did.
+
+The **46% was also the wrong number in four places.** `wallet-chain.ts`
+measured it as the NEITHER row — movements with no quote source at all —
+and three downstream comments plus the /status note relabelled it the
+UNPRICED rate. Both cannot hold once a rotation with a quote leg, a pool
+deposit and a missing price bar are also unpriced: 46% is a FLOOR on
+unpriced, not its rate, and nothing has measured the rate.
+
+And the `types.ts` doc for the very field whose tooltip was corrected in
+round 5 still carried the old claim — the "fixed where it was quoted"
+shape, three rounds running.
+
+### So the guard changed, not the list
+
+The regression test I added in round 5 read **three files from a
+hand-written array and passed while the banned phrase sat in a fourth** —
+the guard committing the exact failure it existed to prevent. It now
+WALKS `src/`, reads every `.ts`/`.tsx` that mentions the unpriced set, and
+fails naming the file and the pattern. Verified by injecting the phrase
+into `wallet-chain.ts`, the file the old array missed, and watching it
+fail by name.
+
+559 tests, tsc clean, build clean.
 
 ## W5 round 5: FAIL — one claim, fixed in one place, standing in three
 

@@ -571,6 +571,18 @@ export default function AlertsPage() {
               record.
             </div>
           )}
+          {/* A shed dedupe key is a row that may alert a second time. Without
+              this line a reader seeing that duplicate would read it as a bug
+              in the dedupe rather than as the storage pressure it actually is —
+              the events beside it have always been counted, and these are the
+              ones that change what the reader SEES. */}
+          {(blob.keysShed ?? 0) > 0 && (
+            <div className="px-3 py-1.5 border-b border-[rgba(27,35,51,0.5)] text-[10.5px] warn">
+              Browser storage ran out: {blob.keysShed} de-duplication key{blob.keysShed === 1 ? "" : "s"} were
+              discarded to keep the rules and watermarks saved. Rows alerted before that point can alert once more —
+              a repeat you see is that, not a broken filter.
+            </div>
+          )}
           <div className="max-h-[560px] overflow-y-auto">
             {blob.events.map((e) => (
               <Link

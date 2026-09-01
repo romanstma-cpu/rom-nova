@@ -55,7 +55,7 @@
 // stays at ~2 days in every runtime, and this file says which of the two
 // numbers a reader is looking at.
 
-import type { WalletCoverage, WalletFill } from "../types";
+import type { TradeClassification, WalletCoverage, WalletFill } from "../types";
 import { getSolBars, solUsdAt, type SolBar } from "./sol-history";
 import { resolveRpcRoute, TX_RETENTION_DAYS, type RpcRoute } from "./rpc-endpoint";
 import { identifyAccount, type AccountIdentity } from "./account-kind";
@@ -405,7 +405,20 @@ export function fillsFromTx(
   const quotes = deltas.filter((d) => isQuoteMint(d.mint));
   const nativeLamports = nativeQuoteLamports(tx, wallet, deltas);
 
-  const unpriced = (d: MintDelta, reason: string): WalletFill => ({
+  // UNPRICED IS NOT ONE THING, and calling it all "transfer" was a lie of
+  // convenience. Four different situations reach this helper — a rotation, a
+  // pool deposit, a genuine transfer, an ambiguity — and only one of them is a
+  // movement nobody paid for. The union has had `rotate` and `lp` all along.
+  //
+  // Nothing surfaced the collapse while `classification` was only a faint
+  // column on two tables. The moment an alert started SAYING what it meant,
+  // it said "a transfer, not a trade: nothing was paid or received for it"
+  // over a token-for-token swap, contradicting the reason printed beside it.
+  const unpriced = (
+    d: MintDelta,
+    reason: string,
+    classification: TradeClassification = "transfer",
+  ): WalletFill => ({
     signature,
     slot: tx.slot,
     ts,
@@ -416,14 +429,16 @@ export function fillsFromTx(
     tokens: Math.abs(toUnits(d.delta, d.decimals)),
     pricing: "unpriced",
     unpricedReason: reason,
-    classification: "transfer",
+    classification,
   });
 
   // A rotation: the wallet swapped one token straight into another. Real, and
   // unpriceable here — nothing keyless publishes what either token was worth at
   // that moment, and the quote leg (if any) belongs to both sides at once.
   if (base.length > 1) {
-    return base.map((d) => unpriced(d, "token-for-token rotation — no single quote leg to price against"));
+    return base.map((d) =>
+      unpriced(d, "token-for-token rotation — no single quote leg to price against", "rotate"),
+    );
   }
 
   const b = base[0];
@@ -454,6 +469,11 @@ export function fillsFromTx(
     // borrowing the pool price would be inventing one.
     const keys = tx.transaction.message.accountKeys.map(keyAt);
     if (Math.abs(nativeLamports) > 0) {
+      // Stays `transfer`: a SOL movement BELOW the rent floor is too small to
+      // have bought anything, which is evidence for a transfer rather than
+      // against one. (Briefly made "unknown" here — that swept in the most
+      // common genuine transfer case, 46% of real movements, and traded a
+      // true label for a hedge.)
       return [unpriced(b, "no quote leg — SOL movement too small to separate from account rent")];
     }
     return [
@@ -470,7 +490,7 @@ export function fillsFromTx(
   // happened — a liquidity deposit, a two-sided mint — and the ratio of the two
   // numbers would not be a price.
   if (Math.sign(baseUnits) === Math.sign(quoteUnits) || quoteUnits === 0) {
-    return [unpriced(b, "base and quote moved the same way — not a swap")];
+    return [unpriced(b, "base and quote moved the same way — not a swap", "lp")];
   }
 
   const quoteAmount = Math.abs(quoteUnits);

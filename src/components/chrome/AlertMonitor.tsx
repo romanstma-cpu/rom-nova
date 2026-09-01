@@ -29,7 +29,7 @@ import Link from "next/link";
 import { apiGet } from "@/lib/client";
 import type { LaunchFeed } from "@/lib/api/launches";
 import type { TokenRow } from "@/lib/api/rows";
-import type { WalletProfile } from "@/lib/types";
+import type { WalletFill, WalletProfile } from "@/lib/types";
 import {
   DETAIL_EVERY_MS,
   LAUNCHES_EVERY_MS,
@@ -48,6 +48,7 @@ import {
   type LiveAlertEvent,
   type LiveAlertRule,
   type RuleEvalState,
+  type WalletFillObs,
 } from "@/lib/alerts/rules";
 import {
   acquireLease,
@@ -96,7 +97,50 @@ export function mintSkipReason(message: string): string {
   if (/no system account exists|no account exists/i.test(message)) {
     return `no token exists at this mint address on Solana, so there is nothing to price — ${message}`;
   }
+  // An identified address is not an unreachable one. The chain answered, said
+  // what the address IS, and that answer arrives here as the error message —
+  // wrapping it in "unreachable" claimed a transport failure for a lookup that
+  // succeeded, and invited a retry for something that can never change. Fixing
+  // this one layer down was not enough: the reader sees THIS string.
+  if (permanentMintAnswer(message)) return message;
   return `token detail unreachable — ${message}`;
+}
+
+/**
+ * Whether a mint rule's failure is settled rather than transient.
+ *
+ * Keyed off the sentences `addressAnswer` produces for an address the chain
+ * reached and identified. A rule whose subject can never be a token should
+ * stop re-asking every sixty seconds, and should not be described as a
+ * connection problem in the meantime.
+ */
+export function permanentMintAnswer(message: string): boolean {
+  return /none ever will|not a valid Solana address|is an on-chain PROGRAM|that is a WALLET|TOKEN ACCOUNT/i.test(
+    message,
+  );
+}
+
+/**
+ * One chain-read fill, narrowed to what the evaluator is allowed to see.
+ *
+ * Exported and named because this mapping is where the round-2 HIGH defect
+ * lived, invisibly: it silently dropped `classification`, and the evaluator —
+ * having no basis left to judge — stamped BUY/SELL onto transfers, in a
+ * headline and an OS notification title. A hand-inlined object literal cannot
+ * be tested, so deleting a field from it broke nothing anywhere in the suite.
+ * This one has a test that fails if a field goes missing.
+ */
+export function toFillObs(f: WalletFill): WalletFillObs {
+  return {
+    signature: f.signature,
+    ts: f.ts,
+    mint: f.mint,
+    side: f.side,
+    tokens: f.tokens,
+    valueUsd: f.valueUsd,
+    unpricedReason: f.unpricedReason,
+    classification: f.classification,
+  };
 }
 
 /** Fold one pass's results into id-keyed states + concrete events. */
@@ -113,6 +157,12 @@ function fold(results: EvalResult[]): { states: Record<string, RuleEvalState>; e
 export function AlertMonitor() {
   const [toasts, setToasts] = useState<LiveAlertEvent[]>([]);
   const lastAttempt = useRef<Map<string, number>>(new Map());
+  /**
+   * Sources whose answer is settled: the address was identified and can never
+   * be a token. Session-scoped rather than persisted — a reload re-asks once,
+   * which is the right cost for the case where the reader fixed a typo.
+   */
+  const settled = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     // Local to the effect: the id exists to distinguish tabs racing for the
@@ -240,6 +290,13 @@ export function AlertMonitor() {
     const passDetail = async (mint: string, rules: LiveAlertRule[], states: Record<string, RuleEvalState>, now: number) => {
       const key = `detail:${mint}`;
       lastAttempt.current.set(key, now);
+      // Already answered permanently. The rule keeps its chip and its reason;
+      // what stops is the pointless re-asking.
+      const already = settled.current.get(key);
+      if (already !== undefined) {
+        skipAll(rules, states, now, already);
+        return;
+      }
       try {
         const body = await apiGet<DetailResp>(`/api/tokens/${mint}`);
         if (body.demo || !body.snapshot) {
@@ -268,6 +325,11 @@ export function AlertMonitor() {
         );
       } catch (err) {
         const why = mintSkipReason(err instanceof Error ? err.message : String(err));
+        // A rule told "no token page exists for it and none ever will" has its
+        // answer. Re-asking the chain every sixty seconds for the rest of the
+        // session spends a reader's request budget to be told the same thing,
+        // and contradicts the sentence beside it.
+        if (permanentMintAnswer(why)) settled.current.set(key, why);
         noteSourcePass({ key, lastAttemptAt: now, ok: false, note: why });
         skipAll(rules, states, now, why);
       }
@@ -315,19 +377,7 @@ export function AlertMonitor() {
               r,
               stateFor(states, r),
               {
-                fills: p.fills.map((f) => ({
-                  signature: f.signature,
-                  ts: f.ts,
-                  mint: f.mint,
-                  side: f.side,
-                  tokens: f.tokens,
-                  valueUsd: f.valueUsd,
-                  unpricedReason: f.unpricedReason,
-                  // Carried, not dropped: without it the evaluator has no basis
-                  // for the trade side it stamps, and a transfer went out as
-                  // "sold" in a headline and an OS notification.
-                  classification: f.classification,
-                })),
+                fills: p.fills.map(toFillObs),
                 newestTs: p.coverage.newestTs,
                 windowHours: p.coverage.windowHours,
                 dataAsOf,

@@ -31,7 +31,8 @@ import {
   leaseAgeMs,
   LOCK_STALE_MS,
 } from "@/lib/alerts/store";
-import { mintSkipReason } from "@/components/chrome/AlertMonitor";
+import { mintSkipReason, permanentMintAnswer, toFillObs } from "@/components/chrome/AlertMonitor";
+import { movementLabel } from "@/lib/engine/fill-label";
 import type { LiveAlertEvent } from "@/lib/alerts/rules";
 import type { TokenLaunch } from "@/lib/types";
 
@@ -444,6 +445,57 @@ describe("skip reasons are phrased for the rule that failed (D8)", () => {
   it("passes an ordinary failure through unchanged in meaning", () => {
     expect(mintSkipReason("HTTP 429")).toBe("token detail unreachable — HTTP 429");
   });
+
+  // Fixing the sentence one layer down was not enough: the reader sees THIS
+  // string, and it still opened "token detail unreachable" over an address the
+  // chain had reached and identified.
+  it("does not call an identified address unreachable", () => {
+    const identified =
+      "a PROGRAM-DERIVED ADDRESS — the 32 bytes are off the ed25519 curve, so no private key can exist for it. " +
+      "It is not a token mint, so no token page exists for it and none ever will.";
+    const why = mintSkipReason(identified);
+    expect(why).not.toMatch(/unreachable/i);
+    expect(why).toBe(identified);
+    expect(permanentMintAnswer(why)).toBe(true);
+  });
+
+  it("still treats a transport failure as retryable", () => {
+    expect(permanentMintAnswer("token detail unreachable — HTTP 429")).toBe(false);
+    expect(permanentMintAnswer("network timeout")).toBe(false);
+  });
+});
+
+// --------------------------------------------- the seam that caused round 2
+
+describe("the monitor hands the evaluator everything it judges on", () => {
+  // Deleting `classification` from this mapping is exactly what shipped the
+  // round-2 HIGH defect, and at the time it broke no test anywhere: the
+  // mapping was an inline object literal nothing could reach.
+  it("carries every field the wallet evaluator reads", () => {
+    const fill = {
+      signature: "sigX",
+      slot: 1,
+      ts: T0,
+      wallet: "W".repeat(43),
+      mint: "M".repeat(43),
+      decimals: 6,
+      side: "sell" as const,
+      tokens: 12.5,
+      pricing: "unpriced" as const,
+      unpricedReason: "no quote leg — tokens moved without this wallet paying or receiving",
+      classification: "transfer" as const,
+    };
+    const obs = toFillObs(fill);
+    expect(obs.classification).toBe("transfer");
+    expect(obs.unpricedReason).toBe(fill.unpricedReason);
+    expect(obs.signature).toBe("sigX");
+    expect(obs.ts).toBe(T0);
+    expect(obs.mint).toBe(fill.mint);
+    expect(obs.side).toBe("sell");
+    expect(obs.tokens).toBe(12.5);
+    // What it produces must label the way the wallet page labels.
+    expect(movementLabel(obs).short).toBe("OUT");
+  });
 });
 
 // ------------------------------------------- round 2: a transfer is not a sale
@@ -508,6 +560,67 @@ describe("wallet alerts do not promote a transfer to a trade", () => {
     expect(f.headline).toContain("SELL");
     expect(f.detail).toMatch(/\bsold\b/);
     expect(f.detail).not.toMatch(/not a trade/);
+  });
+
+  // A rotation IS a trade — one nobody could price. The first fix over-reached
+  // and printed "nothing was paid or received for it" directly after the
+  // reason "token-for-token rotation", contradicting itself in one sentence.
+  it("does not call a token-for-token rotation a transfer", () => {
+    const f = evaluateWalletRule(
+      rule,
+      armed(),
+      {
+        fills: [
+          {
+            signature: "sigR",
+            ts: T0 - 5_000,
+            mint: MINT,
+            side: "sell",
+            tokens: 1_000,
+            unpricedReason: "token-for-token rotation — no single quote leg to price against",
+            classification: "rotate",
+          },
+        ],
+        newestTs: T0 - 5_000,
+        windowHours: 48,
+        dataAsOf: T0 - 1_000,
+        sourceName: "solana-rpc",
+      },
+      T0,
+    ).fires[0];
+    expect(f.detail).not.toMatch(/nothing was paid or received/);
+    expect(f.detail).toMatch(/swapped/);
+    expect(f.headline).toContain("ROTATE");
+  });
+
+  // A pool deposit is not a trade either, and saying "nothing was paid or
+  // received" about it is equally wrong — both legs moved.
+  it("names a pool deposit as one", () => {
+    const f = evaluateWalletRule(
+      rule,
+      armed(),
+      {
+        fills: [
+          {
+            signature: "sigL",
+            ts: T0 - 5_000,
+            mint: MINT,
+            side: "sell",
+            tokens: 1_000,
+            unpricedReason: "base and quote moved the same way — not a swap",
+            classification: "lp",
+          },
+        ],
+        newestTs: T0 - 5_000,
+        windowHours: 48,
+        dataAsOf: T0 - 1_000,
+        sourceName: "solana-rpc",
+      },
+      T0,
+    ).fires[0];
+    expect(f.headline).toContain("LP");
+    expect(f.detail).toMatch(/deposited/);
+    expect(f.detail).not.toMatch(/nothing was paid or received/);
   });
 
   // An older stored fill, or any producer that predates the field, must not

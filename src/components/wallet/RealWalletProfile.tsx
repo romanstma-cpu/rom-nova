@@ -18,6 +18,7 @@ import Link from "next/link";
 import { fmtUsd, fmtAgo, shortAddr } from "@/lib/client";
 import { Stat, Empty } from "@/components/ui/bits";
 import type { WalletFill, WalletHolding, WalletProfile } from "@/lib/types";
+import { movementLabel } from "@/lib/engine/fill-label";
 
 /** A measured value, or an explicit statement that nobody measured it. */
 function Measured({
@@ -258,9 +259,11 @@ function FillRow({ f }: { f: WalletFill }) {
     <tr className="trow">
       <td className="px-3 py-1 faint">{new Date(f.ts).toLocaleString()}</td>
       <td className={`px-2 ${unpriced ? "faint" : f.side === "buy" ? "pos" : "neg"}`}>
-        {/* IN/OUT rather than BUY/SELL when nothing was paid: tokens arriving
-            by airdrop or by someone else's purchase are not a buy. */}
-        {unpriced ? (f.side === "buy" ? "IN" : "OUT") : f.side.toUpperCase()}
+        {/* The shared label, so this cell and an alert about the same fill can
+            never disagree. Testing `priceUsd === undefined` here (which is what
+            this cell used to do) called a real swap with no SOL/USD bar a
+            transfer, while the alert called it a sale. */}
+        {movementLabel(f).short}
       </td>
       <td className="px-2">
         <Link href={`/token?m=${f.mint}`} className="hover:text-[var(--accent)]">

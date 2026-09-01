@@ -269,6 +269,32 @@ describe("fillsFromTx — a price, or an honest absence of one", () => {
     expect(fills).toHaveLength(2);
     expect(fills.every((f) => f.pricing === "unpriced")).toBe(true);
     expect(fills.every((f) => f.priceUsd === undefined)).toBe(true);
+    // UNPRICED IS NOT UNTRADED. All four unpriceable situations used to be
+    // stamped "transfer", which read as "nobody paid for this" the moment
+    // anything said the classification out loud — over a swap.
+    expect(fills.every((f) => f.classification === "rotate")).toBe(true);
+  });
+
+  it("calls a same-direction pair a pool movement, not a transfer", () => {
+    // Base and quote both leaving is a deposit, not a swap: the ratio of the
+    // two numbers is not a price, and neither is it a gift.
+    const fills = fillsFromTx(
+      tx({
+        pre: [
+          { idx: 1, mint: TOKEN, owner: WALLET, amount: "500000000", decimals: 6 },
+          { idx: 2, mint: WSOL, owner: WALLET, amount: "2000000000", decimals: 9 },
+        ],
+        post: [
+          { idx: 1, mint: TOKEN, owner: WALLET, amount: "100000000", decimals: 6 },
+          { idx: 2, mint: WSOL, owner: WALLET, amount: "1000000000", decimals: 9 },
+        ],
+      }),
+      WALLET,
+      BARS,
+    );
+    expect(fills).toHaveLength(1);
+    expect(fills[0].classification).toBe("lp");
+    expect(fills[0].pricing).toBe("unpriced");
   });
 
   // Rent is 0.00204 SOL. A leg below the floor is mostly rent, and a price

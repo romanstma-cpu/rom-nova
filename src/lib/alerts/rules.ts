@@ -25,6 +25,7 @@
 //    different claims, and Cielo/Photon render both as the first one.
 
 import type { LaunchVerdict, TokenLaunch, TradeClassification } from "../types";
+import { movementLabel } from "../engine/fill-label";
 
 /** Base58, 32-44 chars — same shape gate the API handlers apply. Local copy
  *  so the rule form can validate without dragging the handler graph along. */
@@ -816,12 +817,9 @@ export function evaluateWalletRule(rule: LiveAlertRule, state: RuleEvalState, ob
   for (const f of fresh.slice(0, MAX_FILL_FIRES)) {
     const what = f.symbol || shortMint(f.mint);
     const value = f.valueUsd !== undefined ? usd(f.valueUsd) : `unpriced${f.unpricedReason ? ` — ${f.unpricedReason}` : ""}`;
-    // A movement nobody paid for is a direction, not a trade. The wallet page
-    // prints these IN/OUT; the alert says the same thing in its own words
-    // rather than promoting a transfer to a sale.
-    const moved = f.classification === "transfer";
-    const word = moved ? (f.side === "buy" ? "received" : "sent") : f.side === "buy" ? "bought" : "sold";
-    const label = moved ? (f.side === "buy" ? "IN" : "OUT") : f.side.toUpperCase();
+    // One shared answer to "what should this be called", so an alert and the
+    // wallet page can never describe the same fill differently again.
+    const { short: label, verb: word, note: kindNote } = movementLabel(f);
     fires.push({
       ruleId: rule.id,
       ruleName: rule.name,
@@ -834,8 +832,7 @@ export function evaluateWalletRule(rule: LiveAlertRule, state: RuleEvalState, ob
       gapNote: gap,
       headline: `WALLET ${label} · ${short}`,
       detail:
-        `${short} ${word} ${what} (${value})` +
-        (moved ? " — a transfer, not a trade: nothing was paid or received for it. " : ". ") +
+        `${short} ${word} ${what} (${value})${kindNote || "."} ` +
         `Fill landed at block time; this tab noticed it ${Math.max(0, Math.round((now - f.ts) / 1000))}s later by its own clock.`,
       mint: f.mint,
       symbol: f.symbol,

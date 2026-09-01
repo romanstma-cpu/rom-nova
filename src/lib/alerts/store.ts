@@ -48,9 +48,26 @@ export interface AlertsBlob {
    * UI is obliged to print.
    */
   dropped: Record<string, number>;
+  /**
+   * Dedupe keys shed under storage pressure, cumulative.
+   *
+   * Not cosmetic: a shed key is an already-alerted row that CAN alert again,
+   * so this is the one number that tells a reader a duplicate they are looking
+   * at was permitted rather than a bug. Zero and absent mean the same thing.
+   */
+  keysShed?: number;
 }
 
 const EMPTY: AlertsBlob = { rules: [], events: [], states: {}, settings: { backgroundWatch: false }, dropped: {} };
+
+/**
+ * Dedupe keys kept per rule when storage forces a shed.
+ *
+ * Enough to cover a few passes of the launch feed, so the rows most likely to
+ * still be listed keep their keys; far below SEEN_CAP, because the point is to
+ * free space.
+ */
+const KEY_FLOOR = 100;
 
 /**
  * Trim the inbox to MAX_EVENTS by taking from whichever rule is hogging it.
@@ -158,7 +175,11 @@ export function parseAlerts(raw: string | null): AlertsBlob {
         if (typeof v === "number" && Number.isFinite(v) && v > 0) dropped[k] = v;
       }
     }
-    return { rules, events, states, settings, dropped };
+    const keysShed =
+      typeof parsed.keysShed === "number" && Number.isFinite(parsed.keysShed) && parsed.keysShed > 0
+        ? parsed.keysShed
+        : undefined;
+    return { rules, events, states, settings, dropped, keysShed };
   } catch {
     return EMPTY;
   }
@@ -206,12 +227,25 @@ function save(blob: AlertsBlob): void {
       // keys (the rows still in the feed, which are the ones that would
       // re-fire). Giving up here instead would persist nothing at all, and a
       // dedupe set that stops persisting is the duplicate storm returning.
+      //
+      // Counted and said out loud, like the events beside it: shedding keys
+      // means some already-alerted row can alert again, which is a promise
+      // being broken quietly unless the page can see that it happened.
       const states: typeof bounded.states = {};
+      let shed = 0;
       for (const [id, st] of Object.entries(bounded.states)) {
-        states[id] = st.seenKeys ? { ...st, seenKeys: st.seenKeys.slice(-100) } : st;
+        if (st.seenKeys && st.seenKeys.length > KEY_FLOOR) {
+          shed += st.seenKeys.length - KEY_FLOOR;
+          states[id] = { ...st, seenKeys: st.seenKeys.slice(-KEY_FLOOR) };
+        } else {
+          states[id] = st;
+        }
       }
       try {
-        s.setItem(KEY, JSON.stringify({ ...bounded, events: cut, dropped, states }));
+        s.setItem(
+          KEY,
+          JSON.stringify({ ...bounded, events: cut, dropped, states, keysShed: (bounded.keysShed ?? 0) + shed }),
+        );
       } catch {
         /* storage unavailable — monitoring continues without a saved record */
       }

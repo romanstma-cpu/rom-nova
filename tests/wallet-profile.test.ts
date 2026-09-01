@@ -402,25 +402,44 @@ describe("assembleProfile — what reaches the screen", () => {
 // (rotations), both legs moving the same way (pool deposits), and a swap with
 // a perfectly good quote leg and no SOL/USD bar for its hour.
 describe("nothing claims every unpriced movement lacked a quote leg", () => {
-  it("holds across every surface that describes the count", async () => {
-    const sources = await Promise.all([
-      import("node:fs/promises").then((fs) =>
-        fs.readFile(new URL("../src/lib/engine/wallet-profile.ts", import.meta.url), "utf8"),
-      ),
-      import("node:fs/promises").then((fs) =>
-        fs.readFile(new URL("../src/components/wallet/RealWalletProfile.tsx", import.meta.url), "utf8"),
-      ),
-      import("node:fs/promises").then((fs) =>
-        fs.readFile(new URL("../src/lib/providers/registry.ts", import.meta.url), "utf8"),
-      ),
-    ]);
-    for (const src of sources) {
-      // The phrase may appear as ONE cause among several; what it may never do
-      // is quantify over all of them.
-      expect(src).not.toMatch(/movements have no quote leg/i);
-      expect(src).not.toMatch(/movements — tokens moved with no quote leg/i);
-      expect(src).not.toMatch(/movements had no quote leg/i);
+  // The first version of this guard read three files and passed while the
+  // banned phrase sat in a fourth — the same "fixed where it was quoted"
+  // failure it exists to prevent, committed by the guard itself. It now reads
+  // every file in src/ that mentions the unpriced set at all, discovered
+  // rather than listed, so a new surface cannot be added outside its reach.
+  const BANNED = [
+    /movements have no quote leg/i,
+    /movements — tokens moved with no quote leg/i,
+    /movements had no quote leg/i,
+    /movements .{0,40}came back unpriced/i,
+  ];
+
+  it("holds across every file in src that describes the unpriced set", async () => {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const root = new URL("../src/", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+
+    const walk = async (dir: string): Promise<string[]> => {
+      const out: string[] = [];
+      for (const e of await fs.readdir(dir, { withFileTypes: true })) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) out.push(...(await walk(full)));
+        else if (/\.tsx?$/.test(e.name)) out.push(full);
+      }
+      return out;
+    };
+
+    const files = await walk(root);
+    expect(files.length).toBeGreaterThan(20);
+    const offenders: string[] = [];
+    for (const file of files) {
+      const src = await fs.readFile(file, "utf8");
+      if (!/unpriced/i.test(src)) continue;
+      for (const re of BANNED) {
+        if (re.test(src)) offenders.push(`${path.basename(file)} :: ${re}`);
+      }
     }
+    expect(offenders).toEqual([]);
   });
 });
 

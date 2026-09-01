@@ -478,11 +478,15 @@ function provenanceLines(
     // SOL/USD bar covering the hour, and pool movements where both legs went
     // the same way — the same four-into-one collapse the classification had.
     // The count is right; the reason had to stop being a single claim.
+    // No enumeration. Every prose list of the causes has drifted out of date
+    // within a round of being written — the chain reader emits six distinct
+    // reason strings and gains one whenever a new case is told apart, while a
+    // sentence like this one is updated only when somebody notices. The fills
+    // each carry their own reason; this line reports the count and points at
+    // them.
     out.push(
-      `${stats.unpricedFills} of ${stats.pricedFills + stats.unpricedFills} movements carry no price — transfers and ` +
-        `claims (no quote leg), token-for-token rotations (one leg belonging to both sides), pool deposits and ` +
-        `withdrawals (both legs the same way), swaps with no SOL/USD bar covering the hour, and movements whose ` +
-        `SOL residue is too small to tell a purchase from account rent. Each fill says which`,
+      `${stats.unpricedFills} of ${stats.pricedFills + stats.unpricedFills} movements carry no price, for several ` +
+        `different reasons — each one states its own beside the fill`,
     );
   }
   if (stats.unmatchedSellMints > 0) {

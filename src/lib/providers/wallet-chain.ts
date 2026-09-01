@@ -28,13 +28,20 @@
 // or moves native lamports, never both — so taking whichever is present cannot
 // double-count.
 //
-// The second is that 46% of token movements have NO quote leg belonging to
-// this wallet. They are transfers in, claims, and token-for-token rotations
-// routed entirely through pool accounts. There is no price to recover from
-// them, because nothing this wallet owned moved against the tokens. They are
-// recorded as movements with `pricing: "unpriced"` and they never enter a PnL
-// figure. Guessing a price for them — from the token's price now, say — would
-// fabricate 46% of every number on the page.
+// The second is that 46% of token movements (the NEITHER row) had no quote
+// source at all: nothing this wallet owned moved against the tokens, so there
+// is no price to recover. They are recorded `pricing: "unpriced"` and never
+// enter a PnL figure. Guessing a price for them — from the token's price now,
+// say — would fabricate 46% of every number on the page.
+//
+// THAT 46% IS A FLOOR ON `unpriced`, NOT ITS RATE, and this comment used to
+// say otherwise. It counts one cause. A movement can have a perfectly good
+// quote leg and still be unpriceable: a rotation's belongs to two sides at
+// once, a pool deposit's moves the same way as the base, and a swap can want
+// a SOL/USD bar that does not exist for its hour. Each fill carries its own
+// `unpricedReason` and its own `classification` precisely so that no summary
+// anywhere has to guess which applied — the enumerations that tried drifted
+// out of date twice.
 //
 // TWO DEPTHS, NOT ONE — SEE rpc-endpoint.ts FOR THE MEASUREMENTS
 //

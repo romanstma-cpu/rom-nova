@@ -45,7 +45,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **PASS** — round 4 confirmed the last defect closed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ✅ **PASS round 1** — merged to main, post-PASS list closed same hour |
-| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🟢 round 3 FAIL (narrow) — six closed (@ 6928be9, 555 tests) · round-4 confirm running |
+| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🟢 round 4 FAIL (narrow) — six closed (@ 0fbef82, 558 tests) · round-5 confirm running |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
 
 ## Round 3 dispatched — both confirmation critics in flight (2026-08-31)
@@ -116,6 +116,57 @@ One honest residual it correctly declined to count: with the local clock
 negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
+
+## W5 round 4: FAIL — a residue means opposite things by direction
+
+Four of six confirmed closed, live: the permanent refusal reads verbatim
+with no "unreachable"; rotations, pool pairs and genuine transfers all
+label correctly with no self-contradiction; both surfaces share one
+`movementLabel`; the key shed printed **"Browser storage ran out: 900
+de-duplication keys were discarded"** after the critic forced the third
+rung of the ladder; and the settled rule was proven to stop asking by
+wrapping `window.fetch` — **437 app fetches over ~7 minutes, zero
+carrying the mint**. Regressions clean: 77 launch events, zero true
+duplicates.
+
+The two it failed on were both mine. A sub-rent-floor SOL residue was
+labelled `transfer` in BOTH directions, so an ordinary pump.fun buy —
+0.002 SOL, below the floor — alerted as *"a transfer, not a trade:
+nothing was paid or received for it"*, in the inbox, the toast and the OS
+notification title. Its own reason said the opposite in the same breath:
+"too small to SEPARATE from account rent" admits ambiguity; the label
+beside it claimed certainty.
+
+**Direction settles it with no new data.** `nativeQuoteLamports` already
+adds the fee back for the payer and nets the wallet's own token-account
+rent, so a residue on a tokens-OUT movement is the 2,039,280 lamports of
+ATA rent a sender pays to open the RECIPIENT's account — rent-explainable,
+and the dominant case (the critic pulled two off chain to check). A
+residue on a tokens-IN movement is not rent-explainable at all, because
+nothing about receiving tokens obliges this wallet to pay rent for anyone.
+So inbound became `unknown` — whose sentence, written two rounds earlier,
+had never once been reachable for a real fill.
+
+Seeing this needed a pre-existing fixture made honest: the test factory
+defaults to balances 0 → 0 **with** a 5,000-lamport fee, describing a
+wallet that gained exactly what it spent. A real inbound transfer's
+balance drops by the fee and the residue nets to zero, which is why the
+46%-of-movements case still reads `transfer`.
+
+The seam test also still missed one field — and it was the value field.
+Deleting `valueUsd` from the monitor's mapping left 555 tests green
+(optional, and the fixture carried none), and every priced alert would
+then have announced "unpriced" for a fill the pipeline priced perfectly:
+round 2's failure mode, one field over. Now pinned, verified by deleting
+it and watching exactly one test fail.
+
+Also closed: two clocks disagreeing about a settled mint (source line
+"failing (8m ago)" beside a tooltip ticking "last attempt 15s ago", for a
+rule that had stopped asking), and the wallet profile's claim that every
+unpriced fill "had no quote leg" — untrue of rotations, pool movements
+and no-SOL-bar swaps alike. The same four-into-one collapse, one layer up.
+
+558 tests, tsc clean, build clean.
 
 ## W5 round 3: FAIL — the fix for the lie had a lie inside it
 

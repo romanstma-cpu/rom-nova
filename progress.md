@@ -45,7 +45,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **PASS** — round 4 confirmed the last defect closed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ✅ **PASS round 1** — merged to main, post-PASS list closed same hour |
-| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🟢 round 2 FAIL — nine closed, four new fixed same hour (@ a9e9879, 549 tests) · round-3 confirm running |
+| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🟢 round 3 FAIL (narrow) — six closed (@ 6928be9, 555 tests) · round-4 confirm running |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
 
 ## Round 3 dispatched — both confirmation critics in flight (2026-08-31)
@@ -116,6 +116,57 @@ One honest residual it correctly declined to count: with the local clock
 negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
+
+## W5 round 3: FAIL — the fix for the lie had a lie inside it
+
+The transfer fix was confirmed live — **6 alerts, all WALLET OUT, all
+"sent", zero "sold"**, against round 2's 14-of-14 wrong, with the critic
+cross-checking a signature on chain (a `transferChecked` of 8.4M PUMP out,
+SOL delta = fee only: a withdrawal). `dataAsOf`/`firedAt` ordering clean
+across 200 alerts; the quota ladder forced live and observed stepping
+181,150 → 119,878 → **72,829 bytes written**; dedupe still zero true
+duplicates over 7.9 minutes.
+
+Then it failed on what my own fix had over-reached into, which is the
+right way to lose a round. `unpriced()` in `wallet-chain.ts` stamped
+`classification: "transfer"` on FOUR different situations — a genuine
+transfer, a token-for-token rotation, a pool deposit, an ambiguity.
+Nothing surfaced the collapse while `classification` was a faint column
+on two tables. The moment an alert SAID what it meant, it printed "a
+transfer, not a trade: nothing was paid or received for it" directly
+after the reason "token-for-token rotation — no single quote leg to price
+against", contradicting itself inside one sentence.
+
+**The union has had `rotate` and `lp` all along.** The reader was simply
+never given them.
+
+### All six closed (`6928be9`)
+
+Rotations are `rotate`, same-direction pairs are `lp`, and the two
+no-quote-leg cases stay `transfer` — including the SOL-below-rent-floor
+one, which is 46% of real movements and where a tiny SOL delta is
+evidence FOR a transfer, not against it. (I briefly labelled that
+"unknown" and reverted it: it traded a true label for a hedge, and the
+suite caught me.)
+
+The alert and the wallet page had also grown SEPARATE answers to "what is
+this movement called" — the page testing `priceUsd`, the alert testing
+`classification` — so a real swap with no SOL/USD bar showed OUT on one
+surface and "sold" on the other. Both now call one `movementLabel()`,
+which answers "was it a trade" from the classification and leaves "what
+was it worth" to the pricing, inferring neither from the other.
+
+Also: the permanent refusal is returned verbatim instead of wrapped in
+"token detail unreachable" (fixing `addressAnswer` one layer down was not
+enough — the reader sees the outer string), and the rule stops re-asking
+the chain every 60s for an answer that can never change; the last-resort
+key shed is counted, persisted and printed, because a shed key is a row
+that may alert twice; and the mapping that caused round 2's HIGH defect
+is now a named function with **a test verified to fail when a field is
+dropped** — it was an inline literal, so deleting a field from it had
+broken nothing in 549 tests.
+
+555 tests, tsc clean, build clean.
 
 ## W5 round 2: FAIL — a transfer was being sold
 

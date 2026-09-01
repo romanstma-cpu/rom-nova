@@ -45,7 +45,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **PASS** — round 4 confirmed the last defect closed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ✅ **PASS round 1** — merged to main, post-PASS list closed same hour |
-| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🟢 round 7 FAIL (guard only — copy clean) — guard now normalises wrapped text (@ 55abc9a, 561 tests) · round-8 confirm running |
+| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🟢 round 8 FAIL (guard only — copy clean) — five exploits closed (@ d2d2572, 566 tests) · round-9 confirm running |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
 
 ## Round 3 dispatched — both confirmation critics in flight (2026-08-31)
@@ -116,6 +116,49 @@ One honest residual it correctly declined to count: with the local clock
 negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
+
+## W5 round 8: FAIL — the exemption is where a guard lives or dies
+
+The normaliser held: four wrappings injected, four caught, each naming file
+and pattern. **The rendered copy is true** — /status labels 46% as both the
+measured no-quote-leg rate and a floor, the provenance line and tooltip
+defer to each fill's own reason, and 68 live launch rows produced 68 mints
+with zero repeats.
+
+Then it took the guard apart on its exemption, which is fair and is where
+these things actually fail:
+
+- **The scope test accepted ANY nearby percentage.** It asked whether a
+  digit-percent existed in the preceding sixty characters, never whether it
+  scoped the claim — so *"although only 3% of wallets were sampled, every
+  one of their token movements had no quote leg"* walked straight through.
+  Sweeping, false, and the exact class the guard exists to catch.
+- **One intervening word made a claim invisible.** The verb had to follow
+  "movements" immediately, so of the three places the claim lives the guard
+  watched ONE. A test named "holds across every file" held across one.
+- **The exemption marker was self-serve** — the fixture cut ran on every
+  scanned file, so any source file could exempt itself by pasting the
+  comment. Greppable was true; enforced was not.
+- The count check missed **"reason strings"** — the very phrase an earlier
+  round de-quantified — because its alternation wanted "reasons".
+- And a **live miscount**: types.ts said "Six states rather than a boolean"
+  over a five-member union that enumerates five, four lines down.
+
+### What the hardened guard deliberately does NOT do
+
+Applied globally, the count check flags honest prose — "two measured
+reasons" for a chart default, "the three states distinct: REVOKED, LIVE,
+UNVERIFIED" — which enumerate themselves and cannot drift. **A guard that
+cries wolf on correct copy teaches people to widen its exemptions**, and
+claiming coverage it does not have is the failure under review. So counts
+are policed near the pricing copy this guard is about, "reason strings"
+everywhere because that phrasing has drifted twice on its own, and the
+limit is stated in the test rather than implied by its name. Same
+reasoning for singular: "every movement had no quote leg" is caught, while
+the test name "refuses to price a movement with no quote leg" is not.
+
+All five exploits replayed against the hardened guard and caught, every
+injection restored byte-identically. 566 tests, tsc clean, build clean.
 
 ## W5 round 7: FAIL — the guard couldn't read the copy it guards
 

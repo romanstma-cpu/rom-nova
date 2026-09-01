@@ -45,7 +45,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **PASS** — round 4 confirmed the last defect closed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ✅ **PASS round 1** — merged to main, post-PASS list closed same hour |
-| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🟢 round 4 FAIL (narrow) — six closed (@ 0fbef82, 558 tests) · round-5 confirm running |
+| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🟢 round 5 FAIL (1 item) — closed on all four surfaces (@ 73331d8, 559 tests) · round-6 confirm running |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
 
 ## Round 3 dispatched — both confirmation critics in flight (2026-08-31)
@@ -116,6 +116,44 @@ One honest residual it correctly declined to count: with the local clock
 negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
+
+## W5 round 5: FAIL — one claim, fixed in one place, standing in three
+
+Five of six confirmed, several by mutation rather than by reading: the
+residue direction split verified end to end (outbound `transfer`, inbound
+micro-buy `unknown`, fee-only inbound still `transfer`) with the critic
+checking my reasoning in source before accepting it — `nativeQuoteLamports`
+adds the fee back for the payer and nets only the wallet's OWN token
+accounts, so the recipient's ATA rent really does survive in the residue.
+The `valueUsd` seam test verified by deleting the line and watching it
+fail. The settled mint's two clocks agreed with no attempt time anywhere
+on screen. Launch dedupe: **157 unique keys, 0 duplicates** over 5.4
+minutes.
+
+It failed on the item I had fixed in exactly one place. "No quote leg
+belonging to this wallet" was corrected in the provenance line and left
+standing, verbatim, in the wallet page's UNMEASURED tooltip and in the
+/status coverage note — both gated on the same counter — plus the type
+comment behind them. False in all three for one reason: **a pool deposit
+reaches the unpriced state BECAUSE its quote leg moved**, and a swap with
+no SOL/USD bar had one all along.
+
+Second time in two rounds that a fix landed one layer from where the
+reader looks. So it is corrected on all four surfaces AND a test now
+reads the three shipping ones and fails on the quantifying phrase —
+verified by reintroducing the old wording. Nothing in the type system
+connects a sentence in a tooltip to the counter it describes; only a test
+can. The corrected sentence also gained round 4's own new case (a SOL
+residue too small to tell a purchase from rent), which it had been
+folding into "transfers and claims" — the exact assertion round 4 existed
+to stop making.
+
+Also closed: a settled rule's `lastAttemptAt` kept advancing every 60s
+though the monitor had stopped asking. Nothing renders it, which is why
+the critic filed it as an observation — but a stored value that is wrong
+is a defect waiting for its first reader.
+
+559 tests, tsc clean, build clean.
 
 ## W5 round 4: FAIL — a residue means opposite things by direction
 

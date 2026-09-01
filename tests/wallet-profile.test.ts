@@ -401,7 +401,7 @@ describe("assembleProfile — what reaches the screen", () => {
 // ways: version one read three files from a hand-written array while the
 // phrase sat in a fourth, and version two searched raw source — which cannot
 // see a sentence written the way every sentence here is written.
-describe("nothing over-claims about the unpriced set", () => {
+describe("the known over-claims about the unpriced set stay dead", () => {
   /* guard-fixture:start — the guard's machinery: the normaliser (whose own
      documentation has to QUOTE the offending phrase to explain it), the
      pattern lists, and the strings that prove they fire. All three would
@@ -438,28 +438,52 @@ describe("nothing over-claims about the unpriced set", () => {
   // demanded that, so "movements measured across five real wallets had no
   // quote leg" — one of the three places the claim actually lives — matched
   // nothing, and a test named "holds across every file" held across one.
-  const CLAIM = "(have|has|had|with|lack|lacks|lacked|carry|carries|carried) no quote (leg|source)";
-  // Plural, or singular UNDER A UNIVERSAL QUANTIFIER — "every movement had no
-  // quote leg" is the same sweeping claim in different grammar. Bare singular
-  // is left alone: "refuses to price a movement with no quote leg" describes
-  // one case truthfully, and a guard that flags correct copy teaches people to
-  // widen its exemptions.
+  //
+  // The vocabulary covers the plain forms too. Version four knew only "had no
+  // quote leg", so "movements lack a quote leg", "no movement had a quote
+  // leg" and "all token movements are unpriced" — the ways a person actually
+  // writes this — all walked past a test named "nothing over-claims".
+  const CLAIM =
+    "((have|has|had|with|carry|carries|carried|show|shows|showed) (no|any) quote (leg|source)" +
+    "|(lack|lacks|lacked|without) (a |any |no )?quote (leg|source))";
+  const ALL = "(every|each|all|any|no|the)";
+  // No length cap on the intervening text. `{0,80}` was invisible past 84
+  // characters, and the /status note this guards is a single 1,000-character
+  // string — the cap was measuring prettier's line width, not meaning.
+  //
+  // WHAT THIS HALF DOES NOT DO, since the count check states its limits and
+  // this one used to imply none: it matches PHRASINGS, not meanings. A writer
+  // determined to say "nothing this wallet owned ever moved against any of
+  // them" will get past it. It covers the forms this claim has actually taken
+  // across nine review rounds plus the plain ways of saying the same thing,
+  // which is a floor on vigilance, not a proof. The test names below say
+  // "the phrasings seen so far" rather than "nothing over-claims" for that
+  // reason — a guard that overstates its coverage is the bug it looks for.
   const NEEDS_SCOPE = [
-    new RegExp(`movements\\b[^.;]{0,80}?\\b${CLAIM}`, "i"),
-    new RegExp(`(every|each|all|any)\\s+movement\\b[^.;]{0,80}?\\b${CLAIM}`, "i"),
+    new RegExp(`movements\\b[^.;]*?\\b${CLAIM}`, "i"),
+    // Singular only under a universal quantifier: "refuses to price a movement
+    // with no quote leg" describes one case truthfully, and a guard that flags
+    // correct copy teaches people to widen its exemptions.
+    new RegExp(`${ALL}\\s+movement\\b[^.;]*?\\b${CLAIM}`, "i"),
+    // "No movement HAD a quote leg" — the same claim by negating the subject
+    // instead of the object.
+    /\bno movements?\b[^.;]*?\b(had|has|have|with) a quote (leg|source)/i,
+    // "All token movements are unpriced", which says it without the word leg.
+    new RegExp(`${ALL}\\b[^.;]{0,30}movements?\\b[^.;]*?\\b(are|were|is|was) unpriced`, "i"),
     /movements? — tokens moved with no quote (leg|source)/i,
-    /movements?[^.;]{0,40}came back unpriced/i,
+    /movements?[^.;]*?came back unpriced/i,
   ];
   /**
    * A measured share that actually SCOPES the claim: "46% of token movements".
    *
-   * At most two words may sit between "of" and the claim, because a percentage
-   * merely nearby proves nothing. Version three took any digit-percent in the
-   * preceding sixty characters, and "although only 3% of wallets were sampled,
-   * every one of their token movements had no quote leg" walked straight
-   * through — sweeping, false, and the exact class this exists to catch.
+   * An ALLOWLIST of adjectives, not a word count. Version four allowed any two
+   * words, so "46% of wallets had movements with no quote leg" passed — the
+   * percentage governing *wallets* while the claim swept *movements*. That is
+   * not a hypothetical: the protected sentence contains both nouns, and
+   * shifting the share one noun left is precisely the drift this sentence's
+   * history is made of.
    */
-  const SCOPED = /\d+%\s+of\s+(the\s+)?(\w+\s+){0,2}$/;
+  const SCOPED = /\d+%\s+of\s+(the\s+)?(token\s+|observed\s+|sampled\s+|measured\s+|real\s+|chain\s+)*$/;
 
   // Closing a list the code keeps adding to. No scope redeems these: the count
   // is wrong the moment a new case is told apart, and it has been wrong four
@@ -472,7 +496,12 @@ describe("nothing over-claims about the unpriced set", () => {
   // is the exact failure under review here, so the count check is scoped to
   // the pricing vocabulary this guard is actually about, and `reason strings`
   // is global because that phrasing has drifted twice on its own.
-  const COUNT = "\\b(two|three|four|five|six|seven|eight)\\b (different |distinguishable |distinct )?";
+  // Digits and the numbers past eight included: the chain reader emits six
+  // reason strings TODAY, so "nine" and "6" are exactly the values the next
+  // stale sentence will use.
+  const COUNT =
+    "\\b(two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\\d{1,3})\\b " +
+    "(different |distinguishable |distinct |separate )?";
   const NEVER_ANYWHERE = [new RegExp(`${COUNT}reason strings?\\b`, "i")];
   const NEVER_NEAR_PRICING = [new RegExp(`${COUNT}(reasons?|causes?|cases?|states?|kinds?|branches?)\\b`, "i")];
   /** How close a count must sit to the pricing copy to be this guard's business. */
@@ -550,6 +579,37 @@ describe("nothing over-claims about the unpriced set", () => {
     expect(offends(`it("refuses to price a movement with no quote leg", () => {`)).toBe(false);
   });
 
+  // Six sweeping claims that walked past version four. The first is the one
+  // that matters: the protected sentence contains BOTH "wallets" and
+  // "movements", so moving the share one noun left is the drift this
+  // sentence's own history is made of.
+  it("refuses a share that governs a different noun", () => {
+    expect(offends(`"46% of wallets had movements with no quote leg"`)).toBe(true);
+    expect(offends(`"In 46% of hours movements had no quote leg"`)).toBe(true);
+    expect(offends(`"46% of token movements had no quote leg"`)).toBe(false);
+    expect(offends(`"46% of observed movements had no quote leg"`)).toBe(false);
+  });
+
+  it("knows the plain ways a person writes the claim", () => {
+    expect(offends(`"All token movements are unpriced"`)).toBe(true);
+    expect(offends(`"No movement had a quote leg"`)).toBe(true);
+    expect(offends(`"Movements lack a quote leg"`)).toBe(true);
+    expect(offends(`"every movement shows no quote leg"`)).toBe(true);
+    expect(offends(`"the movements were unpriced"`)).toBe(true);
+  });
+
+  it("sees past a long intervening clause", () => {
+    // 84 characters was caught and 120 passed, while the sentence this guards
+    // is a single 1,000-character string.
+    const long = "measured across five real wallets over five hundred and seventy-seven transactions in total";
+    expect(offends(`"movements ${long} had no quote leg"`)).toBe(true);
+  });
+
+  it("catches a count in digits or past eight", () => {
+    expect(offends(`"the chain reader emits nine distinct reason strings"`)).toBe(true);
+    expect(offends(`"the chain reader emits 6 reason strings"`)).toBe(true);
+  });
+
   it("leaves honest prose about other things alone", () => {
     // Both were flagged by an over-broad version and both are true, closed,
     // and self-enumerating. A guard that cries wolf on correct copy teaches
@@ -561,10 +621,11 @@ describe("nothing over-claims about the unpriced set", () => {
   });
   /* guard-fixture:end */
 
-  it("holds across every file that describes the unpriced set", async () => {
+  it("finds no known over-claim in any file under src or tests", async () => {
     const fs = await import("node:fs/promises");
     const path = await import("node:path");
     const here = new URL("./", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+    const selfPath = path.join(here, "wallet-profile.test.ts");
     // src/ AND tests/: version two could not read itself, and its own preamble
     // was closing a four-cause list while it forbade exactly that.
     const roots = [path.join(here, "..", "src"), here];
@@ -584,11 +645,13 @@ describe("nothing over-claims about the unpriced set", () => {
     const offenders: string[] = [];
     for (const file of files) {
       let raw = await fs.readFile(file, "utf8");
-      // The fixture cut applies to THIS FILE ONLY. Version three ran it over
+      // The fixture cut applies to THIS EXACT FILE. Version three ran it over
       // every scanned file, which made the marker self-serve: any source file
-      // could exempt itself by pasting the comment, which is not a guard, it
-      // is an honour system. Greppable was true; enforced was not.
-      if (path.basename(file) === "wallet-profile.test.ts") {
+      // could exempt itself by pasting the comment. Version four keyed on the
+      // basename, so `src/lib/wallet-profile.test.ts` could still claim the
+      // exemption by being named after the guard. The full path is the only
+      // form of this check that is enforcement rather than an honour system.
+      if (file === selfPath) {
         raw = raw.replace(/guard-fixture:start[\s\S]*?guard-fixture:end/g, " ");
       }
       // Deliberately loose: any file discussing pricing at all gets read, not

@@ -162,7 +162,7 @@ export async function handleLaunches(): Promise<{ feed: LaunchFeed | null; demo:
  * simulator's own mints are generated from the same alphabet at 44 characters,
  * so this gates nothing legitimate.
  *
- * Checked before the mint reaches five providers, and before it can reach a
+ * Checked before the mint reaches the provider stack, and before it can reach a
  * message the page prints verbatim: `/token?m=<script>alert(1)</script>` used
  * to render its own query string back at the reader through the 404 body. React
  * escapes it, so it was never XSS, but a page that will print whatever a link

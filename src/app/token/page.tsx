@@ -117,7 +117,7 @@ const DEFAULT_INTERVAL: ChartInterval = "15m";
 
 function TokenInner() {
   const mint = useSearchParams().get("m") ?? "";
-  // Thirty seconds, not fifteen. A live assembly reaches five providers and
+  // Thirty seconds, not fifteen. A live assembly reaches several providers and
   // pulls a risk report measured up to 1.1MB; `liveTokenDetail` caches for
   // twenty, so a faster poll would re-render the same payload and a slower one
   // would show a stale price.

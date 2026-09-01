@@ -903,7 +903,7 @@ export interface RiskFlag {
 /**
  * The outcome of one triage check on a brand-new launch.
  *
- * Six states rather than a boolean, because a launch feed is the place where
+ * Several states rather than a boolean, because a launch feed is the place where
  * "we looked and it is fine" and "nobody has looked yet" are hardest to tell
  * apart and most expensive to confuse. A token forty seconds old has had no
  * time to accumulate findings, so an empty risk list is almost always silence

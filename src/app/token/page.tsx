@@ -1182,8 +1182,8 @@ function marketLine(risk: NonNullable<LiveTokenDetail["risk"]>): string[] {
  * directly above "435 pools · 43 LP providers". With forty-three independent
  * parties holding the LP, no one of them can withdraw the pool, so that
  * sentence is not true — and it was the largest single penalty on the page.
- * The three states below are the three genuinely different situations that one
- * sentence was collapsing.
+ * The states below are the genuinely different situations that one sentence
+ * was collapsing.
  */
 function LpLockLine({
   lockedPct,

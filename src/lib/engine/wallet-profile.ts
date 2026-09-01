@@ -473,9 +473,15 @@ function provenanceLines(
       : `positions: UNAVAILABLE — the balance read failed, so only fill-derived positions are shown`,
   );
   if (stats.unpricedFills > 0) {
+    // "No quote leg" was not true of all of them. This count is every fill
+    // with no priceUsd, which also includes swaps that HAD a quote leg and no
+    // SOL/USD bar covering the hour, and pool movements where both legs went
+    // the same way — the same four-into-one collapse the classification had.
+    // The count is right; the reason had to stop being a single claim.
     out.push(
-      `${stats.unpricedFills} of ${stats.pricedFills + stats.unpricedFills} movements had no quote leg belonging to this ` +
-        `wallet (transfers, claims, token-for-token rotations) and carry no price`,
+      `${stats.unpricedFills} of ${stats.pricedFills + stats.unpricedFills} movements carry no price — transfers and ` +
+        `claims (no quote leg), token-for-token rotations (one leg belonging to both sides), pool deposits and ` +
+        `withdrawals (both legs the same way), and swaps with no SOL/USD bar covering the hour`,
     );
   }
   if (stats.unmatchedSellMints > 0) {

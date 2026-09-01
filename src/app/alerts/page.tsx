@@ -18,6 +18,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useApi, apiPost, fmtAgo } from "@/lib/client";
 import { Empty } from "@/components/ui/bits";
+import { permanentMintAnswer } from "@/components/chrome/AlertMonitor";
 import {
   achievedCadenceMs,
   describeCondition,
@@ -84,10 +85,16 @@ export function ruleCoverage(
     };
   }
   if (state.lastSkipReason) {
+    // A settled answer has no meaningful "last attempt": the monitor stopped
+    // asking, so the clock beside it was timing nothing. Two clocks on one
+    // screen disagreed about the same rule for exactly this reason.
+    const settled = permanentMintAnswer(state.lastSkipReason);
     return {
       ok: false,
       label: "NOT EVALUATED",
-      detail: `${state.lastSkipReason} (last attempt ${fmtAgo(state.lastAttemptAt, now)})`,
+      detail: settled
+        ? `${state.lastSkipReason} This rule has stopped asking; nothing about that address can change.`
+        : `${state.lastSkipReason} (last attempt ${fmtAgo(state.lastAttemptAt, now)})`,
     };
   }
   if (state.lastEvaluatedAt === undefined) {
@@ -453,10 +460,15 @@ export default function AlertsPage() {
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10.5px] num">
             {sources.map((s) => (
               <span key={s.key} className={s.ok ? "dim" : "warn"} title={s.note ?? (s.dataAsOf ? `data as of ${fmtAgo(s.dataAsOf, now)}` : undefined)}>
-                {s.ok ? "●" : "■"} {s.key}{" "}
+                {s.ok ? "●" : s.settled ? "◇" : "■"} {s.key}{" "}
                 {s.ok
                   ? `ok ${s.lastSuccessAt ? fmtAgo(s.lastSuccessAt, now) : ""}`
-                  : `failing${s.lastAttemptAt ? ` (${fmtAgo(s.lastAttemptAt, now)})` : ""}`}
+                  : s.settled
+                    ? // Not failing and not being retried: the chain answered
+                      // permanently. A ticking "last attempt" beside it would
+                      // describe requests that are no longer being made.
+                      "answered — nothing to retry"
+                    : `failing${s.lastAttemptAt ? ` (${fmtAgo(s.lastAttemptAt, now)})` : ""}`}
               </span>
             ))}
           </div>

@@ -496,6 +496,30 @@ describe("the monitor hands the evaluator everything it judges on", () => {
     // What it produces must label the way the wallet page labels.
     expect(movementLabel(obs).short).toBe("OUT");
   });
+
+  // The fixture above carries no valueUsd, so deleting THAT field from the
+  // mapping left the whole suite green — every priced alert would then have
+  // announced "unpriced" for a fill the pipeline priced perfectly. An optional
+  // field is exactly the kind the compiler cannot miss for you.
+  it("carries the value of a priced fill", () => {
+    const obs = toFillObs({
+      signature: "sigP",
+      slot: 2,
+      ts: T0,
+      wallet: "W".repeat(43),
+      mint: "M".repeat(43),
+      decimals: 6,
+      side: "buy",
+      tokens: 40,
+      pricing: "wsol",
+      valueUsd: 812.34,
+      priceUsd: 20.3085,
+      classification: "open",
+    });
+    expect(obs.valueUsd).toBe(812.34);
+    expect(obs.unpricedReason).toBeUndefined();
+    expect(movementLabel(obs).short).toBe("BUY");
+  });
 });
 
 // ------------------------------------------- round 2: a transfer is not a sale

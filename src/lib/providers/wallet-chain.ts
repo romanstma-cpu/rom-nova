@@ -469,12 +469,36 @@ export function fillsFromTx(
     // borrowing the pool price would be inventing one.
     const keys = tx.transaction.message.accountKeys.map(keyAt);
     if (Math.abs(nativeLamports) > 0) {
-      // Stays `transfer`: a SOL movement BELOW the rent floor is too small to
-      // have bought anything, which is evidence for a transfer rather than
-      // against one. (Briefly made "unknown" here — that swept in the most
-      // common genuine transfer case, 46% of real movements, and traded a
-      // true label for a hedge.)
-      return [unpriced(b, "no quote leg — SOL movement too small to separate from account rent")];
+      // A sub-rent-floor SOL residue means two opposite things depending on
+      // WHICH WAY THE TOKENS WENT, and calling both "transfer" asserted
+      // certainty on top of a reason that admits ambiguity — the sentence
+      // said "too small to separate from account rent" and the label said
+      // "nothing was paid or received for it".
+      //
+      //   tokens OUT: the residue is the 2,039,280 lamports of ATA rent the
+      //     SENDER pays to open the RECIPIENT's account. Rent-explainable, and
+      //     the dominant case — sampled live, 2 of 3 such fills on one wallet
+      //     were plain `transferChecked` sends whose entire residue was that.
+      //
+      //   tokens IN: nothing about receiving tokens obliges this wallet to pay
+      //     rent for someone else, so a residue is NOT rent-explainable. It
+      //     may be a genuine micro-purchase — an ordinary pump.fun buy is
+      //     0.002 SOL, below this floor — and announcing "nothing was paid"
+      //     over a purchase is the same class of lie as selling a transfer.
+      //
+      // The honest label for the second case already existed and was
+      // unreachable: `unknown` says the price could not be determined without
+      // claiming there was none.
+      const inbound = b.delta > ZERO;
+      return [
+        unpriced(
+          b,
+          inbound
+            ? "no quote leg — a SOL residue too small to separate from account rent, so a micro-purchase and a transfer look identical here"
+            : "no quote leg — SOL movement too small to separate from account rent",
+          inbound ? "unknown" : "transfer",
+        ),
+      ];
     }
     return [
       unpriced(

@@ -294,6 +294,9 @@ export function AlertMonitor() {
       // what stops is the pointless re-asking.
       const already = settled.current.get(key);
       if (already !== undefined) {
+        // The source line says "answered", not "failing (8m ago)": nothing is
+        // being attempted, so nothing should be dated as an attempt.
+        noteSourcePass({ key, ok: false, settled: true, note: already });
         skipAll(rules, states, now, already);
         return;
       }
@@ -329,8 +332,9 @@ export function AlertMonitor() {
         // answer. Re-asking the chain every sixty seconds for the rest of the
         // session spends a reader's request budget to be told the same thing,
         // and contradicts the sentence beside it.
-        if (permanentMintAnswer(why)) settled.current.set(key, why);
-        noteSourcePass({ key, lastAttemptAt: now, ok: false, note: why });
+        const permanent = permanentMintAnswer(why);
+        if (permanent) settled.current.set(key, why);
+        noteSourcePass({ key, lastAttemptAt: now, ok: false, settled: permanent, note: why });
         skipAll(rules, states, now, why);
       }
     };

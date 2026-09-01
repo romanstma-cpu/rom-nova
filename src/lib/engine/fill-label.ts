@@ -20,8 +20,6 @@ import type { TradeClassification } from "../types";
 export interface LabelledMovement {
   side: "buy" | "sell";
   classification?: TradeClassification;
-  /** Undefined when nothing could price it. */
-  priceUsd?: number;
 }
 
 export interface MovementLabel {

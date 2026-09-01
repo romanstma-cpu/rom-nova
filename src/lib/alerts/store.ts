@@ -383,6 +383,15 @@ export interface SourcePassInfo {
   dataAsOf?: number;
   ok: boolean;
   note?: string;
+  /**
+   * The answer is final — the address was identified and can never be a token.
+   *
+   * Distinct from `ok: false`, which means something went wrong and a retry
+   * makes sense. Calling a settled answer "failing" is the same over-claim as
+   * calling it "unreachable", one surface over, and it sat beside a ticking
+   * "last attempt" clock for requests that were no longer being made.
+   */
+  settled?: boolean;
 }
 
 export interface CoverageGap {

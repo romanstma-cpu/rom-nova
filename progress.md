@@ -45,7 +45,7 @@ Parallel builders work in isolated git worktrees; I merge and re-verify.
 | W2 | Launch / sniper feed | Photon New Pairs, Axiom Pulse | ✅ **PASS** — round 4 confirmed the last defect closed |
 | W3 | Token deep-dive | Photon token page, GMGN, DexScreener | ✅ **PASS** — first stream to clear blind review |
 | W4 | UI/UX + performance craft | Axiom & Photon density and latency | ✅ **PASS round 1** — merged to main, post-PASS list closed same hour |
-| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🔵 all nine closed (`w5/alerts` @ a4ca6de, 543 tests) — round-2 critic running |
+| W5 | Alerts that actually fire | Cielo alerts, Photon alerts | 🟢 round 2 FAIL — nine closed, four new fixed same hour (@ a9e9879, 549 tests) · round-3 confirm running |
 | — | **Blind critic on the MERGED 1.4.0 build** | all of the above | ❌ FAIL · 5 fixed, rest routed |
 
 ## Round 3 dispatched — both confirmation critics in flight (2026-08-31)
@@ -116,6 +116,54 @@ One honest residual it correctly declined to count: with the local clock
 negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
+
+## W5 round 2: FAIL — a transfer was being sold
+
+All nine round-1 defects verified closed, and the load numbers are now the
+stream's strongest evidence: **456 launch alerts over 955s, 456 distinct
+keys, zero duplicates**, spanning a mid-stream reload and a two-tab
+handoff; 314 inbox evictions, **every one from the noisy rule**, with the
+lone price-cross alert surviving and the banner naming what went. The
+hidden tab released its own lease ~5s after going hidden and the visible
+tab evaluated 15.5s later, against 2+ minutes in round 1.
+
+Then it failed on a different instance of the same bar, and the finding
+was the sharpest of the campaign: **14 of 14 wallet alerts asserted a
+trade that did not happen.** `WALLET SELL · 5tzF…uAi9` — "sold" — for
+movements `wallet-chain.ts` had already tagged `classification:
+"transfer"`, which the wallet page prints as OUT under a comment saying
+exactly why. The alert path DROPPED that field when mapping fills into
+the evaluator, so the evaluator stamped a trade side it had no basis for,
+into a headline, a toast and an OS notification title. The loudest
+surface in the app making the one claim its own pipeline had already
+refused, with the evidence sitting in the payload it discarded.
+
+The critic's framing is worth keeping: Cielo's free tier caps at 120
+alerts/hour and then halts silently, and its docs admit alerts can "drop
+out altogether" under load. Nova fired 251 launch alerts in 484s — that
+cap exhausted in under four minutes — while printing exactly what it
+evicted and from which rule. Nova wins that comparison decisively, which
+is precisely why the transfer bug was fatal: it handed back the one thing
+Photon's wallet notifications also get wrong.
+
+### All four closed same hour (`a9e9879`)
+
+A transfer now reads as what it is (IN/OUT, "received"/"sent", and a
+clause saying nothing was paid or received), while an unclassified fill
+stays the trade it is labelled — absence of the field is not evidence of
+a transfer. A program-derived address on a mint rule gets a permanent,
+accurate refusal instead of "unreachable" (the branch was simply MISSING
+from the answer list, so the chain's own identification was discarded;
+the mapping is now a pure exported function with every kind pinned).
+`firedAt` is read after each pass's fetch returns, so no record prints
+data newer than the evaluation that produced it. And the quota fallback
+now sheds dedupe keys — the actual bulk at ~53 bytes × 1000 × 60 rules —
+because the old one halved events, failed, persisted nothing, and brought
+the duplicate storm back through another door.
+
+**The transfer test reproduces the critic's captured string verbatim and
+was verified to FAIL against the old code** before the fix went in.
+549 tests, tsc clean, build clean.
 
 ## W5 round 2 — nine closed, and the fix argued back
 

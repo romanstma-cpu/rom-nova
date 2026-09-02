@@ -7,6 +7,7 @@
 
 import { getStore, type DemoStore } from "./demo/store";
 import { ensureSimulator } from "./demo/simulator";
+import { subscribeLiveEvents } from "./live/bus";
 import {
   ApiError,
   handleAccuracy,
@@ -232,8 +233,23 @@ export async function localPost(url: string, body: unknown): Promise<LocalRespon
   }
 }
 
-/** static-mode event subscription — same shape the SSE stream delivers */
+/**
+ * Static-mode event subscription — same shape the SSE stream delivers.
+ *
+ * Two sources fan into one subscription: the demo store's synthetic events,
+ * marked `real: false` so every renderer can label them without knowing where
+ * they came from, and the live bus, which is where sockets and the live
+ * signal path publish. Before the bus existed this forwarded the simulator
+ * alone, and the shipped app's every toast was fiction wearing a live pulse.
+ */
 export function localSubscribe(onEvent: (e: unknown) => void): () => void {
   const store = localStore();
-  return store.onEvent((e) => onEvent({ ...e, symbol: e.mint ? getStore().token(e.mint)?.info.symbol : undefined }));
+  const offDemo = store.onEvent((e) =>
+    onEvent({ ...e, real: false, source: "demo", symbol: e.mint ? getStore().token(e.mint)?.info.symbol : undefined }),
+  );
+  const offLive = subscribeLiveEvents((e) => onEvent(e));
+  return () => {
+    offDemo();
+    offLive();
+  };
 }

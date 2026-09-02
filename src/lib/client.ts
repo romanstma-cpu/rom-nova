@@ -245,22 +245,53 @@ export const scoreColor = (score: number): string =>
  * life of the chart"); the list contradicted it.
  */
 export const whaleFlowCell = (
-  usd: number,
-  flowMinutes: number | undefined,
+  r: { whaleFlowUsd: number; flowMinutes?: number; unmeasured?: readonly string[] },
   threshold = 20_000,
-): { cls: string; title: string } => {
+): { cls: string; title: string; text: string } => {
+  const usd = r.whaleFlowUsd;
   const window =
-    flowMinutes === undefined
+    r.flowMinutes === undefined
       ? "a short chain scan"
-      : `the last ${flowMinutes < 1 ? "<1" : Math.round(flowMinutes)} min of chain`;
+      : `the last ${r.flowMinutes < 1 ? "<1" : Math.round(r.flowMinutes)} min of chain`;
+  // ABSENCE FIRST. The engine never produces a measured whale-flow zero on
+  // the live path: a window with movement but no $20,000+ move, a provider
+  // that answered with nothing, and no provider at all ALL declare the field
+  // unmeasured. Three pages ignored that declaration and printed the
+  // placeholder `$0` under a tooltip calling it "a quiet window", ~3 seconds
+  // after the scanner had rendered the identical rows as "—". Eleven of twelve
+  // rows on the screener. The scanner also gave a single false reason for the
+  // dash ("no wallet-flow source configured") when the source was configured,
+  // live, and answering for other rows in the same batch — so the reason names
+  // every cause honestly rather than picking one.
+  if (absent(r, "whaleFlow")) {
+    return {
+      cls: "faint",
+      text: "—",
+      title:
+        `no whale reading for this row: either ${window} held no single $${threshold.toLocaleString()}+ move, ` +
+        "or the flow read returned nothing (rate limit or byte budget), or no flow source answered. " +
+        "An absence is not a quiet verdict — the token page names which of these it was.",
+    };
+  }
   return {
     cls: usd > 0 ? "pos" : usd < 0 ? "neg" : "dim",
+    text: fmtUsd(usd),
     title:
       usd === 0
         ? `no single wallet moved $${threshold.toLocaleString()}+ of this token in ${window}. That is a quiet window, not a verdict — and it is NOT six hours.`
         : `net whale movement over ${window}, counting only wallets that moved $${threshold.toLocaleString()}+`,
   };
 };
+
+/**
+ * Whether a field was declared unmeasured for this row.
+ *
+ * Shared, because the scanner had it and three other pages did not — and the
+ * pages without it printed placeholder zeros as readings. Any surface that
+ * renders a `TokenRow` number consults this before formatting it.
+ */
+export const absent = (r: { unmeasured?: readonly string[] }, field: string): boolean =>
+  (r.unmeasured ?? []).includes(field);
 
 export const labelClass = (label: string): string => {
   if (label.includes("POSITIVE")) return "chip-pos";

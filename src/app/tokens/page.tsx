@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useApi, fmtUsd, fmtPct, fmtNum, fmtAge, whaleFlowCell } from "@/lib/client";
+import { useApi, fmtUsd, fmtPct, fmtNum, fmtAge, whaleFlowCell, absent } from "@/lib/client";
 import { Score, RiskBadge, SkeletonRows, TokenMark, Freshness, Empty } from "@/components/ui/bits";
 import type { TokenRow } from "@/lib/api/rows";
 
@@ -109,26 +109,35 @@ export default function TokenRadar() {
                   </Link>
                 </td>
                 <td className="text-right px-2">{fmtUsd(r.priceUsd)}</td>
-                <Cell v={r.m5} />
-                <Cell v={r.h1} />
-                <Cell v={r.h24} />
+                {/* Every column below can be UNMEASURED on a live row, and each
+                    used to print its placeholder zero: "+0.0%" for a tape nobody
+                    fetched, "0%" for a top-10 share no free RPC will serve. The
+                    scanner dashes these; this page contradicted it. */}
+                <Cell v={r.m5} absent={absent(r, "momentum")} why="no interval price change published for this row; candles are not fetched for the list" />
+                <Cell v={r.h1} absent={absent(r, "momentum")} why="no interval price change published for this row; candles are not fetched for the list" />
+                <Cell v={r.h24} absent={absent(r, "momentum")} why="no interval price change published for this row; candles are not fetched for the list" />
                 <td className="text-right px-2 dim">{fmtUsd(r.marketCapUsd)}</td>
                 <td className="text-right px-2 dim">{fmtUsd(r.liquidityUsd)}</td>
                 <td className="text-right px-2 dim">{fmtUsd(r.volume24hUsd)}</td>
-                <td className={`text-right px-2 ${r.volumeAccel > 1.6 ? "warn" : "dim"}`}>{r.volumeAccel.toFixed(1)}×</td>
-                <td className="text-right px-2 dim">{fmtNum(r.holders)}</td>
-                <Cell v={r.holderGrowthPct} />
-                <td
-                  className={`text-right px-2 ${whaleFlowCell(r.whaleFlowUsd, r.flowMinutes).cls}`}
-                  title={whaleFlowCell(r.whaleFlowUsd, r.flowMinutes).title}
-                >
-                  {fmtUsd(r.whaleFlowUsd)}
+                <Dash absent={absent(r, "volumeAccel")} cls={r.volumeAccel > 1.6 ? "warn" : "dim"} why="volume acceleration needs interval volumes this row's source did not publish">
+                  {r.volumeAccel.toFixed(1)}×
+                </Dash>
+                <Dash absent={absent(r, "holders")} cls="dim" why="holder count not published by this row's source">
+                  {fmtNum(r.holders)}
+                </Dash>
+                <Cell v={r.holderGrowthPct} absent={absent(r, "holderGrowth")} why="holder growth needs a prior holder count nobody published" />
+                <td className={`text-right px-2 ${whaleFlowCell(r).cls}`} title={whaleFlowCell(r).title}>
+                  {whaleFlowCell(r).text}
                 </td>
-                <td className={`text-right px-2 ${r.smFlow6hUsd > 0 ? "pos" : r.smFlow6hUsd < 0 ? "neg" : "faint"}`}>
+                <Dash absent={absent(r, "smartMoney")} cls={r.smFlow6hUsd > 0 ? "pos" : r.smFlow6hUsd < 0 ? "neg" : "faint"} why="smart-money flow needs wallet reputation no keyless source carries">
                   {r.smFlow6hUsd !== 0 ? fmtUsd(r.smFlow6hUsd) : "—"}
-                </td>
-                <td className={`text-right px-2 ${r.top10Pct > 0.35 ? "neg" : "dim"}`}>{(r.top10Pct * 100).toFixed(0)}%</td>
-                <td className={`text-right px-2 ${r.organicScore < 0.4 ? "warn" : "dim"}`}>{(r.organicScore * 100).toFixed(0)}</td>
+                </Dash>
+                <Dash absent={absent(r, "top10Pct")} cls={r.top10Pct > 0.35 ? "neg" : "dim"} why="top-10 share needs getTokenLargestAccounts, which free RPC endpoints refuse">
+                  {(r.top10Pct * 100).toFixed(0)}%
+                </Dash>
+                <Dash absent={absent(r, "organicScore")} cls={r.organicScore < 0.4 ? "warn" : "dim"} why="organic score not published for this row">
+                  {(r.organicScore * 100).toFixed(0)}
+                </Dash>
                 <td className="text-right px-2">
                   <Score value={r.signalScore} width={40} scored={r.scored !== false} reason={r.unscoredReason} />
                 </td>
@@ -151,6 +160,26 @@ export default function TokenRadar() {
   );
 }
 
-function Cell({ v }: { v: number }) {
+/** A percentage cell that dashes, and says why, when its input was never measured. */
+function Cell({ v, absent, why }: { v: number; absent: boolean; why: string }) {
+  if (absent) {
+    return (
+      <td className="text-right px-2 faint" title={why}>
+        —
+      </td>
+    );
+  }
   return <td className={`text-right px-2 ${v > 0.05 ? "pos" : v < -0.05 ? "neg" : "faint"}`}>{fmtPct(v)}</td>;
+}
+
+/** Any other numeric cell, same rule. */
+function Dash({ absent, cls, why, children }: { absent: boolean; cls: string; why: string; children: React.ReactNode }) {
+  if (absent) {
+    return (
+      <td className="text-right px-2 faint" title={why}>
+        —
+      </td>
+    );
+  }
+  return <td className={`text-right px-2 ${cls}`}>{children}</td>;
 }

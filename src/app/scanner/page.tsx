@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { apiGet, useEventStream, fmtUsd, fmtPct, fmtAge, whaleFlowCell, type StreamEvent } from "@/lib/client";
+import { apiGet, useEventStream, fmtUsd, fmtPct, fmtAge, whaleFlowCell, absent, type StreamEvent } from "@/lib/client";
 import { Score, SkeletonRows, TokenMark, Empty } from "@/components/ui/bits";
 import { appendPass } from "@/lib/track-store";
 import type { TokenRow } from "@/lib/api/rows";
@@ -18,10 +18,8 @@ import type { TokenRow } from "@/lib/api/rows";
 // unmeasured rather than zero, and rendering a placeholder 0 as "+0.0%" would
 // tell a reader the tape was flat when nobody looked.
 
-/** Whether a field was declared unmeasured for this row. */
-function absent(r: TokenRow, field: string): boolean {
-  return (r.unmeasured ?? []).includes(field as never);
-}
+// `absent` moved to lib/client so the pages that lacked it stop printing
+// placeholder zeros; this page keeps calling the shared one.
 
 /** A numeric cell that shows a dash, and why, when its input was not measured. */
 function Cell({
@@ -353,14 +351,12 @@ export default function ScannerPage() {
                   <Cell show={!absent(r, "volumeAccel")} cls={r.volumeAccel > 1.6 ? "warn" : "dim"} why="this row's source published no interval price change, and candles are not fetched for the list">
                     {r.volumeAccel.toFixed(1)}×
                   </Cell>
-                  <Cell
-                    show={!absent(r, "whaleFlow")}
-                    cls={whaleFlowCell(r.whaleFlowUsd, r.flowMinutes).cls}
-                    why="no wallet-flow source configured"
-                  >
-                    <span title={whaleFlowCell(r.whaleFlowUsd, r.flowMinutes).title}>
-                      {fmtUsd(r.whaleFlowUsd)}
-                    </span>
+                  {/* The dash's reason comes from the shared helper now. This
+                      cell used to say "no wallet-flow source configured" for
+                      every dash, while the source was configured, live, and
+                      answering for other rows in the same batch. */}
+                  <Cell show={!absent(r, "whaleFlow")} cls={whaleFlowCell(r).cls} why={whaleFlowCell(r).title}>
+                    <span title={whaleFlowCell(r).title}>{whaleFlowCell(r).text}</span>
                   </Cell>
                   <td className="px-2 text-[10px]">
                     {r.topWallets && r.topWallets.length > 0 ? (

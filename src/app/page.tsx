@@ -234,11 +234,8 @@ export default function Dashboard() {
                   <td className="text-right px-2">{fmtUsd(r.priceUsd)}</td>
                   <td className={`text-right px-2 ${r.h24 >= 0 ? "pos" : "neg"}`}>{fmtPct(r.h24)}</td>
                   <td className="text-right px-2 dim">{fmtUsd(r.marketCapUsd)}</td>
-                  <td
-                    className={`text-right px-2 ${whaleFlowCell(r.whaleFlowUsd, r.flowMinutes).cls}`}
-                    title={whaleFlowCell(r.whaleFlowUsd, r.flowMinutes).title}
-                  >
-                    {fmtUsd(r.whaleFlowUsd)}
+                  <td className={`text-right px-2 ${whaleFlowCell(r).cls}`} title={whaleFlowCell(r).title}>
+                    {whaleFlowCell(r).text}
                   </td>
                   <td className="text-right px-3">
                     <Score value={r.signalScore} width={44} scored={r.scored !== false} reason={r.unscoredReason} />

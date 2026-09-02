@@ -2,9 +2,48 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useApi, fmtUsd, fmtPct, fmtNum, fmtAge, whaleFlowCell } from "@/lib/client";
+import { useApi, fmtUsd, fmtPct, fmtNum, fmtAge, whaleFlowCell, absent } from "@/lib/client";
 import { Score, RiskBadge, SkeletonRows, TokenMark, Empty, Freshness } from "@/components/ui/bits";
 import type { TokenRow } from "@/lib/api/rows";
+
+/** Which CSV column reads which declared-absent field. */
+const CSV_ABSENCE: Record<string, string> = {
+  m5: "momentum",
+  h1: "momentum",
+  h6: "momentum",
+  h24: "momentum",
+  holders: "holders",
+  holderGrowthPct: "holderGrowth",
+  top10Pct: "top10Pct",
+  organicScore: "organicScore",
+  whaleFlowUsd: "whaleFlow",
+  smFlow6hUsd: "smartMoney",
+};
+
+/**
+ * The export, as a pure function so the suite can read it.
+ *
+ * A CSV is the one surface with no tooltip to hide behind: whatever lands in
+ * the cell IS the claim. This used to write every row's placeholder zero as a
+ * figure — "whaleFlowUsd,0" for a window nobody could read — so the export
+ * dropped the measured/unmeasured distinction the page itself keeps. An
+ * unmeasured field is now an empty cell, and an `unmeasured` column names them
+ * so the absence survives a spreadsheet.
+ */
+export function screenCsv(rows: TokenRow[]): string {
+  const cols = [
+    "symbol", "name", "mint", "priceUsd", "marketCapUsd", "liquidityUsd", "volume24hUsd", "m5", "h1", "h6", "h24",
+    "holders", "holderGrowthPct", "top10Pct", "organicScore", "whaleFlowUsd", "smFlow6hUsd", "signalScore", "signalLabel", "confidence", "riskLevel", "ageHours",
+  ] as const;
+  const cell = (r: TokenRow, c: (typeof cols)[number]): string => {
+    const field = CSV_ABSENCE[c];
+    if (field && absent(r, field)) return '""';
+    return JSON.stringify(r[c] ?? "");
+  };
+  const header = [...cols, "unmeasured"].join(",");
+  const lines = rows.map((r) => [...cols.map((c) => cell(r, c)), JSON.stringify((r.unmeasured ?? []).join(";"))].join(","));
+  return [header, ...lines].join("\n");
+}
 
 interface Filters {
   minLiq: string;
@@ -64,12 +103,7 @@ export default function ScreenerPage() {
   }, [data, f]);
 
   const exportCsv = () => {
-    const cols = [
-      "symbol", "name", "mint", "priceUsd", "marketCapUsd", "liquidityUsd", "volume24hUsd", "m5", "h1", "h6", "h24",
-      "holders", "holderGrowthPct", "top10Pct", "organicScore", "whaleFlowUsd", "smFlow6hUsd", "signalScore", "signalLabel", "confidence", "riskLevel", "ageHours",
-    ] as const;
-    const lines = [cols.join(","), ...rows.map((r) => cols.map((c) => JSON.stringify(r[c] ?? "")).join(","))];
-    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+    const blob = new Blob([screenCsv(rows)], { type: "text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `rom-nova-screen-${Date.now()}.csv`;
@@ -177,17 +211,25 @@ export default function ScreenerPage() {
                 <td className="text-right px-2 dim">{fmtUsd(r.marketCapUsd)}</td>
                 <td className="text-right px-2 dim">{fmtUsd(r.liquidityUsd)}</td>
                 <td className="text-right px-2 dim">{fmtUsd(r.volume24hUsd)}</td>
-                <td className={`text-right px-2 ${r.h1 >= 0 ? "pos" : "neg"}`}>{fmtPct(r.h1)}</td>
-                <td className={`text-right px-2 ${r.h24 >= 0 ? "pos" : "neg"}`}>{fmtPct(r.h24)}</td>
-                <td className="text-right px-2 dim">{r.buys1h}/{r.sells1h}</td>
-                <td className="text-right px-2 dim">{fmtNum(r.holders)}</td>
-                <td
-                  className={`text-right px-2 ${whaleFlowCell(r.whaleFlowUsd, r.flowMinutes).cls}`}
-                  title={whaleFlowCell(r.whaleFlowUsd, r.flowMinutes).title}
-                >
-                  {fmtUsd(r.whaleFlowUsd)}
+                {/* A placeholder zero must not read as a flat tape or a quiet
+                    window: the scanner dashes these and this page printed
+                    them. Same rows, seconds apart, two answers. */}
+                <td className={`text-right px-2 ${absent(r, "momentum") ? "faint" : r.h1 >= 0 ? "pos" : "neg"}`} title={absent(r, "momentum") ? "no interval price change published for this row; candles are not fetched for the list" : undefined}>
+                  {absent(r, "momentum") ? "—" : fmtPct(r.h1)}
                 </td>
-                <td className={`text-right px-2 ${r.smFlow6hUsd > 0 ? "pos" : "faint"}`}>{r.smFlow6hUsd ? fmtUsd(r.smFlow6hUsd) : "—"}</td>
+                <td className={`text-right px-2 ${absent(r, "momentum") ? "faint" : r.h24 >= 0 ? "pos" : "neg"}`} title={absent(r, "momentum") ? "no interval price change published for this row; candles are not fetched for the list" : undefined}>
+                  {absent(r, "momentum") ? "—" : fmtPct(r.h24)}
+                </td>
+                <td className="text-right px-2 dim">{r.buys1h}/{r.sells1h}</td>
+                <td className="text-right px-2 dim" title={absent(r, "holders") ? "holder count not published by this row's source" : undefined}>
+                  {absent(r, "holders") ? "—" : fmtNum(r.holders)}
+                </td>
+                <td className={`text-right px-2 ${whaleFlowCell(r).cls}`} title={whaleFlowCell(r).title}>
+                  {whaleFlowCell(r).text}
+                </td>
+                <td className={`text-right px-2 ${absent(r, "smartMoney") ? "faint" : r.smFlow6hUsd > 0 ? "pos" : "faint"}`} title={absent(r, "smartMoney") ? "smart-money flow needs wallet reputation no keyless source carries" : undefined}>
+                  {absent(r, "smartMoney") ? "—" : r.smFlow6hUsd ? fmtUsd(r.smFlow6hUsd) : "—"}
+                </td>
                 <td className="text-right px-2"><Score value={r.signalScore} width={40} scored={r.scored !== false} reason={r.unscoredReason} /></td>
                 <td className="text-right px-2 dim">{(r.confidence * 100).toFixed(0)}%</td>
                 <td className="text-right px-3"><RiskBadge level={r.riskLevel} /></td>

@@ -869,18 +869,20 @@ describe("a ten-minute scan is not a six-hour window", () => {
     // Production showed $0 on eleven of twelve scanner rows, all rendered
     // green, reading as "no whale sold this in six hours". It meant "nobody
     // moved $20,000 in the last ten minutes".
-    expect(whaleFlowCell(0, 10).cls).toBe("dim");
-    expect(whaleFlowCell(1_000, 10).cls).toBe("pos");
-    expect(whaleFlowCell(-1_000, 10).cls).toBe("neg");
+    // The helper takes the row now, so it can consult `unmeasured` before it
+    // formats anything — three pages had been printing the placeholder zero.
+    expect(whaleFlowCell({ whaleFlowUsd: 0, flowMinutes: 10 }).cls).toBe("dim");
+    expect(whaleFlowCell({ whaleFlowUsd: 1_000, flowMinutes: 10 }).cls).toBe("pos");
+    expect(whaleFlowCell({ whaleFlowUsd: -1_000, flowMinutes: 10 }).cls).toBe("neg");
   });
 
   it("names the window it actually covered, per row", () => {
     // Per row rather than from a constant, because a byte-budgeted read that
     // stopped at four minutes covered four, not ten.
-    expect(whaleFlowCell(0, 4).title).toContain("last 4 min");
-    expect(whaleFlowCell(0, 10).title).toContain("NOT six hours");
+    expect(whaleFlowCell({ whaleFlowUsd: 0, flowMinutes: 4 }).title).toContain("last 4 min");
+    expect(whaleFlowCell({ whaleFlowUsd: 0, flowMinutes: 10 }).title).toContain("NOT six hours");
     // And says so honestly when nothing recorded the window.
-    expect(whaleFlowCell(0, undefined).title).toContain("a short chain scan");
+    expect(whaleFlowCell({ whaleFlowUsd: 0 }).title).toContain("a short chain scan");
   });
 
   it("stops the invalidation copy promising a 6h whale window", () => {

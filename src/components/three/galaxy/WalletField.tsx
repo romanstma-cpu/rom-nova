@@ -12,6 +12,7 @@ import { useFrame } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 import type { NetworkPayload, NodePlacement } from "../graph";
+import { SMART_MONEY_THRESHOLD } from "@/lib/engine/thresholds";
 
 type Kind = "smart" | "whale" | "plain";
 
@@ -39,7 +40,8 @@ export function WalletField({
   const buckets = useMemo(() => {
     const out: Record<Kind, { id: string; idx: number }[]> = { smart: [], whale: [], plain: [] };
     payload.wallets.forEach((w, idx) => {
-      const kind: Kind = w.smartMoneyScore >= 65 ? "smart" : w.labels.includes("whale") || w.labels.includes("fund") ? "whale" : "plain";
+      const kind: Kind =
+        w.smartMoneyScore >= SMART_MONEY_THRESHOLD ? "smart" : w.labels.includes("whale") || w.labels.includes("fund") ? "whale" : "plain";
       out[kind].push({ id: w.id, idx });
     });
     return out;

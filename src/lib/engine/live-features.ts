@@ -25,6 +25,7 @@
 // the coverage penalty accounts for them.
 
 import { scoreFeatures } from "./signals";
+import { WHALE_TRADE_USD } from "./thresholds";
 import type {
   Candle,
   FeatureVector,
@@ -65,11 +66,13 @@ export interface LiveSources {
 /**
  * A movement this size in USD counts as a whale.
  *
- * Matches the demo path's own threshold in `buildFlowSeries`, deliberately: a
+ * The same constant the demo path reads, by import rather than by agreement: a
  * live vector and a simulated one have to mean the same thing when they reach
- * the scorer, or the two worlds stop being comparable.
+ * the scorer, or the two worlds stop being comparable — and "matches the demo
+ * path's threshold" was true here while the dashboard counted whales at
+ * $25,000 two files away. Re-exported under the name this file's callers use.
  */
-export const WHALE_USD = 20_000;
+export const WHALE_USD = WHALE_TRADE_USD;
 
 /** How much chain history one live vector will pay for. */
 const FLOW_MINUTES = 10;

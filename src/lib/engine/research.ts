@@ -6,6 +6,7 @@
 import type { DemoStore } from "../demo/store";
 import { HOUR, DAY } from "../demo/universe";
 import { computeSignal, signalsAt } from "./signals";
+import { WHALE_TRADE_USD } from "./thresholds";
 import { findSimilar } from "./similarity";
 import { buildTokenRows } from "../api/rows";
 import { shortAddr } from "../demo/rng";
@@ -92,7 +93,7 @@ export function answerQuestion(store: DemoStore, question: string): ResearchAnsw
   // "biggest whale exits today"
   if (/exit|sold|selling|dump/.test(q)) {
     const trades = [...store.universe.trades, ...store.liveTrades].filter(
-      (t) => t.ts >= now - DAY && t.ts <= now && t.side === "sell" && (t.classification === "exit" || t.amountUsd >= 20_000),
+      (t) => t.ts >= now - DAY && t.ts <= now && t.side === "sell" && (t.classification === "exit" || t.amountUsd >= WHALE_TRADE_USD),
     );
     const top = trades.sort((a, b) => b.amountUsd - a.amountUsd).slice(0, 6);
     return mk(

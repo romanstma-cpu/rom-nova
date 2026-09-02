@@ -5,9 +5,12 @@
 import type { DemoStore } from "../demo/store";
 import { HOUR, DAY } from "../demo/universe";
 import type { FeatureVector } from "../types";
+// The one definition of "smart" and "whale". A private copy lived here and
+// agreed with the flow chart by luck, not by construction — see thresholds.ts.
+import { SMART_MONEY_THRESHOLD, WHALE_TRADE_USD } from "./thresholds";
 
-const SMART_THRESHOLD = 65;
-const WHALE_TRADE_USD = 20_000;
+/** The window the simulator's wallet-flow fields cover. */
+export const DEMO_FLOW_WINDOW_MS = 6 * HOUR;
 
 export function extractFeatures(store: DemoStore, mint: string, asOf: number): FeatureVector | undefined {
   const tok = store.token(mint);
@@ -37,8 +40,8 @@ export function extractFeatures(store: DemoStore, mint: string, asOf: number): F
   const holdersNow = snap.holders;
   const holders24 = tok.holders[Math.max(0, i - 24)];
 
-  // wallet flows over trailing 6h
-  const trades = store.mintTrades(mint, asOf - 6 * HOUR, asOf);
+  // wallet flows over the trailing window — six hours, and the vector says so
+  const trades = store.mintTrades(mint, asOf - DEMO_FLOW_WINDOW_MS, asOf);
   let smFlow = 0;
   let whaleFlow = 0;
   let whaleBuys = 0;
@@ -47,7 +50,7 @@ export function extractFeatures(store: DemoStore, mint: string, asOf: number): F
   for (const t of trades) {
     const w = store.wallet(t.wallet);
     const signed = t.side === "buy" ? t.amountUsd : -t.amountUsd;
-    if (w && w.smartMoney.total >= SMART_THRESHOLD) {
+    if (w && w.smartMoney.total >= SMART_MONEY_THRESHOLD) {
       smFlow += signed;
       smWallets.add(t.wallet);
     }

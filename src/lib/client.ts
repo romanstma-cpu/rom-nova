@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { IS_STATIC, localGet, localPost, localSubscribe } from "./local";
+import { WHALE_TRADE_USD } from "./engine/thresholds";
 
 export async function apiGet<T = unknown>(url: string): Promise<T> {
   return (await getJson(url)) as T;
@@ -246,7 +247,7 @@ export const scoreColor = (score: number): string =>
  */
 export const whaleFlowCell = (
   r: { whaleFlowUsd: number; flowMinutes?: number; unmeasured?: readonly string[] },
-  threshold = 20_000,
+  threshold = WHALE_TRADE_USD,
 ): { cls: string; title: string; text: string } => {
   const usd = r.whaleFlowUsd;
   const window =

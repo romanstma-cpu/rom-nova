@@ -20,6 +20,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { apiGet, useApi, fmtUsd, fmtPct, fmtAgo, shortAddr } from "@/lib/client";
 import { Score, Stat, Empty } from "@/components/ui/bits";
 import { RealWalletProfile } from "@/components/wallet/RealWalletProfile";
+import { SMART_MONEY_THRESHOLD } from "@/lib/engine/thresholds";
 import type { WalletInfo, WalletPerformance, WalletProfile, WalletTrade, WalletCluster } from "@/lib/types";
 
 interface WalletDetail {
@@ -229,7 +230,7 @@ function DemoWallet({ address, initial }: { address: string; initial: WalletDeta
               the universe is not, and the label now says which. */}
           <div className="panel-title">Smart money score (measured in the simulation)</div>
           <div className="flex items-center gap-2 justify-end mt-1">
-            <span className="num text-[22px]" style={{ color: sm.total >= 65 ? "var(--pos)" : "var(--text-dim)" }}>{sm.total}</span>
+            <span className="num text-[22px]" style={{ color: sm.total >= SMART_MONEY_THRESHOLD ? "var(--pos)" : "var(--text-dim)" }}>{sm.total}</span>
             <span className="faint text-[11px]">/100</span>
           </div>
         </div>

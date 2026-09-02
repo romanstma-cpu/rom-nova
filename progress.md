@@ -117,6 +117,49 @@ negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
 
+## Post-ship verification — "make sure it's live on site and app"
+
+**Site:** v1.7.0 in both places, zero stale strings; `/nova/` and
+`/nova/alerts/` render; the alert monitor took over a stale lease in 10s
+and began evaluating; all six chart intervals present; production
+resource timing shows the SOL reference, token search and **candles all
+dispatched at 64–69ms with chart data landing at 379ms** — W4's parallel
+hoist confirmed in production, not just on a local server.
+
+**Installer:** the public `releases/latest` URL redirects to v1.7.0; I
+downloaded it (79.3 MB) and hashed it — **SHA256 matches the release
+digest exactly**; `latest.yml` reads 1.7.0.
+
+**One defect found and fixed:** every nested route 404'd on its own RSC
+prefetch payload — the export writes `alerts/__next.alerts/__PAGE__.txt`
+(a directory) while the router requests `alerts/__next.alerts.__PAGE__.txt`
+(a flat dotted file). A Next server routes over the difference; static
+hosting cannot. Checked the impact before assuming: in-app clicks still
+performed SOFT navigation (window survived, one navigation entry) via the
+tree-payload fallback, so the cost was a wasted round trip per route and a
+console full of 404s on a site whose pitch is not hiding things. Build
+script now mirrors the 21 payloads to the dotted names (`87ea62b`); site
+redeployed; a fresh load makes 35 same-origin requests with **zero
+failures**. Predates 1.7.0 — every version had it.
+
+**Desktop — a real finding.** The installed app was **1.1.1 from Aug 27**.
+The updater had worked once (1.0 → 1.1.1), then on Aug 29 downloaded a
+newer installer to its `pending/` slot — and it was never applied, because
+electron-updater installs on a CLEAN quit and the app was evidently killed
+or the machine shut down instead. So the local install had silently missed
+four releases. Launched it: the updater fetched the feed and pulled 1.7.0
+**within five seconds** (byte-exact against the release SHA256). Closed
+the window cleanly: **1.1.1 → 1.7.0.0 installed four seconds later.** The
+pipeline works end to end; the failure mode is a dirty exit, which the app
+cannot prevent but could disclose — an "update ready, restart to apply"
+line would have turned a silent four-release lag into a one-click fix.
+Logged as the first item for whatever comes after this campaign.
+
+A blind critic is now reviewing **the merged 1.7.0 as a whole** — the
+last whole-build review was on 1.4.0 and failed on cross-page
+contradictions no per-stream review could see. Five streams have since
+merged; assume more exist.
+
 ## W5 round 9 — the last word, and it was a good one
 
 Landed after 1.7.0 shipped. It changed nothing a user sees: the rendered

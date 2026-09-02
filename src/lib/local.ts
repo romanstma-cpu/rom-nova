@@ -175,17 +175,28 @@ export async function localGet(url: string): Promise<LocalResponse> {
       const m = p.match(/^\/api\/wallets\/([^/]+)$/);
       if (m) return { status: 200, body: handleWalletDetail(store, m[1]) };
     }
+    // Awaited, like tokens: the signal feed is materialised from the live
+    // list, so in the static build this is the visitor's own browser scoring
+    // real tokens. The registry behind it lives in this module's process for
+    // the life of the tab, which is what makes ids stable across polls.
     if (p === "/api/signals")
       return {
         status: 200,
-        body: handleSignals(store, (q.get("profile") ?? "balanced") as StrategyProfileId, num(q.get("asOf"))),
+        body: await handleSignals(store, (q.get("profile") ?? "balanced") as StrategyProfileId, num(q.get("asOf"))),
       };
     {
       const m = p.match(/^\/api\/signals\/([^/]+)$/);
-      if (m) return { status: 200, body: handleSignalById(store, m[1]) };
+      if (m) return { status: 200, body: await handleSignalById(store, m[1]) };
     }
     if (p === "/api/accuracy")
-      return { status: 200, body: handleAccuracy(store, (q.get("profile") ?? "balanced") as StrategyProfileId) };
+      return {
+        status: 200,
+        body: handleAccuracy(
+          store,
+          (q.get("profile") ?? "balanced") as StrategyProfileId,
+          q.get("scope") === "simulated" ? "simulated" : "auto",
+        ),
+      };
     if (p === "/api/network") return { status: 200, body: handleNetwork(store, num(q.get("asOf"))) };
     if (p === "/api/events") return { status: 200, body: handleEvents(store, num(q.get("limit")) ?? 60) };
     if (p === "/api/status") return { status: 200, body: handleStatus(store) };

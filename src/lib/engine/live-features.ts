@@ -25,6 +25,7 @@
 // the coverage penalty accounts for them.
 
 import { scoreFeatures } from "./signals";
+import { WHALE_TRADE_USD } from "./thresholds";
 import type {
   Candle,
   FeatureVector,
@@ -65,14 +66,18 @@ export interface LiveSources {
 /**
  * A movement this size in USD counts as a whale.
  *
- * Matches the demo path's own threshold in `buildFlowSeries`, deliberately: a
+ * The same constant the demo path reads, by import rather than by agreement: a
  * live vector and a simulated one have to mean the same thing when they reach
- * the scorer, or the two worlds stop being comparable.
+ * the scorer, or the two worlds stop being comparable — and "matches the demo
+ * path's threshold" was true here while the dashboard counted whales at
+ * $25,000 two files away. Re-exported under the name this file's callers use.
  */
-export const WHALE_USD = 20_000;
+export const WHALE_USD = WHALE_TRADE_USD;
 
 /** How much chain history one live vector will pay for. */
 const FLOW_MINUTES = 10;
+/** Solana produces a block roughly every 400ms; the flow window is in blocks. */
+const BLOCKS_PER_MINUTE = 150;
 
 /**
  * How deep into the mover ranking to look for whales.
@@ -568,6 +573,15 @@ export async function liveFeatures(
     whaleNetFlowUsd,
     whaleBuys,
     whaleSells,
+    // The window the flow fields were REALLY measured over, so the copy that
+    // describes them can read it instead of asserting one. The covered slice,
+    // not the requested one: a byte-budgeted read that stopped at four minutes
+    // covered four. Absent when no provider was asked at all.
+    flowWindowMs: flowDetail
+      ? (flowDetail.complete ? FLOW_MINUTES : flowDetail.blocksCovered / BLOCKS_PER_MINUTE) * 60_000
+      : sources.flow
+        ? FLOW_MINUTES * 60_000
+        : undefined,
     // Candles first, the source's own published stats second, zero last — and
     // a zero that survives to here is inert, because the factor reading it has
     // been declared unmeasured above and the scorer drops it rather than

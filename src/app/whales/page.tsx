@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useApi, fmtUsd, fmtAgo } from "@/lib/client";
 import { Score, Empty } from "@/components/ui/bits";
 import { shortAddr } from "@/lib/client";
+import { SMART_MONEY_THRESHOLD } from "@/lib/engine/thresholds";
 import type { WalletRow } from "@/lib/api/rows";
 
 type Filter = "all" | "smart" | "whales" | "snipers" | "suspect";
@@ -126,7 +127,7 @@ export default function WhalesPage() {
     const all = data?.rows ?? [];
     switch (filter) {
       case "smart":
-        return all.filter((r) => r.smartMoneyScore >= 65);
+        return all.filter((r) => r.smartMoneyScore >= SMART_MONEY_THRESHOLD);
       case "whales":
         return all.filter((r) => r.labels.includes("whale") || r.labels.includes("fund"));
       case "snipers":

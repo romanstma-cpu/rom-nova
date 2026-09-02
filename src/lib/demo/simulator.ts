@@ -8,6 +8,7 @@ import { getStore, DemoStore } from "./store";
 import { HOUR } from "./universe";
 import { enforceStops } from "../engine/paper";
 import { signalsAt } from "../engine/signals";
+import { SMART_MONEY_THRESHOLD } from "../engine/thresholds";
 import type { AlertEvent, LiveEvent, WalletTrade } from "../types";
 
 const TICK_MS = 4_000;
@@ -62,7 +63,7 @@ function tick(store: DemoStore) {
       store.liveTrades.push(trade);
       if (store.liveTrades.length > 3000) store.liveTrades.splice(0, 500);
 
-      const smart = w.smartMoney.total >= 65;
+      const smart = w.smartMoney.total >= SMART_MONEY_THRESHOLD;
       const kind: LiveEvent["kind"] =
         side === "buy"
           ? smart

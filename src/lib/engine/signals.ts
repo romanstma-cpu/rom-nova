@@ -6,6 +6,7 @@
 import type { DemoStore } from "../demo/store";
 import { HOUR } from "../demo/universe";
 import { extractFeatures } from "./features";
+import { flowWindowLabel, isChainScanWindow } from "./flow-window";
 import {
   ENGINE_VERSION,
   type FeatureVector,
@@ -107,7 +108,7 @@ export const FACTORS: FactorDef[] = [
       clamp(0.5 + Math.tanh(f.smartMoneyNetFlowUsd / 120_000) * 0.5) * clamp(0.4 + f.smartMoneyWallets / 8, 0, 1),
     explain: (f) =>
       f.smartMoneyWallets > 0
-        ? `${f.smartMoneyWallets} high-scoring wallet${f.smartMoneyWallets === 1 ? "" : "s"} net ${f.smartMoneyNetFlowUsd >= 0 ? "bought" : "sold"} ${usd(Math.abs(f.smartMoneyNetFlowUsd))} in 6h`
+        ? `${f.smartMoneyWallets} high-scoring wallet${f.smartMoneyWallets === 1 ? "" : "s"} net ${f.smartMoneyNetFlowUsd >= 0 ? "bought" : "sold"} ${usd(Math.abs(f.smartMoneyNetFlowUsd))} in ${flowWindowLabel(f.flowWindowMs)}`
         : "no tracked smart-money activity in the window",
   },
   {
@@ -836,8 +837,12 @@ export function securityVetoOf(f: FeatureVector): string | null {
   return null;
 }
 
-/** Labels that read as an invitation. The cap must not be able to produce one. */
-const POSITIVE_LABELS: readonly SignalLabel[] = [
+/**
+ * Labels that read as an invitation. The cap must not be able to produce one —
+ * and the live feed emits a `signal_created` event only when a mint first
+ * reaches one of these, which is why it is exported.
+ */
+export const POSITIVE_LABELS: readonly SignalLabel[] = [
   "EXTREME POSITIVE",
   "STRONG POSITIVE",
   "POSITIVE",
@@ -1124,15 +1129,30 @@ export function scoreFeatures(
   // tell the reader to expect a "dev selling" flag on a field that is hardcoded
   // false for every live token — an invalidation condition that could not occur.
   const missing = f.unmeasured ?? [];
+  // The window is READ OFF THE VECTOR, not asserted. This line said "a
+  // ten-minute chain scan, not a 6h window" for every signal — true of the
+  // live path, whose flow read is a short byte-budgeted scan, and false of the
+  // simulator, whose vector is computed over six hours and whose feature
+  // snapshot said so seven lines below on the same page. Live copy applied to
+  // both paths was two stated windows for one number. Widening the live window
+  // is not affordable; naming each one correctly is free.
+  const window = flowWindowLabel(f.flowWindowMs);
+  const windowNote = isChainScanWindow(f.flowWindowMs)
+    ? `a ${window} chain scan, not a six-hour window`
+    : `the trailing ${window} window the feature snapshot reports`;
   const invalidation = [
     `liquidity falls below ${usd(f.liquidityUsd * 0.65)}`,
-    // "over 6h" was a promise this stack cannot keep. The flow read is a short,
-    // byte-budgeted chain scan — ten minutes, truncated further when the budget
-    // bites — and the token page said so on the same screen. Naming the window
-    // honestly is the whole fix; widening it is not affordable.
-    missing.includes("whaleFlow")
-      ? "whale flow becomes observable and shows net distribution — no whale-sized move has been seen in the short window this reads"
-      : `whale netflow turns below ${usd(-Math.max(50_000, Math.abs(f.whaleNetFlowUsd)))} on a subsequent flow read (a ten-minute chain scan, not a 6h window)`,
+    ...(missing.includes("whaleFlow")
+      ? // A window that held no whale-sized move can still show one on the
+        // next read, so it stays on the list — named. No flow source at all is
+        // a condition nobody can observe, and like the smart-money line below
+        // it is omitted rather than reworded.
+        f.flowWindowMs === undefined
+        ? []
+        : [
+            `whale flow becomes observable and shows net distribution — no whale-sized move has been seen in the ${window} chain window this reads`,
+          ]
+      : [`whale netflow turns below ${usd(-Math.max(50_000, Math.abs(f.whaleNetFlowUsd)))} on a subsequent flow read (${windowNote})`]),
     // An invalidation list is a list of things the reader can WATCH FOR. Smart
     // money is declared NEVER_AVAILABLE on live data, so "no smart-money
     // confirmation appears within 24h" promised a confirmation nothing in this

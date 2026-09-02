@@ -6,6 +6,7 @@
 import type { DemoStore } from "../demo/store";
 import { HOUR } from "../demo/universe";
 import { signalsAt } from "../engine/signals";
+import { SMART_MONEY_THRESHOLD, WHALE_TRADE_USD } from "../engine/thresholds";
 import type {
   RiskLevel,
   Signal,
@@ -343,12 +344,15 @@ export function buildFlowSeries(store: DemoStore, mint: string | null, hours = 7
     const pt = points.get(bucket);
     if (!pt) continue;
     const w = store.wallet(t.wallet);
-    const isWhale = (w && w.labels.includes("whale")) || t.amountUsd >= 20_000;
+    // Both thresholds imported, not restated. This line read `>= 65` while the
+    // dashboard's marketState read `>= 70`, and the two "smart money" figures
+    // on one screen disagreed by 22% with no explanation on either.
+    const isWhale = (w && w.labels.includes("whale")) || t.amountUsd >= WHALE_TRADE_USD;
     if (isWhale) {
       if (t.side === "buy") pt.whaleBuyUsd += t.amountUsd;
       else pt.whaleSellUsd += t.amountUsd;
     }
-    if (w && w.smartMoney.total >= 65) pt.smNetUsd += t.side === "buy" ? t.amountUsd : -t.amountUsd;
+    if (w && w.smartMoney.total >= SMART_MONEY_THRESHOLD) pt.smNetUsd += t.side === "buy" ? t.amountUsd : -t.amountUsd;
   }
   if (mint) {
     for (const pt of points.values()) pt.priceUsd = store.lastPrice(mint, pt.ts) ?? 0;

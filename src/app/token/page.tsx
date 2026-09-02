@@ -1563,7 +1563,10 @@ function DemoToken({ detail, mint, candles }: { detail: DemoTokenDetail; mint: s
   const markers = useMemo<ChartMarker[]>(
     () =>
       data.trades
-        .filter((t) => t.amountUsd >= 8000)
+        // A marker named whale_buy must use the whale threshold. This filtered
+        // at $8,000 and painted the result as a whale — a fourth definition of
+        // the word, on the one chart where the markers are labelled with it.
+        .filter((t) => t.amountUsd >= WHALE_USD)
         .slice(0, 40)
         .map((t) => ({
           ts: t.ts,

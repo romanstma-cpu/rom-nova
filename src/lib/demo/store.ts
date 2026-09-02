@@ -12,6 +12,7 @@ import {
   smartMoneyScore,
   WalletLedger,
 } from "../engine/perf";
+import { SMART_MONEY_THRESHOLD, WHALE_TRADE_USD } from "../engine/thresholds";
 import type {
   AlertEvent,
   AlertRule,
@@ -354,8 +355,12 @@ export class DemoStore {
       if (t.ts < cut || t.ts > now) continue;
       const w = this.universe.wallets.get(t.wallet);
       if (!w) continue;
-      if (w.smartMoney.total >= 70) smFlow += t.side === "buy" ? t.amountUsd : -t.amountUsd;
-      if (w.labels.includes("whale") || t.amountUsd >= 25_000) activeWhales.add(t.wallet);
+      // The dashboard's "Smart $ Flow 24h" and "Active Whales 24h" used to
+      // count at 70 and $25,000 while every other surface counted at 65 and
+      // $20,000 — the same universe answering the same question two ways on
+      // one screen. One definition now, imported.
+      if (w.smartMoney.total >= SMART_MONEY_THRESHOLD) smFlow += t.side === "buy" ? t.amountUsd : -t.amountUsd;
+      if (w.labels.includes("whale") || t.amountUsd >= WHALE_TRADE_USD) activeWhales.add(t.wallet);
     }
 
     let regime: MarketRegime;
@@ -404,7 +409,7 @@ export class DemoStore {
 
   private seedUserState() {
     const smart = this.walletList()
-      .filter((w) => w.smartMoney.total >= 65)
+      .filter((w) => w.smartMoney.total >= SMART_MONEY_THRESHOLD)
       .sort((a, b) => b.smartMoney.total - a.smartMoney.total);
     const whales = this.walletList().filter((w) => w.labels.includes("whale"));
     const now = this.universe.genesis;

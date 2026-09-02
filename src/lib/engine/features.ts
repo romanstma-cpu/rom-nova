@@ -9,7 +9,15 @@ import type { FeatureVector } from "../types";
 // agreed with the flow chart by luck, not by construction — see thresholds.ts.
 import { SMART_MONEY_THRESHOLD, WHALE_TRADE_USD } from "./thresholds";
 
-/** The window the simulator's wallet-flow fields cover. */
+/**
+ * The window the simulator's wallet-flow fields cover.
+ *
+ * Named because it travels ON the vector (`flowWindowMs`), so the invalidation
+ * copy and the feature snapshot say the same thing. Before that, one screen
+ * printed "whale net 6h $18.3K" seven lines below "a ten-minute chain scan,
+ * not a 6h window" — live copy applied to a simulated vector that really had
+ * been computed over six hours.
+ */
 export const DEMO_FLOW_WINDOW_MS = 6 * HOUR;
 
 export function extractFeatures(store: DemoStore, mint: string, asOf: number): FeatureVector | undefined {
@@ -74,6 +82,7 @@ export function extractFeatures(store: DemoStore, mint: string, asOf: number): F
     whaleNetFlowUsd: whaleFlow,
     whaleBuys,
     whaleSells,
+    flowWindowMs: DEMO_FLOW_WINDOW_MS,
     momentum1h: mom1h,
     momentum5m: mom5m,
     momentum24h: mom24h,

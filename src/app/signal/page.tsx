@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useApi, fmtUsd, fmtPct, fmtAgo, labelClass } from "@/lib/client";
 import { Score, Empty } from "@/components/ui/bits";
+import { flowWindowLabel } from "@/lib/engine/flow-window";
 import type { Signal } from "@/lib/types";
 
 export default function SignalPage() {
@@ -121,8 +122,12 @@ function SignalInner() {
           <div className="panel p-3.5">
             <div className="panel-title mb-2">Feature snapshot (reproducibility)</div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 num text-[10.5px] dim">
-              <KV k="smart $ net 6h" v={fmtUsd(s.features.smartMoneyNetFlowUsd)} />
-              <KV k="whale net 6h" v={fmtUsd(s.features.whaleNetFlowUsd)} />
+              {/* The window comes off the vector. This was captioned "6h" for
+                  every signal while the invalidation list above it said "a
+                  ten-minute chain scan, not a 6h window" — one engine, two
+                  stated windows, on one screen. */}
+              <KV k={`smart $ net · ${flowWindowLabel(s.features.flowWindowMs)}`} v={fmtUsd(s.features.smartMoneyNetFlowUsd)} />
+              <KV k={`whale net · ${flowWindowLabel(s.features.flowWindowMs)}`} v={fmtUsd(s.features.whaleNetFlowUsd)} />
               <KV k="momentum 1h/24h" v={`${fmtPct(s.features.momentum1h)} / ${fmtPct(s.features.momentum24h)}`} />
               <KV k="volume accel" v={`${s.features.volumeAccel.toFixed(2)}×`} />
               <KV k="liquidity" v={fmtUsd(s.features.liquidityUsd)} />

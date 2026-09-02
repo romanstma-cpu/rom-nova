@@ -815,6 +815,22 @@ export interface FeatureVector {
   whaleNetFlowUsd: number;
   whaleBuys: number;
   whaleSells: number;
+  /**
+   * The window the five wallet-flow fields above were measured over, in ms.
+   *
+   * Six hours in the simulator; on live data, the slice of chain the flow
+   * provider actually covered — ten minutes requested, and less whenever the
+   * byte budget stops the read early. It travels on the vector because two
+   * sentences on one screen were computed from it and stated it differently:
+   * the invalidation list said "a ten-minute chain scan, not a 6h window" and
+   * the feature snapshot seven lines below was captioned "whale net 6h", for
+   * a simulated vector that really had been built over six hours. Copy that
+   * reads the window from the vector cannot contradict the vector.
+   *
+   * Absent when nothing read any flow at all — no provider configured — which
+   * is different from a window that held no whale-sized move.
+   */
+  flowWindowMs?: number;
   momentum1h: number; // pct
   momentum5m: number;
   momentum24h: number;

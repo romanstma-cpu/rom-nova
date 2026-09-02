@@ -76,6 +76,8 @@ export const WHALE_USD = WHALE_TRADE_USD;
 
 /** How much chain history one live vector will pay for. */
 const FLOW_MINUTES = 10;
+/** Solana produces a block roughly every 400ms; the flow window is in blocks. */
+const BLOCKS_PER_MINUTE = 150;
 
 /**
  * How deep into the mover ranking to look for whales.
@@ -571,6 +573,15 @@ export async function liveFeatures(
     whaleNetFlowUsd,
     whaleBuys,
     whaleSells,
+    // The window the flow fields were REALLY measured over, so the copy that
+    // describes them can read it instead of asserting one. The covered slice,
+    // not the requested one: a byte-budgeted read that stopped at four minutes
+    // covered four. Absent when no provider was asked at all.
+    flowWindowMs: flowDetail
+      ? (flowDetail.complete ? FLOW_MINUTES : flowDetail.blocksCovered / BLOCKS_PER_MINUTE) * 60_000
+      : sources.flow
+        ? FLOW_MINUTES * 60_000
+        : undefined,
     // Candles first, the source's own published stats second, zero last — and
     // a zero that survives to here is inert, because the factor reading it has
     // been declared unmeasured above and the scorer drops it rather than

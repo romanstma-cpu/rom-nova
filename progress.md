@@ -117,6 +117,58 @@ negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
 
+## LIVE SIGNALS + REAL-TIME DATA — the next build (started 2026-09-01)
+
+LO's ask: "make the app have live signals and real time new data." Facts
+established before a line was written:
+
+- `/signals` and `/signal` read **only the simulator**. Live rows ARE scored
+  (`scoreRows` → `liveSignal`), so the raw material exists; nobody
+  materialises it as `Signal`s, and `signal_created` is emitted only by
+  `demo/simulator.ts`.
+- There is **no WebSocket anywhere** in `src/`. The SSE route is dropped
+  from the static export; static mode subscribes to the demo store alone.
+- Probed keyless from BOTH origins (`app://rom-nova`, `https://romapps.xyz`):
+  **PumpPortal `subscribeNewToken` answers in ~200–290ms** (creation push;
+  its trade streams need a key); **publicnode's RPC WebSocket answers
+  `logsSubscribe`/`accountSubscribe` in ~270–355ms**; mainnet-beta's socket
+  refuses, matching its HTTP 403.
+- **Rates decide the design.** `logsSubscribe` on the pump.fun program is
+  **567 notifications/s, 612 KB/s**; PumpSwap 109/s. A tab cannot drink
+  that. Per-account: an exchange hot wallet 0.33/s at 0.4 KB/s; quiet
+  accounts silent. So: creation push from PumpPortal, per-account
+  subscriptions for watched wallets, curves and pools, never program-wide.
+
+Two builders dispatched into worktrees from a commit that lands the shared
+event bus (`src/lib/live/bus.ts` — real events join the same subscription
+the demo store feeds, carrying `real` and `source`): **B1 live signals**
+(engine/API/pages, the dashboard KPI, the SIMULATED labels the whole-build
+review found missing) and **B2 real-time transport** (socket wrapper with
+connection honesty, PumpPortal push into the launch feed with NO fabricated
+`poolCreatedAt`, per-account RPC subscriptions that nudge the alert
+monitor, `/status` LIVE SOCKETS block, and the health-log plumbing the
+review found broken). Blind critic after.
+
+## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
+
+The per-stream passes could not see between pages. The critic could.
+**H1** one whale-flow reading rendered `—` on the scanner and `$0 — a quiet
+window` on three other pages from the same batch (**fixed on main, at the
+helper all four pages call**; the radar's seven other unmeasured columns and
+the CSV export fixed with it). **H2** the scanner's dash gave one false
+reason (fixed — names all three causes). **H3** `/status` rows for sqd,
+solana-rpc-wallet and jupiter-holdings read "not asked yet" forever
+because those adapters bypass `providerFetch` (→ B2). **H4** disabled
+providers render `○ offline · 1ms · 0% · now` — three measurements nobody
+took (→ B2). **H5** `/signals`, `/signal`, `/flow` and the dashboard's
+Highest Conviction are 100% simulator with no marker (→ B1). **H6** one
+synthetic event stream labelled SIMULATED in the toasts and unlabelled in
+the activity feed (→ B2, via the bus). **H7** the dashboard KPI counts
+simulator signals beside a live-scored table (→ B1). Nine MEDIUM and seven
+LOW on the list for after. Its fair credit: the launch feed "measures its
+own lag, separates mints from graduations, and detects its host's clock
+error" — it bracketed that independently and the numbers reconciled.
+
 ## 🔴 The desktop app has been headless since 1.4.0 — found, fixed, 1.7.1
 
 The most serious finding of the entire campaign, and no critic could have

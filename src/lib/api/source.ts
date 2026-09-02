@@ -39,7 +39,8 @@ import { identifyAccount, isOnCurve, KNOWN_ADDRESSES } from "../providers/accoun
 import { getSolReference } from "../providers/reference";
 import { assembleProfile } from "../engine/wallet-profile";
 import type { WalletCoverage } from "../types";
-import { liveSignal } from "../engine/live-features";
+import { liveSignal, type LiveFeatureResult } from "../engine/live-features";
+import { observeLivePass } from "../live/signals";
 import { buildLiveTokenRows, riskLevelOf, type TokenRow } from "./rows";
 
 export interface Provenance {
@@ -419,24 +420,45 @@ async function scoreRows(
   entries: (TokenInfo & { snapshot: TokenSnapshot })[],
   source: string,
 ): Promise<TokenRow[]> {
-  const rows = buildLiveTokenRows(entries, source);
+  // ONE clock reading for the whole pass. Twelve rows read off one cached
+  // list are one observation of the market; a per-row `Date.now()` inside
+  // `liveSignal` scattered one pass across twelve `asOf`s, and the live
+  // signal feed needs the rows to share a timestamp for the same reason the
+  // track ledger does — a pass is the unit everything downstream reasons in.
+  const passAt = Date.now();
+  const rows = buildLiveTokenRows(entries, source, passAt);
   const providers = getProviders();
 
   const signals = await pooled(entries, LIVE_LIST_CONCURRENCY, async (e) => {
     try {
-      return await liveSignal(e.mint, {
-        token: { ...providers.token, getToken: async () => e },
-        market: NO_CANDLES,
-        security: providers.security,
-        flow: providers.flow,
-        // Summary only — `liveSignal`'s detailedRisk stays false here. The full
-        // report is 80KB to 1.6MB per token, and twelve of those in one pass
-        // would undo everything the single-call list just bought.
-        risk: providers.risk,
-      });
+      return await liveSignal(
+        e.mint,
+        {
+          token: { ...providers.token, getToken: async () => e },
+          market: NO_CANDLES,
+          security: providers.security,
+          flow: providers.flow,
+          // Summary only — `liveSignal`'s detailedRisk stays false here. The full
+          // report is 80KB to 1.6MB per token, and twelve of those in one pass
+          // would undo everything the single-call list just bought.
+          risk: providers.risk,
+        },
+        "balanced",
+        passAt,
+      );
     } catch {
       return null;
     }
+  });
+
+  // The vectors become the live signal feed. Everything `/signals` serves on
+  // the live path descends from this call; the rows below only ever carried
+  // six fields of it. Ids come back so a row links to the signal the feed
+  // will actually serve, not to a bucket-of-the-moment id that goes stale.
+  const stableIds = observeLivePass({
+    at: passAt,
+    source,
+    rows: signals.flatMap((s): LiveFeatureResult[] => (s ? [s.result] : [])),
   });
 
   return rows.map((row, i) => {
@@ -491,7 +513,7 @@ async function scoreRows(
       signalScore: s.signal.score,
       signalLabel: s.signal.label,
       signalKind: s.signal.kind,
-      signalId: s.signal.id,
+      signalId: stableIds.get(row.mint) ?? s.signal.id,
       confidence: s.signal.confidence,
       riskLevel: riskLevelOf(s.signal),
       // Carried through so a reader can see WHICH factors stood down; a score

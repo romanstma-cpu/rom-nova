@@ -121,7 +121,12 @@ function queued<T>(run: () => Promise<T>): Promise<T> {
 }
 
 const gtFetch = <T>(path: string) =>
-  queued(() => providerFetch<T>("coingecko", `${BASE}${path}`, { timeoutMs: 12_000 }));
+  // Its own health key. This was "coingecko", which folded every OHLCV and
+  // new-pool call into the row for the api.coingecko.com SOL price ping — an
+  // endpoint that never rate-limits — so the row read "● ok" while the
+  // endpoint its own note described as throttling hard contributed nothing
+  // observable. Two hosts, two failure modes, two rows.
+  queued(() => providerFetch<T>("geckoterminal", `${BASE}${path}`, { timeoutMs: 12_000 }));
 
 // ---------------------------------------------------------------- shapes
 
@@ -250,7 +255,7 @@ const addressOf = (id: string | undefined): string => (id ?? "").split("_").pop(
 // ---------------------------------------------------------------- providers
 
 export class GeckoTerminalMarketProvider implements MarketDataProvider {
-  readonly name = "coingecko";
+  readonly name = "geckoterminal";
 
   /** mint -> deepest pool + which SIDE of it the mint is. One lookup, cached. */
   private pools = new Map<string, { addr: string; side: "base" | "quote" }>();
@@ -311,7 +316,7 @@ export class GeckoTerminalMarketProvider implements MarketDataProvider {
 }
 
 export class GeckoTerminalTokenProvider implements TokenDataProvider {
-  readonly name = "coingecko";
+  readonly name = "geckoterminal";
 
   async getToken(mint: string): Promise<(TokenInfo & { snapshot: TokenSnapshot }) | null> {
     const res = await gtFetch<GtToken>(

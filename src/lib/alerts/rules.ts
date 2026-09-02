@@ -428,16 +428,22 @@ export function evaluateLaunchRule(rule: LiveAlertRule, state: RuleEvalState, ob
       kind: "launch",
       firedAt: now,
       dataAsOf: obs.dataAsOf,
+      // Undefined on a pushed row nobody has dated: the socket frame carries
+      // no on-chain time, and the record says "on-chain time: not known"
+      // rather than wearing the receipt as one.
       eventAt: row.poolCreatedAt,
       // Named for what the row's OWN event is. `poolCreatedAt` is re-dated to
       // the migrated pool when a curve graduates (see types.ts), so calling it
       // "the pool-creation time" on a graduation row put the right timestamp
       // under the wrong claim — the dedicated graduation rule got this right
-      // and the filter rule did not.
+      // and the filter rule did not. And credited to whoever DATED the row,
+      // which for a pushed row is the poll that listed it, not the socket.
       eventAtNote:
-        row.event === "graduation"
-          ? `source claim — the graduation time ${row.source} published, not a chain read by this app`
-          : `source claim — the pool-creation time ${row.source} published, not a chain read by this app`,
+        row.poolCreatedAt === undefined
+          ? undefined
+          : row.event === "graduation"
+            ? `source claim — the graduation time ${row.datedBy ?? row.source} published, not a chain read by this app`
+            : `source claim — the pool-creation time ${row.datedBy ?? row.source} published, not a chain read by this app`,
       measurement: describeLaunch(row),
       gapNote: gap,
       headline: `LAUNCH MATCH · ${row.symbol || shortMint(row.mint)}`,
@@ -508,7 +514,7 @@ export function evaluateGraduationRule(rule: LiveAlertRule, state: RuleEvalState
         firedAt: now,
         dataAsOf: obs.dataAsOf,
         eventAt: row.graduatedAt ?? row.poolCreatedAt,
-        eventAtNote: `source claim — graduation time per ${row.source}`,
+        eventAtNote: `source claim — graduation time per ${row.datedBy ?? row.source}`,
         measurement,
         gapNote: alreadyGraduated ? undefined : gapNoteFor(state.lastEvaluatedAt, now, LAUNCHES_EVERY_MS),
         headline: `GRADUATED · ${row.symbol || c.symbol || shortMint(c.mint)}`,

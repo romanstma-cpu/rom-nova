@@ -128,6 +128,15 @@ export interface StreamEvent {
   detail: string;
   confidence?: number;
   symbol?: string;
+  /**
+   * True only when a real source produced this event. Absent or false is the
+   * simulator, and every surface that renders a stream event labels it from
+   * THIS field — the toasts and the activity feed used to render the same
+   * payload as SIMULATED on one and "streaming" on the other.
+   */
+  real?: boolean;
+  /** The adapter or socket that produced it — "demo", "pumpportal-ws", "solana-rpc-ws"… */
+  source?: string;
 }
 
 /** Subscribe to the live event feed — SSE in server mode, the in-browser

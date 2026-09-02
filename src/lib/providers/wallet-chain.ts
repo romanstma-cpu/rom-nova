@@ -65,6 +65,7 @@
 import type { TradeClassification, WalletCoverage, WalletFill } from "../types";
 import { getSolBars, solUsdAt, type SolBar } from "./sol-history";
 import { resolveRpcRoute, TX_RETENTION_DAYS, type RpcRoute } from "./rpc-endpoint";
+import { noteProviderCall } from "./http";
 import { identifyAccount, type AccountIdentity } from "./account-kind";
 
 export const WSOL = "So11111111111111111111111111111111111111112";
@@ -236,6 +237,18 @@ async function rpcOnce<T>(
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 15_000);
   opts.signal?.addEventListener("abort", () => ctl.abort(), { once: true });
+  // Raw fetch rather than `providerFetch`, because a 429 here is a cooldown
+  // to honour rather than an error to count, and the caller's abort signal
+  // has to reach the request. The health row is written by hand instead —
+  // before this, /status said "not asked yet" about the reader that had just
+  // pulled four hundred transactions for the wallet page.
+  const started = Date.now();
+  let recorded = false;
+  const record = (ok: boolean) => {
+    if (recorded) return;
+    recorded = true;
+    noteProviderCall(WALLET_RPC_HEALTH_KEY, ok, Date.now() - started);
+  };
   try {
     const res = await fetch(endpoint, {
       method: "POST",
@@ -245,24 +258,41 @@ async function rpcOnce<T>(
     });
     if (res.status === 429) {
       cooldownUntil = Date.now() + COOLDOWN_MS;
+      record(false);
       throw new RateLimitedError();
     }
-    if (!res.ok) throw new Error(`HTTP ${res.status} from ${method}`);
+    if (!res.ok) {
+      record(false);
+      throw new Error(`HTTP ${res.status} from ${method}`);
+    }
     const body = (await res.json()) as RpcEnvelope<T>;
     // -32005 is the same refusal arriving as a JSON-RPC error instead of a 429;
     // the endpoint uses both shapes for it, sometimes within one burst.
     if (body.error) {
       if (body.error.code === -32005) {
         cooldownUntil = Date.now() + COOLDOWN_MS;
+        record(false);
         throw new RateLimitedError();
       }
+      // The endpoint ANSWERED — "no account exists" is a reading, not an
+      // outage — so the provider is healthy even though the call is refused.
+      record(true);
       throw new Error(`${method}: ${body.error.message}`);
     }
+    record(true);
     return body.result as T;
+  } catch (err) {
+    // Anything not already recorded above is a network failure or our own
+    // timeout: the endpoint did not answer at all.
+    record(false);
+    throw err;
   } finally {
     clearTimeout(timer);
   }
 }
+
+/** The /status row this reader reports under. Distinct from `solana-rpc`, which is the mint-authority reader. */
+export const WALLET_RPC_HEALTH_KEY = "solana-rpc-wallet";
 
 async function rpc<T>(
   endpoint: string,

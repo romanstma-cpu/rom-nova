@@ -25,6 +25,7 @@
 // are set at or below the pages' own poll rates.
 
 import { useEffect, useRef, useState } from "react";
+// `useRef` still holds the settled-answer map below.
 import Link from "next/link";
 import { apiGet } from "@/lib/client";
 import type { LaunchFeed } from "@/lib/api/launches";
@@ -64,6 +65,8 @@ import {
   watchDecision,
 } from "@/lib/alerts/store";
 import { deliverNotification } from "@/lib/alerts/notify";
+import { due, lastAttemptAt, noteAttempt, subscribeNudges } from "@/lib/alerts/cadence";
+import { setWatched } from "@/lib/live/rpc-ws";
 
 interface DetailResp {
   snapshot?: { priceUsd: number; liquidityUsd: number; ts?: number; unmeasured?: readonly string[] };
@@ -78,6 +81,13 @@ interface ProfileResp {
   builtAt?: number;
   demo: boolean;
 }
+
+/**
+ * How soon after a socket nudge the next tick runs. Long enough for a burst
+ * of notifications about one wallet to collapse into one read; short enough
+ * that "instant re-read" is not a lie about a ten-second tick.
+ */
+export const NUDGE_WAKE_MS = 250;
 
 function stateFor(states: Record<string, RuleEvalState>, rule: LiveAlertRule): RuleEvalState {
   return states[rule.id] ?? { ruleId: rule.id };
@@ -156,7 +166,9 @@ function fold(results: EvalResult[]): { states: Record<string, RuleEvalState>; e
 
 export function AlertMonitor() {
   const [toasts, setToasts] = useState<LiveAlertEvent[]>([]);
-  const lastAttempt = useRef<Map<string, number>>(new Map());
+  // The attempt clock lives in `lib/alerts/cadence` now, not in a ref here:
+  // a socket notification has to be able to clear one key's attempt and
+  // wake this loop, and a socket handler is not a React component.
   /**
    * Sources whose answer is settled: the address was identified and can never
    * be a token. Session-scoped rather than persisted — a reload re-asks once,
@@ -205,12 +217,10 @@ export function AlertMonitor() {
       );
     };
 
-    const due = (key: string, everyMs: number, now: number) => now - (lastAttempt.current.get(key) ?? 0) >= everyMs;
-
     // ---------------------------------------------------------- source passes
 
     const passScanner = async (rules: LiveAlertRule[], states: Record<string, RuleEvalState>, now: number) => {
-      lastAttempt.current.set("scanner", now);
+      noteAttempt("scanner", now);
       try {
         const body = await apiGet<{ rows: TokenRow[]; demo: boolean; asOf: number; provenance?: { source?: string } }>(
           "/api/tokens?limit=300",
@@ -254,7 +264,7 @@ export function AlertMonitor() {
     };
 
     const passLaunches = async (rules: LiveAlertRule[], states: Record<string, RuleEvalState>, now: number) => {
-      lastAttempt.current.set("launches", now);
+      noteAttempt("launches", now);
       try {
         const body = await apiGet<{ feed: LaunchFeed | null }>("/api/launches");
         if (!body.feed) {
@@ -295,7 +305,7 @@ export function AlertMonitor() {
 
     const passDetail = async (mint: string, rules: LiveAlertRule[], states: Record<string, RuleEvalState>, now: number) => {
       const key = `detail:${mint}`;
-      lastAttempt.current.set(key, now);
+      noteAttempt(key, now);
       // Already answered permanently. The rule keeps its chip and its reason;
       // what stops is the pointless re-asking.
       const already = settled.current.get(key);
@@ -348,7 +358,7 @@ export function AlertMonitor() {
 
     const passWallet = async (wallet: string, rules: LiveAlertRule[], states: Record<string, RuleEvalState>, now: number) => {
       const key = `wallet:${wallet}`;
-      lastAttempt.current.set(key, now);
+      noteAttempt(key, now);
       try {
         const body = await apiGet<ProfileResp>(`/api/wallets/${wallet}/profile`);
         const p = body.profile;
@@ -407,8 +417,16 @@ export function AlertMonitor() {
 
     // ------------------------------------------------------------------ tick
 
+    // A socket nudge while a tick is running is honoured at the END of that
+    // tick — two ticks in flight would race each other's writes — and a
+    // nudge between ticks pulls the next one forward to now.
+    let inTick = false;
+    let wakeSoon = false;
+
     const tick = async () => {
       if (dead) return;
+      inTick = true;
+      wakeSoon = false;
       const now = Date.now();
       const visible = typeof document === "undefined" || document.visibilityState === "visible";
       const { rules, states, settings } = loadAlerts();
@@ -443,6 +461,20 @@ export function AlertMonitor() {
       if (paused) openGap(now, "tab hidden — monitoring paused (background watch is off)");
       else closeGap(now);
 
+      // The per-account socket subscriptions follow the armed rules, and
+      // only for the tab that is actually evaluating: a follower tab or a
+      // paused one holds nothing, so one browser holds each account once.
+      // The socket never evaluates; a notification only makes a key due now.
+      const watching = leader && !paused;
+      setWatched("alerts", {
+        wallets: watching ? enabled.filter((r) => r.condition.kind === "wallet_fills").map((r) => (r.condition as { wallet: string }).wallet) : [],
+        mints: watching
+          ? enabled
+              .filter((r) => r.condition.kind === "price_cross" || r.condition.kind === "liquidity_floor")
+              .map((r) => (r.condition as { mint: string }).mint)
+          : [],
+      });
+
       if (leader && !paused && enabled.length > 0) {
         const jobs: Promise<void>[] = [];
 
@@ -470,7 +502,7 @@ export function AlertMonitor() {
         }
         const dueMints = [...byMint.keys()]
           .filter((m) => due(`detail:${m}`, DETAIL_EVERY_MS, now))
-          .sort((a, b) => (lastAttempt.current.get(`detail:${a}`) ?? 0) - (lastAttempt.current.get(`detail:${b}`) ?? 0))
+          .sort((a, b) => lastAttemptAt(`detail:${a}`) - lastAttemptAt(`detail:${b}`))
           .slice(0, 2);
         for (const m of dueMints) jobs.push(passDetail(m, byMint.get(m)!, states, now));
 
@@ -484,19 +516,32 @@ export function AlertMonitor() {
         }
         const dueWallets = [...byWallet.keys()]
           .filter((w) => due(`wallet:${w}`, WALLET_EVERY_MS, now))
-          .sort((a, b) => (lastAttempt.current.get(`wallet:${a}`) ?? 0) - (lastAttempt.current.get(`wallet:${b}`) ?? 0))
+          .sort((a, b) => lastAttemptAt(`wallet:${a}`) - lastAttemptAt(`wallet:${b}`))
           .slice(0, 1);
         for (const w of dueWallets) jobs.push(passWallet(w, byWallet.get(w)!, states, now));
 
         await Promise.all(jobs);
       }
 
+      inTick = false;
       if (dead) return;
       // A chain of timeouts rather than an interval: a hidden tab's next tick
       // may be stretched arbitrarily by the browser's throttling, and chaining
-      // means the achieved cadence is measured instead of queued up.
-      timer = setTimeout(tick, paused ? TICK_VISIBLE_MS : visible ? TICK_VISIBLE_MS : TICK_HIDDEN_MS);
+      // means the achieved cadence is measured instead of queued up. A nudge
+      // that landed mid-tick shortens the chain to a quarter second.
+      timer = setTimeout(tick, wakeSoon ? NUDGE_WAKE_MS : paused ? TICK_VISIBLE_MS : visible ? TICK_VISIBLE_MS : TICK_HIDDEN_MS);
     };
+
+    const onNudge = () => {
+      if (dead) return;
+      if (inTick) {
+        wakeSoon = true;
+        return;
+      }
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(tick, NUDGE_WAKE_MS);
+    };
+    const offNudge = subscribeNudges(onNudge);
 
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
@@ -525,6 +570,8 @@ export function AlertMonitor() {
       dead = true;
       if (timer) clearTimeout(timer);
       for (const t of toastTimers) clearTimeout(t);
+      offNudge();
+      setWatched("alerts", { wallets: [], mints: [] });
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pagehide", onPageHide);
       releaseLease(tabId);

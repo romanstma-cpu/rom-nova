@@ -324,12 +324,28 @@ export function dataMode(): DataMode {
     }
   }
   (p.security.name === "demo" ? simulated : live).push("mint & freeze authority");
-  (p.flow ? live : simulated).push("whale flow");
+  // The same observation-over-configuration rule candles get, applied to the
+  // three capabilities whose /status rows said "not asked yet" while this
+  // panel called them LIVE. Configuration decides until something has been
+  // tried; after that, the last outcome decides.
+  const failedLately = (capability: string): string | null => {
+    const h = lastOutcome(capability);
+    return h && !h.ok ? h.note ?? "the last request failed" : null;
+  };
+  if (!p.flow) {
+    simulated.push("whale flow");
+  } else {
+    const why = failedLately("whale flow");
+    if (why) bounded.push(`whale flow — the last SQD read FAILED (${why}); rows declare it unmeasured until one succeeds`);
+    else live.push("whale flow");
+  }
   // Wallet activity is real whenever the chain reader is on, whatever the
   // `wallet` provider slot holds — that slot is the WalletTrade contract, which
   // the chain reader deliberately does not implement. See getProviders().
   if (FLAGS.walletChain() || p.wallet.name !== "demo") {
-    live.push("wallet activity");
+    const why = failedLately("wallet activity");
+    if (why) bounded.push(`wallet activity — the last chain read FAILED (${why})`);
+    else live.push("wallet activity");
     if (FLAGS.walletChain() && !FLAGS.helius()) {
       // Two depths, and one label over both would be false for one of them.
       bounded.push(
@@ -345,7 +361,9 @@ export function dataMode(): DataMode {
     simulated.push("wallet activity");
   }
   if (p.holdings) {
-    live.push("wallet positions");
+    const why = failedLately("wallet positions");
+    if (why) bounded.push(`wallet positions — the last balance read FAILED (${why}); positions fall back to the trade window`);
+    else live.push("wallet positions");
   } else {
     bounded.push("wallet positions — derived from the trade window, not read whole");
   }
@@ -377,14 +395,22 @@ export function dataMode(): DataMode {
 
 export function providerHealth(): ProviderHealth[] {
   const store = getStore();
+  /**
+   * A row for a provider nobody has called, with NOTHING measured in it.
+   *
+   * This used to hardcode `latencyMs: 1`, `errorRatePct: 0` and `lastDataTs:
+   * now` — three measurements nobody took, rendered four rows apart from the
+   * live rows that correctly dash all three for the same condition. A
+   * disabled provider has no latency, no error rate over zero requests and
+   * no last data, least of all "now". The table already knows how to render
+   * absence; it just has to be handed one.
+   */
   const demoHealth = (name: string): ProviderHealth => ({
     name,
     mode: "demo",
     status: "ok",
-    latencyMs: 1,
-    errorRatePct: 0,
-    lastSuccessTs: store.simulatedUntil,
-    lastDataTs: store.simulatedUntil,
+    lastSuccessTs: 0,
+    lastDataTs: 0,
     note: "synthetic data — deterministic demo universe",
   });
 
@@ -448,18 +474,46 @@ export function providerHealth(): ProviderHealth[] {
         }
       : { ...demoHealth("dexscreener"), mode: "disabled", status: "down", note: "disabled via ENABLE_DEXSCREENER" },
   );
+  // Two hosts that used to share one row. The SOL reference ping never
+  // rate-limits and the OHLCV host throttles hard, so a combined row read
+  // "● ok" on the strength of the endpoint nobody worries about.
   rows.push(
     FLAGS.coingecko()
       ? {
           ...healthOf("coingecko", "live"),
           note:
-            "keyless. LIVE NOW: the SOL reference price in the header, and the price chart on " +
-            "any token page — ~1,000 hourly on-chain bars, the only keyless source with real " +
-            "history. NOT used for the token LIST: it rate-limits hard under concurrency, so " +
-            "list rows are scored without candles and declare momentum unmeasured. The " +
-            "backtester still takes a DemoStore and cannot use any of it",
+            "keyless, api.coingecko.com. ONLY the SOL reference price in the header (cross-checked " +
+            "against Crypto.com). Nothing else in the app reads this host — the price chart is " +
+            "geckoterminal and jupiter-charts, two rows down",
         }
       : { ...demoHealth("coingecko"), mode: "disabled", status: "down", note: "disabled via ENABLE_COINGECKO" },
+  );
+  rows.push(
+    FLAGS.coingecko()
+      ? {
+          ...healthOf("geckoterminal", "live"),
+          note:
+            "keyless, api.geckoterminal.com. The HOURLY view of a token's price chart — ~1,000 " +
+            "hourly on-chain bars — and the new-pool sweep behind the launch feed's direct-AMM " +
+            "rows. It rate-limits hard under concurrency (four no-gap calls: 200 ×4 then 429 ×4, " +
+            "and the 429 carries no CORS header, so a browser sees a network error), so it is " +
+            "serialised behind a 2.1s gap, NOT used for the token list, and the chart falls back " +
+            "to jupiter-charts when it throttles. The chart names whichever host drew it",
+        }
+      : { ...demoHealth("geckoterminal"), mode: "disabled", status: "down", note: "disabled via ENABLE_COINGECKO" },
+  );
+  rows.push(
+    FLAGS.jupiter()
+      ? {
+          ...healthOf("jupiter-charts", "live"),
+          note:
+            "keyless, datapi.jup.ag/v2/charts. The DEFAULT price chart on a token page — the 15m view " +
+            "a first visit opens with — and every minute-granularity bucket (1m/5m/15m/4h/1d), plus the " +
+            "fallback for the hourly view when geckoterminal throttles. Its volume field's unit could " +
+            "not be established (see jupiter-chart.ts), so the chart carries it unlabelled. This row " +
+            "did not exist while the token page already credited the chart to it",
+        }
+      : { ...demoHealth("jupiter-charts"), mode: "disabled", status: "down", note: "disabled via ENABLE_JUPITER" },
   );
   rows.push(
     FLAGS.sqd()
@@ -568,7 +622,16 @@ export function providerHealth(): ProviderHealth[] {
       ? { ...healthOf("infstones", "live"), note: "third-opinion price cross-check" }
       : { ...demoHealth("infstones"), mode: "disabled", status: "down", note: "needs server mode + INFSTONES_API_KEY — optional third price opinion" },
   );
-  rows.push({ ...demoHealth("demo-universe"), note: `seed ${store.universe.seed} · ${store.tokenList().length} tokens · ${store.walletList().length} wallets · genesis ${new Date(store.universe.genesis).toISOString()}` });
+  // The simulator's heartbeat is a real timestamp — the moment the universe
+  // was last advanced — so that one field is filled. Latency and error rate
+  // stay absent: an in-process function has neither in any sense the other
+  // rows mean.
+  rows.push({
+    ...demoHealth("demo-universe"),
+    lastSuccessTs: store.simulatedUntil,
+    lastDataTs: store.simulatedUntil,
+    note: `seed ${store.universe.seed} · ${store.tokenList().length} tokens · ${store.walletList().length} wallets · genesis ${new Date(store.universe.genesis).toISOString()}`,
+  });
   return rows;
 }
 

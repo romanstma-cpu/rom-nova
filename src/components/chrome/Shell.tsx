@@ -7,11 +7,36 @@ import { TopBar } from "./TopBar";
 import { CommandPalette } from "./CommandPalette";
 import { EventToasts } from "./EventToasts";
 import { AlertMonitor } from "./AlertMonitor";
+import { dataMode } from "@/lib/providers/registry";
+
+/**
+ * What going offline actually stops, computed from the same resolution the
+ * data-mode chip reads.
+ *
+ * The banner used to say "the live SOL reference is paused. The analytics
+ * universe keeps running locally" — the stale blanket claim from when the
+ * SOL price was the one live number. Offline also stops the token list, the
+ * scanner, the launch feed, wallet reads, rug checks, flow and both sockets:
+ * everything /status calls live. Listed from `dataMode()` so this sentence
+ * cannot drift away from the providers a second time.
+ */
+export function offlineMessage(mode: { live: string[]; bounded: string[] }): string {
+  const paused = [...mode.live, ...mode.bounded.map((b) => b.split(" — ")[0])];
+  if (paused.length === 0) return "You appear to be offline. Nothing here was live, so nothing has changed: the whole terminal is the deterministic simulator.";
+  return (
+    `You appear to be offline — every live source is paused: ${paused.join(", ")}. ` +
+    "The live sockets are down and will reconnect on their own. Anything labelled SIMULATED keeps running locally; " +
+    "anything labelled with a vendor's name is frozen at its last reading and its age keeps counting."
+  );
+}
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [offline, setOffline] = useState(false);
+  // Read once on mount, on the client: the provider set is configuration and
+  // does not change for the life of the tab.
+  const [offlineText, setOfflineText] = useState<string>("You appear to be offline.");
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -37,6 +62,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    try {
+      setOfflineText(offlineMessage(dataMode()));
+    } catch {
+      /* the default sentence stands */
+    }
     const sync = () => setOffline(!navigator.onLine);
     sync();
     window.addEventListener("online", sync);
@@ -52,7 +82,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       <TopBar onOpenPalette={() => setPaletteOpen(true)} onOpenNav={() => setNavOpen(true)} />
       {offline && (
         <div className="shrink-0 bg-[rgba(255,180,84,0.12)] border-b border-[rgba(255,180,84,0.3)] text-[var(--warn)] text-[11.5px] text-center py-1">
-          You appear to be offline — the live SOL reference is paused. The analytics universe keeps running locally.
+          {offlineText}
         </div>
       )}
       <div className="flex flex-1 min-h-0">

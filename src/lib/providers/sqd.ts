@@ -42,6 +42,8 @@
 //    conversions to a caller that has them.
 
 import type { TokenFlow, TokenFlowProvider } from "./types";
+import { noteProviderCall } from "./http";
+import { noteOutcome } from "./health-log";
 import { KNOWN_ADDRESSES, isOnCurve } from "./account-kind";
 
 const PORTAL = "https://portal.sqd.dev/datasets/solana-mainnet";
@@ -180,12 +182,18 @@ export class SqdFlowProvider implements TokenFlowProvider {
   readonly name = "sqd";
 
   async head(): Promise<number | null> {
+    // Raw fetch, because the stream below is; the health row is written by
+    // hand instead. Before this, nothing was ever recorded under `sqd` and
+    // /status called it "not asked yet" beside a scanner full of its numbers.
+    const started = Date.now();
     try {
       const r = await fetch(`${PORTAL}/head`, { headers: { accept: "application/json" } });
+      noteProviderCall(this.name, r.ok, Date.now() - started);
       if (!r.ok) return null;
       const j = (await r.json()) as { number?: number };
       return typeof j.number === "number" ? j.number : null;
     } catch {
+      noteProviderCall(this.name, false, Date.now() - started);
       return null;
     }
   }
@@ -205,6 +213,7 @@ export class SqdFlowProvider implements TokenFlowProvider {
     opts.signal?.addEventListener("abort", () => ctl.abort(), { once: true });
 
     let res: Response;
+    const started = Date.now();
     try {
       res = await fetch(`${PORTAL}/stream`, {
         method: "POST",
@@ -230,9 +239,15 @@ export class SqdFlowProvider implements TokenFlowProvider {
         }),
       });
     } catch {
+      noteProviderCall(this.name, false, Date.now() - started);
+      noteOutcome("whale flow", false, "the flow stream request failed before any response");
       return null;
     }
-    if (!res.ok || !res.body) return null;
+    if (!res.ok || !res.body) {
+      noteProviderCall(this.name, false, Date.now() - started);
+      noteOutcome("whale flow", false, `SQD answered HTTP ${res.status} to the flow stream`);
+      return null;
+    }
 
     const byOwner = new Map<string, bigint>();
     let bytesRead = 0;
@@ -287,6 +302,10 @@ export class SqdFlowProvider implements TokenFlowProvider {
       // A dropped connection mid-stream is a partial read, not an empty one.
       complete = false;
     }
+    // The call answered: a partial window is real data with a stated edge,
+    // not a failure. Latency is the whole read, which is what a reader waits.
+    noteProviderCall(this.name, true, Date.now() - started);
+    noteOutcome("whale flow", true);
 
     return {
       mint,

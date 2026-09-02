@@ -416,7 +416,9 @@ void (async () => {
     } else {
       // Rows that ARRIVED while the feed was running, as opposed to the page of
       // backfill it opened with. Only these describe the feed's own behaviour.
-      const live = feed.launches.filter((l) => l.poolCreatedAt > opened);
+      // Dated rows only: a pushed row nobody has dated yet has no creation
+      // time to compare against the baseline.
+      const live = feed.launches.filter((l) => l.poolCreatedAt !== undefined && l.poolCreatedAt > opened);
       const liveTri = stats(live.filter((l) => l.triage.completedInMs !== undefined).map((l) => l.triage.completedInMs!));
       console.log(
         `  of ${feed.launches.length} rows, ${live.length} launched AFTER the feed opened — those are the ones that measure it:`,
@@ -470,7 +472,7 @@ void (async () => {
         const failed = l.triage.checks.filter((c) => c.state === "fail");
         console.log(
           `    ${(l.symbol || l.mint.slice(0, 6)).slice(0, 12).padEnd(13)}` +
-            `${secs(Date.now() - l.poolCreatedAt).padStart(8)} old  ` +
+            `${(l.poolCreatedAt === undefined ? "undated" : secs(Date.now() - l.poolCreatedAt)).padStart(8)} old  ` +
             failed.map((c) => c.key + (c.assumed ? "(assumed)" : "")).join(", "),
         );
       }

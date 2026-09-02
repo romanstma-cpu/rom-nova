@@ -462,7 +462,14 @@ function windowsOf(m: JupMint): Partial<Record<TradeWindowKey, TradeWindow>> | u
  * needs to say "LIVE" for the first and "assumed live, unaudited" for the
  * second, so the distinction is carried rather than flattened.
  */
-export function toLaunch(m: JupMint, seenAt: number, source = "jupiter"): LaunchObservation {
+/**
+ * A polled observation is always dated: the source publishes a creation time
+ * for every row, and where it somehow does not, the sighting stands in and
+ * says so below. Only a socket push arrives undated (see `observeLaunchPush`).
+ */
+export type DatedLaunch = LaunchObservation & { poolCreatedAt: number };
+
+export function toLaunch(m: JupMint, seenAt: number, source = "jupiter"): DatedLaunch {
   const pool = Date.parse(m.firstPool?.createdAt ?? m.createdAt ?? "");
   const graduated = m.graduatedAt ? Date.parse(m.graduatedAt) : NaN;
   const a = m.audit ?? {};
@@ -519,7 +526,7 @@ export function toLaunch(m: JupMint, seenAt: number, source = "jupiter"): Launch
  * Only the POOL facts are overridden afterwards, because they are the facts
  * `toLaunch` cannot know from a token payload alone.
  */
-export function gemsToLaunch(p: GemsPool, seenAt: number): LaunchObservation | null {
+export function gemsToLaunch(p: GemsPool, seenAt: number): DatedLaunch | null {
   const base = p.baseAsset;
   if (!base?.id) return null;
   const obs = toLaunch(base, seenAt, "jupiter-datapi");
@@ -626,7 +633,7 @@ export class JupiterTokenProvider implements TokenDataProvider {
    *   usually do not, because Jupiter has not priced them yet, and those come
    *   back with the fields undefined rather than zeroed.
    */
-  async getRecentLaunches(seenAt = Date.now()): Promise<LaunchObservation[]> {
+  async getRecentLaunches(seenAt = Date.now()): Promise<DatedLaunch[]> {
     const rows = await this.list("recent");
     return rows.map((m) => toLaunch(m, seenAt));
   }
@@ -641,8 +648,8 @@ export class JupiterTokenProvider implements TokenDataProvider {
    * finds would otherwise need its own lookup; batched, a whole page of them
    * costs one Jupiter call.
    */
-  async getLaunchesByMint(mints: string[], seenAt = Date.now()): Promise<Map<string, LaunchObservation>> {
-    const out = new Map<string, LaunchObservation>();
+  async getLaunchesByMint(mints: string[], seenAt = Date.now()): Promise<Map<string, DatedLaunch>> {
+    const out = new Map<string, DatedLaunch>();
     if (mints.length === 0) return out;
     const rows = await this.list(`search?query=${mints.slice(0, 100).join(",")}`);
     for (const m of rows) out.set(m.id, toLaunch(m, seenAt));
@@ -697,7 +704,7 @@ export class JupiterTokenProvider implements TokenDataProvider {
    * "near graduation" filter that matched nothing. `aboutToGraduate` is where
    * the 65-91% rows live — the mints actually close to completing.
    */
-  async getGems(seenAt = Date.now()): Promise<{ graduations: LaunchObservation[]; curves: Map<string, number> }> {
+  async getGems(seenAt = Date.now()): Promise<{ graduations: DatedLaunch[]; curves: Map<string, number> }> {
     const res = await providerFetch<GemsResponse>(this.name, `${DATAPI}/pools/gems`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...headers() },
@@ -711,7 +718,7 @@ export class JupiterTokenProvider implements TokenDataProvider {
       timeoutMs: 10_000,
     });
 
-    const graduations: LaunchObservation[] = [];
+    const graduations: DatedLaunch[] = [];
     for (const p of res.graduated?.pools ?? []) {
       // A graduated row carrying no parseable graduation time is dropped rather
       // than dated. `toLaunch` falls back to `seenAt` when a payload has no

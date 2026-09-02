@@ -25,6 +25,10 @@ export default function FlowPage() {
     <div className="p-3 flex flex-col gap-3">
       <div className="flex items-center gap-2">
         <h1 className="text-[15px] font-semibold tracking-wide mr-2">MONEY FLOW · ALL TRACKED WALLETS</h1>
+        {/* This page is entirely the simulated wallet universe — there is no
+            keyless source for cross-wallet flow history — and the review found
+            it was the one flow surface that never said so (H5). */}
+        <span className="chip">SIMULATED</span>
         {WINDOWS.map((w) => (
           <button key={w.hours} onClick={() => setHours(w.hours)} className={`chip cursor-pointer ${hours === w.hours ? "chip-accent" : ""}`}>
             {w.label}

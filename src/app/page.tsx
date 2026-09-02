@@ -34,10 +34,10 @@ interface SolReference {
 
 export default function Dashboard() {
   const { data: market } = useApi<{ market: MarketState; reference: SolReference | null }>("/api/market", 8000);
-  const { data: sigData } = useApi<{ signals: SignalWithMeta[] }>("/api/signals", 30_000);
+  const { data: sigData } = useApi<{ signals: SignalWithMeta[]; demo?: boolean }>("/api/signals", 30_000);
   const { data: rowData } = useApi<{ rows: TokenRow[] }>("/api/tokens?sort=h24&limit=10", 20_000);
   const { data: net } = useApi<NetworkPayload>("/api/network", 15_000);
-  const { data: flowData } = useApi<{ flow: FlowPoint[] }>("/api/flow?hours=72", 60_000);
+  const { data: flowData } = useApi<{ flow: FlowPoint[]; demo?: boolean }>("/api/flow?hours=72", 60_000);
   const [selected, setSelected] = useState<string | null>(null);
   const [mobile, setMobile] = useState(false);
   const burstsRef = useRef<{ from: string; to: string; sell: boolean; usd: number }[]>([]);
@@ -94,7 +94,15 @@ export default function Dashboard() {
         <Stat label="Active Whales 24h" sub="tracked universe">
           {m ? m.activeWhales24h : "—"}
         </Stat>
-        <Stat label="Actionable Signals" sub="score ≥ 64, not NO TRADE">
+        {/* The review found this counter reading simulator signals while the
+            Momentum Leaders table beside it showed live scores the counter
+            could not see (H7). The feed underneath is live now when a live
+            token source answers, and this label says which universe was
+            counted rather than leaving the reader to assume. */}
+        <Stat
+          label="Actionable Signals"
+          sub={sigData ? (sigData.demo === false ? "score ≥ 64 · live trending list" : "score ≥ 64 · SIMULATED") : "score ≥ 64, not NO TRADE"}
+        >
           <span className="text-[var(--accent)]">{sigData ? highConviction : "—"}</span>
         </Stat>
         <Stat label="Slot" sub="synthetic chain clock">
@@ -108,6 +116,7 @@ export default function Dashboard() {
         <div className="panel flex flex-col min-h-0">
           <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
             <span className="panel-title">Highest Conviction</span>
+            {sigData && <span className="chip text-[9.5px]">{sigData.demo === false ? "LIVE" : "SIMULATED"}</span>}
             <Link href="/signals" className="link text-[10.5px]">all signals →</Link>
           </div>
           <div className="overflow-y-auto min-h-0 max-h-[560px]">
@@ -248,6 +257,10 @@ export default function Dashboard() {
         <div className="panel">
           <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
             <span className="panel-title">Net Whale Flow · all tracked · 72h</span>
+            {/* "All tracked" here means the simulated wallet universe: the flow
+                series has no live path yet, and the chart must not borrow the
+                credibility of the live panels around it (H5). */}
+            {flowData?.demo !== false && <span className="chip text-[9.5px]">SIMULATED</span>}
             <Link href="/flow" className="link text-[10.5px]">money flow →</Link>
           </div>
           <div className="px-2 pb-2">

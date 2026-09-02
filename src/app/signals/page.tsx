@@ -9,6 +9,33 @@ import type { AccuracyStats } from "@/lib/engine/signals";
 
 type SignalWithMeta = Signal & { symbol: string; name: string; hue: number };
 
+/** What `/api/signals` says about where the feed came from this pass. */
+type SignalsMeta = {
+  demo?: boolean;
+  provenance?: { source: string; real: boolean; note?: string };
+  live?: {
+    pass: { at: number; source: string; seq: number; mints: number };
+    stats: { fresh: number; updated: number; expired: number };
+    cadence: { medianMs: number | null; samples: number; lastGapMs: number | null };
+    corpus: number;
+    note: string;
+  };
+};
+
+/**
+ * `/api/accuracy` refuses to grade the live feed — there is no synthetic
+ * history to grade it against — so on the live path `stats` is null and
+ * `measuredOn` points at the Track Record page, which grades real scores
+ * against real later prices. The strip must render that pointer, not
+ * reach into the null (the crash the first smoke test of this build found).
+ */
+type AccuracyAnswer = {
+  stats: AccuracyStats | null;
+  demo?: boolean;
+  note?: string;
+  measuredOn?: { href: string; label: string; note: string };
+};
+
 const PROFILES: { id: StrategyProfileId; label: string }[] = [
   { id: "balanced", label: "Balanced" },
   { id: "conservative", label: "Conservative" },
@@ -26,8 +53,8 @@ type Board = "best" | "early" | "smart" | "whale" | "warnings" | "no_trade";
 export default function SignalTerminal() {
   const [profile, setProfile] = useState<StrategyProfileId>("balanced");
   const [board, setBoard] = useState<Board>("best");
-  const { data, error } = useApi<{ signals: SignalWithMeta[]; asOf: number }>(`/api/signals?profile=${profile}`, 30_000);
-  const { data: acc } = useApi<{ stats: AccuracyStats }>(`/api/accuracy?profile=${profile}`);
+  const { data, error } = useApi<{ signals: SignalWithMeta[]; asOf: number } & SignalsMeta>(`/api/signals?profile=${profile}`, 30_000);
+  const { data: acc } = useApi<AccuracyAnswer>(`/api/accuracy?profile=${profile}`);
 
   const list = useMemo(() => {
     const all = data?.signals ?? [];
@@ -74,8 +101,36 @@ export default function SignalTerminal() {
         </div>
       </div>
 
-      {/* honest accuracy strip */}
-      {acc && (
+      {/* where this pass came from — the same claim /status makes, on the page itself */}
+      {data && data.demo === false && data.live && (
+        <div className="panel px-4 py-2 flex items-center gap-4 text-[11.5px] flex-wrap">
+          <span className="chip chip-accent">LIVE · {data.provenance?.source ?? data.live.pass.source}</span>
+          <span className="dim leading-snug">{data.live.note}</span>
+          <span className="num faint">
+            {data.live.cadence.medianMs !== null && data.live.cadence.samples >= 2
+              ? `refresh ~${Math.round(data.live.cadence.medianMs / 1000)}s measured over ${data.live.cadence.samples} gaps`
+              : `pass ${data.live.pass.seq} — cadence not yet measured`}
+            {" · "}
+            {data.live.stats.fresh} new · {data.live.stats.updated} carried · {data.live.stats.expired} expired
+          </span>
+        </div>
+      )}
+      {data && data.demo === true && (
+        <div className="panel px-4 py-2 flex items-center gap-4 text-[11.5px] flex-wrap">
+          <span className="chip">SIMULATED</span>
+          <span className="dim leading-snug">{data.provenance?.note ?? "the deterministic simulator — no live token source answered"}</span>
+        </div>
+      )}
+
+      {/* honest accuracy strip: measured numbers, or an honest pointer — never a fabricated history */}
+      {acc && !acc.stats && acc.measuredOn && (
+        <div className="panel px-4 py-2 flex items-center gap-4 text-[11.5px] flex-wrap">
+          <span className="panel-title">Measured performance</span>
+          <span className="dim leading-snug">{acc.measuredOn.note}</span>
+          <Link href={acc.measuredOn.href} className="chip cursor-pointer">{acc.measuredOn.label} →</Link>
+        </div>
+      )}
+      {acc && acc.stats && (
         <div className="panel px-4 py-2 flex items-center gap-6 num text-[11.5px] flex-wrap">
           <span className="panel-title">Measured performance · last {acc.stats.windowDays}d · {profile}</span>
           <span><span className="dim">actionable signals</span> {acc.stats.samples}</span>

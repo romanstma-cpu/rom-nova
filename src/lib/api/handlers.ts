@@ -22,6 +22,7 @@ import { DEMO, LIVE_LIST_LIMIT, candlesFor, listCacheAge, measuredInterval, tren
 import type { ChartInterval } from "../providers/jupiter-chart";
 import { liveTokenDetail } from "./detail";
 import { lastLivePass, liveSignalsFor, liveTrackFor, resolveLiveMint } from "../live/signals";
+import { isRecording, recordFills } from "../ledger/store";
 import { noteOutcome } from "../providers/health-log";
 import { isPlausibleAddress } from "../providers/wallet-chain";
 import { resolveRpcRoute } from "../providers/rpc-endpoint";
@@ -476,6 +477,14 @@ export async function handleWalletProfile(address: string, stage: "balances" | "
       503,
       "Solana could not be reached to read this wallet. The public RPC may be rate-limiting; try again shortly.",
     );
+  }
+  // A recorded wallet's fills join its ledger here, on the one path every
+  // reader of a wallet goes through — the page, the alert monitor, a nudge —
+  // so nothing has to remember to record. `builtAt` dates the read: this
+  // path caches for 45 seconds, and a merge stamped with the response clock
+  // would extend the covered window past what the chain was actually asked.
+  if (stage === "full" && isRecording(address)) {
+    recordFills(address, sourced.data.fills, sourced.data.coverage, sourced.builtAt ?? Date.now());
   }
   // `builtAt` travels so a consumer can date the READING rather than the
   // response: this path is cached for 45 seconds, and anything that stamps its

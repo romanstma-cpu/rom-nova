@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Hint } from "@/components/ui/Hint";
 import Link from "next/link";
 import { apiGet, fmtUsd, fmtNum } from "@/lib/client";
 import { TokenMark, Empty } from "@/components/ui/bits";
@@ -777,7 +778,7 @@ export default function LaunchesPage() {
         </div>
       )}
 
-      <div className="hint px-1 pb-1">
+      <Hint id="launches" className="px-1 pb-1">
         New mints and new pools on Solana, triaged as they arrive. <b>Nothing here is ranked or
         scored</b> — a token seconds old has no momentum to rank it by, so each row is a set of checks
         that either ran or did not, and the verdict says which. The best verdict available is{" "}
@@ -797,7 +798,7 @@ export default function LaunchesPage() {
           <b> Curve</b> is how far a launchpad mint has climbed toward graduating; it reads{" "}
           <i>n/a</i> once there is no curve left and a dash when nobody published one.
         </span>
-      </div>
+      </Hint>
 
       <div className="panel overflow-auto flex-1 min-h-0">
         <table className="w-full text-[12px] min-w-[1040px]">

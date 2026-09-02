@@ -15,6 +15,7 @@
 // looking like the product.
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { Hint } from "@/components/ui/Hint";
 import Link from "next/link";
 import { useApi, apiPost, fmtAgo } from "@/lib/client";
 import { Empty } from "@/components/ui/bits";
@@ -497,14 +498,14 @@ export default function AlertsPage() {
       {/* The boundary, stated where the rules live rather than in a footnote.
           This paragraph is the difference between this page and the products
           it is judged against. */}
-      <div className="hint px-1">
+      <Hint id="alerts" className="px-1">
         <b>These alerts run in your browser, not on a server.</b> Cielo and Photon evaluate rules in
         their datacenters around the clock; Nova has no backend, so rules are evaluated by this tab, from
         the same rate-gated live feeds the rest of the app polls, only while a Nova tab is open. Close the
         browser and nothing is watching — and rather than pretend otherwise, every rule below shows when
         it was last evaluated, the cadence it actually achieved, and any window nobody was watching. A
         rule that could not be evaluated says <b>NOT EVALUATED</b>, never &ldquo;no alert&rdquo;.
-      </div>
+      </Hint>
 
       <div className="panel p-3 flex flex-col gap-2">
         <div className="flex items-center gap-3 flex-wrap">

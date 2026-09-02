@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useApi, useEventStream, fmtUsd, fmtPct, fmtNum, fmtAge, whaleFlowCell } from "@/lib/client";
+import { useApi, useEventStream, fmtUsd, fmtPct, fmtAge, whaleFlowCell } from "@/lib/client";
 import { Score, Skel, SkeletonRows, Stat, TokenMark } from "@/components/ui/bits";
 import { FirstRun } from "@/components/FirstRun";
 import { ActivityFeed } from "@/components/feed/ActivityFeed";
@@ -72,7 +72,7 @@ export default function Dashboard() {
       <FirstRun />
 
       {/* KPI strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {ref ? (
           <Stat label="SOL · live ref" sub={ref.change24hPct !== null ? fmtPct(ref.change24hPct) + " 24h" : "cross-checked"}>
             <span className="text-[var(--accent)]">{fmtUsd(ref.priceUsd)}</span>
@@ -82,17 +82,14 @@ export default function Dashboard() {
             {m ? fmtUsd(m.solPriceUsd) : "—"}
           </Stat>
         )}
-        <Stat label="Regime" sub={m ? `${(m.regimeConfidence * 100).toFixed(0)}% confidence` : undefined}>
-          <span className="text-[13px] tracking-wide uppercase">{m ? m.regime.replace(/_/g, " ") : "—"}</span>
-        </Stat>
-        <Stat label="Meme Momentum" sub="breadth × magnitude">
-          {m ? `${m.memeMomentumIndex}/100` : "—"}
-        </Stat>
-        <Stat label="Smart $ Flow 24h" sub="tracked high-score wallets">
-          <span className={m && m.netSmartMoneyFlowUsd >= 0 ? "pos" : "neg"}>{m ? fmtUsd(m.netSmartMoneyFlowUsd) : "—"}</span>
-        </Stat>
-        <Stat label="Active Whales 24h" sub="tracked universe">
-          {m ? m.activeWhales24h : "—"}
+        {/* Seven tiles was the review's "wall of numbers", and four of them
+            were the simulator's — regime, meme momentum, smart-money flow,
+            active whales — sitting unlabelled beside a live SOL price. One
+            tile now carries the simulated market, says so, and links to it. */}
+        <Stat label="Simulated market" sub={m ? `${m.regime.replace(/_/g, " ")} · meme ${m.memeMomentumIndex}/100 · SIMULATED` : "SIMULATED"}>
+          <Link href="/flow" className="text-[13px] tracking-wide uppercase link">
+            {m ? `${m.activeWhales24h} sim whales` : "—"}
+          </Link>
         </Stat>
         {/* The review found this counter reading simulator signals while the
             Momentum Leaders table beside it showed live scores the counter
@@ -104,9 +101,6 @@ export default function Dashboard() {
           sub={sigData ? (sigData.demo === false ? "score ≥ 64 · live trending list" : "score ≥ 64 · SIMULATED") : "score ≥ 64, not NO TRADE"}
         >
           <span className="text-[var(--accent)]">{sigData ? highConviction : "—"}</span>
-        </Stat>
-        <Stat label="Slot" sub="synthetic chain clock">
-          {m ? fmtNum(m.slot) : "—"}
         </Stat>
       </div>
 

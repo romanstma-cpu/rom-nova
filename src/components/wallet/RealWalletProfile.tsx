@@ -19,6 +19,7 @@ import { fmtUsd, fmtAgo, shortAddr } from "@/lib/client";
 import { Stat, Empty } from "@/components/ui/bits";
 import type { WalletFill, WalletHolding, WalletProfile } from "@/lib/types";
 import { movementLabel } from "@/lib/engine/fill-label";
+import { LedgerPanel } from "./LedgerPanel";
 
 /** A measured value, or an explicit statement that nobody measured it. */
 function Measured({
@@ -307,9 +308,8 @@ const UNMEASURED_COPY: Record<string, string> = {
     "lifetime PnL — the only endpoint that still serves transactions older than ~2 days allows ten of " +
     "them per minute, so the fills here are a recent window however old the wallet is",
   reputation:
-    "wallet reputation — nothing keyless publishes one. Entity labels are not available either: " +
-    "Solscan's account API needs a key, and the one free source returns .sol domains that anyone can " +
-    "point at anyone's address",
+    "wallet reputation — nothing keyless publishes one, so this app builds its own: switch RECORD on " +
+    "below and every read of this wallet is kept, until there is enough history to judge it",
   costBasis: "cost basis on some positions — acquired outside the window or without an observable price",
   realizedPnl: "part of realized PnL — some sells had no observed buy and are excluded rather than counted as profit",
   // Not "no quote leg": an LP deposit reaches this state BECAUSE the quote leg
@@ -393,6 +393,8 @@ export function RealWalletProfile({ p }: { p: WalletProfile }) {
       </div>
 
       <CoverageStrip p={p} />
+
+      <LedgerPanel address={p.address} profile={p} />
 
       {reading && (
         <div className="panel px-4 py-2.5 text-[12px]">

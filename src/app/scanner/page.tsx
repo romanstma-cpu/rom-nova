@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Hint } from "@/components/ui/Hint";
 import Link from "next/link";
 import { apiGet, useEventStream, fmtUsd, fmtPct, fmtAge, whaleFlowCell, absent, type StreamEvent } from "@/lib/client";
 import { Score, SkeletonRows, TokenMark, Empty } from "@/components/ui/bits";
@@ -248,7 +249,7 @@ export default function ScannerPage() {
           feature vector, so the scorer could not read them even in principle.
           They are now, along with the LP lock and the permanent delegate, and
           a token whose authorities are LIVE cannot carry a positive label. */}
-      <div className="hint px-1 pb-1">
+      <Hint id="scanner" className="px-1 pb-1">
         Ranked by the signal score, which weighs liquidity, buy/sell imbalance, momentum, holder
         concentration and growth, organic activity, token age, observed wallet flow, and the
         security facts: mint and freeze authority, any permanent delegate, and how much of the
@@ -264,7 +265,7 @@ export default function ScannerPage() {
         low confidence is a thinner claim than a 45 at high. <b>Risk</b> is a third-party grade where
         higher is worse — the inverse of Signal, and somebody else&rsquo;s opinion rather than
         Nova&rsquo;s.
-      </div>
+      </Hint>
 
       <div className="panel overflow-auto flex-1 min-h-0">
         <table className="w-full text-[12px] min-w-[1000px]">

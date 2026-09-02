@@ -37,6 +37,7 @@ import type {
   UnmeasuredField,
 } from "../types";
 import { riskHeadline } from "../providers/rugcheck";
+import { reputationOf } from "../ledger/store";
 import type {
   MarketDataProvider,
   SecurityDataProvider,
@@ -137,9 +138,10 @@ const NEVER_AVAILABLE: readonly UnmeasuredField[] = [
   // saying so is the difference between an honest gap and a dead code path
   // that silently halved the dev risk factor on every real token.
   "devSold",
-  // A flow provider says WHO moved; nothing here says whether they are any
-  // good. Wallet reputation needs a track record no source in this stack
-  // publishes, so smart money stays unmeasured even when whale flow is real.
+  // A flow provider says WHO moved; no SOURCE says whether they are any good.
+  // The app's own ledger can — a wallet recorded for long enough carries a
+  // measured reputation — so this is the default, removed below for a token
+  // whose movers include at least one wallet the ledger has judged.
   "smartMoney",
 ];
 
@@ -501,6 +503,15 @@ export async function liveFeatures(
   let whaleNetFlowUsd = 0;
   let whaleBuys = 0;
   let whaleSells = 0;
+  // Smart money, from the ledger and nowhere else. A mover whose wallet the
+  // visitor has recorded long enough to be judged contributes its flow here;
+  // one the ledger has never seen contributes nothing and is counted as
+  // unknown. Measured only when at least one mover is known — knowing one
+  // wallet of forty is thin, and the provenance line says exactly how thin,
+  // but it is a measurement, where the old zero was a placeholder.
+  let smartMoneyNetFlowUsd = 0;
+  let smartMoneyWallets = 0;
+  let knownMovers = 0;
   let flowDetail: TokenFlow | undefined;
   if (sources.flow) {
     // topMovers is asked for generously because whale detection happens HERE,
@@ -516,10 +527,30 @@ export async function liveFeatures(
       const decimals = info.decimals ?? 9;
       for (const mover of f.largest) {
         const usd = (Number(mover.deltaUnits) / 10 ** decimals) * price;
+        const rep = reputationOf(mover.owner);
+        if (rep?.verdict === "measured") {
+          knownMovers++;
+          if (rep.smart) {
+            smartMoneyNetFlowUsd += usd;
+            smartMoneyWallets++;
+          }
+        }
         if (Math.abs(usd) < WHALE_USD) continue;
         whaleNetFlowUsd += usd;
         if (usd > 0) whaleBuys++;
         else whaleSells++;
+      }
+      if (knownMovers > 0) {
+        unmeasured.delete("smartMoney");
+        provenance.push(
+          `ledger: ${knownMovers} of ${f.largest.length} movers carry a measured reputation; ` +
+            `${smartMoneyWallets} rated smart money, net $${Math.round(smartMoneyNetFlowUsd).toLocaleString()}`,
+        );
+      } else {
+        provenance.push(
+          `ledger: none of the ${f.largest.length} movers is a recorded wallet with a measured reputation — ` +
+            `smart money stays unmeasured (record a wallet on its page to change that)`,
+        );
       }
       // A window with movement but no WHALE is not evidence about whales.
       //
@@ -565,10 +596,10 @@ export async function liveFeatures(
 
   const features: FeatureVector = {
     asOf: now,
-    // Smart money needs wallet reputation no source here has. Still zero, and
-    // still an absence rather than a finding.
-    smartMoneyNetFlowUsd: 0,
-    smartMoneyWallets: 0,
+    // Zero here is a placeholder while "smartMoney" is in `unmeasured`, and a
+    // measurement once the ledger knew at least one mover — the set says which.
+    smartMoneyNetFlowUsd,
+    smartMoneyWallets,
     mint,
     whaleNetFlowUsd,
     whaleBuys,

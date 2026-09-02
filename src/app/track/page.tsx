@@ -9,6 +9,7 @@
 // the headline cannot be encouraging while the table underneath is empty.
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { Hint } from "@/components/ui/Hint";
 import { HORIZONS, MIN_PASSES, trackReport, type TrackReport } from "@/lib/engine/track-record";
 import {
   clearLedger,
@@ -213,14 +214,14 @@ export default function TrackPage() {
         ))
       )}
 
-      <div className="hint px-1 pb-2">
+      <Hint id="track" className="px-1 pb-2">
         ✳ marks a band whose lift interval excludes zero. That is a measured separation over{" "}
         <i>this sample and this period</i>, not a guarantee and not evidence it will hold. Horizons are{" "}
         {HORIZONS.map((h) => h.label).join(", ")}; an observation resolves only against a price taken
         inside its window, and expires unresolved if the terminal was closed when that window passed.
         Nothing on this page is advice, and no arrangement of these numbers makes a memecoin a good
         idea.
-      </div>
+      </Hint>
     </div>
   );
 }

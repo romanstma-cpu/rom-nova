@@ -67,6 +67,7 @@ import {
 import { deliverNotification } from "@/lib/alerts/notify";
 import { due, lastAttemptAt, noteAttempt, subscribeNudges } from "@/lib/alerts/cadence";
 import { setWatched } from "@/lib/live/rpc-ws";
+import { recordedWallets } from "@/lib/ledger/store";
 
 interface DetailResp {
   snapshot?: { priceUsd: number; liquidityUsd: number; ts?: number; unmeasured?: readonly string[] };
@@ -466,8 +467,14 @@ export function AlertMonitor() {
       // paused one holds nothing, so one browser holds each account once.
       // The socket never evaluates; a notification only makes a key due now.
       const watching = leader && !paused;
+      // Recorded wallets ride the same cadence and the same socket as rule
+      // wallets: a read is a read, and the ledger takes its fills on the way
+      // through the profile handler whether or not a rule was waiting.
+      const recorded = recordedWallets();
       setWatched("alerts", {
-        wallets: watching ? enabled.filter((r) => r.condition.kind === "wallet_fills").map((r) => (r.condition as { wallet: string }).wallet) : [],
+        wallets: watching
+          ? [...new Set([...enabled.filter((r) => r.condition.kind === "wallet_fills").map((r) => (r.condition as { wallet: string }).wallet), ...recorded])]
+          : [],
         mints: watching
           ? enabled
               .filter((r) => r.condition.kind === "price_cross" || r.condition.kind === "liquidity_floor")
@@ -475,7 +482,7 @@ export function AlertMonitor() {
           : [],
       });
 
-      if (leader && !paused && enabled.length > 0) {
+      if (leader && !paused && (enabled.length > 0 || recorded.length > 0)) {
         const jobs: Promise<void>[] = [];
 
         const scannerRules = enabled.filter((r) => r.condition.kind === "signal_band");
@@ -514,6 +521,9 @@ export function AlertMonitor() {
             byWallet.set(r.condition.wallet, list);
           }
         }
+        // A recorded wallet with no rule is read with an empty rule list:
+        // nothing evaluates, nothing fires, the ledger grows.
+        for (const w of recorded) if (!byWallet.has(w)) byWallet.set(w, []);
         const dueWallets = [...byWallet.keys()]
           .filter((w) => due(`wallet:${w}`, WALLET_EVERY_MS, now))
           .sort((a, b) => lastAttemptAt(`wallet:${a}`) - lastAttemptAt(`wallet:${b}`))

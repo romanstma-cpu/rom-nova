@@ -6,6 +6,8 @@ import { Empty, Stat } from "@/components/ui/bits";
 import { describeSocket, socketsSnapshot, socketsSnapshotServer, subscribeSockets, ACK_TIMEOUT_MS } from "@/lib/live/socket";
 import { CURVE_CAP, PROGRAM_WIDE_RATES, RATES_MEASURED_ON, rpcPlan, SUBSCRIPTION_CAP } from "@/lib/live/rpc-ws";
 import { nudgeStats } from "@/lib/alerts/cadence";
+import { ledgerSnapshot, ledgerSnapshotServer, subscribeLedger, FILL_CAP, WALLET_CAP } from "@/lib/ledger/store";
+import { MIN_OBSERVED_DAYS, MIN_ROUND_TRIPS } from "@/lib/ledger/reputation";
 import type { ProviderHealth } from "@/lib/types";
 
 /** Ticking clock so a socket's last-frame age counts without a re-fetch. */
@@ -124,6 +126,78 @@ function LiveSockets() {
           : " (none triggered yet this session)"}
         . Frame times are this machine&apos;s clock, uncorrected.
       </div>
+    </div>
+  );
+}
+
+/**
+ * The wallet ledger: what this browser has recorded, and how far each wallet
+ * is from a verdict. Read from the store directly, like the sockets — it
+ * lives in this tab's IndexedDB and the server has no copy.
+ */
+function WalletLedger() {
+  const now = useNow();
+  const snap = useSyncExternalStore(subscribeLedger, ledgerSnapshot, ledgerSnapshotServer);
+  const days = (d: number) => (d < 1 ? `${(d * 24).toFixed(1)}h` : `${d.toFixed(1)}d`);
+  return (
+    <div className="panel">
+      <div className="panel-title px-3 pt-2.5 pb-1 flex items-baseline gap-2">
+        <span>Wallet ledger</span>
+        <span className="faint text-[10px] normal-case tracking-normal">
+          fills kept across reads for wallets marked RECORD — the app&apos;s own reputation source, stored in this browser (
+          {snap.backend}), {snap.wallets.filter((w) => w.recording).length}/{WALLET_CAP} recording, {snap.totalFills} fills, cap{" "}
+          {FILL_CAP} per wallet
+        </span>
+      </div>
+      {!snap.loaded ? (
+        <div className="px-3 py-3 text-[11.5px] dim">reading the ledger…</div>
+      ) : snap.wallets.length === 0 ? (
+        <div className="px-3 py-3 text-[11.5px] dim">
+          Nothing recorded yet. Open any real wallet and press RECORD THIS WALLET; the alert monitor then re-reads it every few
+          minutes while the app is open, and after {MIN_ROUND_TRIPS} closed round trips over {MIN_OBSERVED_DAYS} observed days it
+          carries a measured reputation the token scorer reads as smart money.
+        </div>
+      ) : (
+        <table className="w-full text-[12px]">
+          <thead className="thead">
+            <tr>
+              <th className="text-left px-3 py-1.5 font-medium">Wallet</th>
+              <th className="text-left px-2 font-medium">State</th>
+              <th className="text-right px-2 font-medium">Fills</th>
+              <th className="text-right px-2 font-medium" title="days actually covered by reads / days from first read to last">Observed / span</th>
+              <th className="text-right px-2 font-medium">Round trips</th>
+              <th className="text-left px-2 font-medium">Verdict</th>
+              <th className="text-right px-3 font-medium">Last read</th>
+            </tr>
+          </thead>
+          <tbody className="num">
+            {snap.wallets.map((w) => (
+              <tr key={w.address} className="trow">
+                <td className="px-3 py-2">
+                  <a href={`/whale?a=${w.address}`} className="link">{w.address.slice(0, 4)}…{w.address.slice(-4)}</a>
+                </td>
+                <td className={`px-2 ${w.recording ? "pos" : "faint"}`}>{w.recording ? "● recording" : "○ paused"}</td>
+                <td className="text-right px-2">{w.fills}</td>
+                <td className="text-right px-2 dim">
+                  {days(w.reputation.observedDays)} / {days(w.reputation.spanDays)}
+                  {w.reputation.gaps.count > 0 && <span className="warn"> · {w.reputation.gaps.count} gap{w.reputation.gaps.count === 1 ? "" : "s"}</span>}
+                </td>
+                <td className="text-right px-2">{w.reputation.roundTrips}</td>
+                <td className="px-2" style={{ fontFamily: "var(--font-sans)" }}>
+                  {w.reputation.verdict === "measured" ? (
+                    <span className={w.reputation.smart ? "pos" : ""}>
+                      grade {w.reputation.grade} · {w.reputation.score}/100{w.reputation.smart ? " · smart money" : ""}
+                    </span>
+                  ) : (
+                    <span className="dim">insufficient — needs {w.reputation.needs.join(", ")}</span>
+                  )}
+                </td>
+                <td className="text-right px-3 dim">{w.lastReadAt ? fmtAgo(w.lastReadAt, now) : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
@@ -278,6 +352,7 @@ export default function StatusPage() {
       </div>
 
       <LiveSockets />
+      <WalletLedger />
 
       <div className="panel p-3.5 text-[11.5px] dim leading-relaxed">
         <span className="panel-title block mb-1.5">Fallback chains</span>

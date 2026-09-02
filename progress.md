@@ -255,6 +255,52 @@ Both halves are now true, shipped, and verifiable by anyone: open
 and the push chip counts frames as pump.fun mints them; open /status and
 every socket is connected with a last-frame age or down with a reason.
 
+## "I want to have an edge" → the wallet ledger (2026-09-02, afternoon)
+
+LO: "I want to have an edge." Then: "Pick the very best one and do it,
+combine 2 if necessary." Then, mid-build: "Then fix the app, it's too
+cluttered, full of information and tools, make it more user friendly."
+
+The honest position, stated to him first: no edge can be coded in; one can
+be measured, and the app could not measure the one that matters most.
+Every wallet read is a ~2-day window (the only keyless RPC that lists
+signatures retains that much), nothing accumulated, so "is this wallet any
+good" was answered from 48 hours forever and smart money stayed a
+simulation. Picked: **the always-on recorder + wallet reputation**, one
+feature, because every day it is not shipped is a day of history not
+recorded.
+
+**Built, by hand, no agents (the limit had killed them twice):**
+
+- `src/lib/ledger/store.ts` — every fill the chain reader returns for a
+  wallet marked RECORD, deduped by signature, with the read windows it was
+  gathered over, in the browser's IndexedDB. The alert monitor re-reads
+  recorded wallets on its cadence and socket nudges. Gaps stay gaps. Caps:
+  4,000 fills/wallet, 40 wallets; eviction clips the covered window to the
+  oldest fill kept so no verdict claims evidence it threw away.
+- `src/lib/ledger/reputation.ts` — FIFO replay (the wallet page's own)
+  over recorded trades; transfers/LP/unpriced excluded and counted; sells
+  with no observed buy book nothing. **Refuses a verdict below 10 closed
+  round trips over 7 observed days** and names what is missing. Above:
+  win rate, profit factor, realized P&L, median hold/size, a score whose
+  formula is printed on the page, SMART MONEY at 60+ with positive net.
+- The token scorer reads it: `liveFeatures` asks the ledger about every
+  flow mover; `smartMoney` leaves the unmeasured set only when ≥1 mover is
+  known, and the provenance line says how many of how many. That field had
+  been a placeholder zero on every live token since the scorer was written.
+- Wallet page: Reputation panel + RECORD THIS WALLET; /status: Wallet
+  Ledger block.
+- 15 new tests; 665 total; tsc, build, lint clean.
+
+**The declutter, same commit:** rail 19 links/4 headings → 6 primary
+(Dashboard, Launch Feed, Scanner, Signals, Wallets, Alerts) + "more",
+with the simulated desk grouped under SIMULATED on the rail itself.
+Dashboard 7 KPI tiles → 3 (live SOL, live actionable signals, one
+labelled simulated-market tile). The scanner, launch feed, alerts and
+track-record explainers fold to one line + "how to read this",
+remembered per page — every paragraph was earned by a review finding, so
+they stay one click down rather than disappearing.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

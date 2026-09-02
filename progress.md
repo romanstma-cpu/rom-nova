@@ -179,6 +179,14 @@ ignore for the Electron build output written around 1.3.0 — main had since
 landed the identical change under another hash, so it was superseded and
 went too. The worktree list is back to main plus the two builders.
 
+**LO, 2026-09-02: "stop critics just work on live."** So this build skips
+the blind-critic loop. When both branches land: merge to main, the three
+gates, ship 1.8.0, prove it on the site and in the installed app. B1 is
+already moving — `0efa5b6` closed M2 by putting the flow window ON the
+feature vector (`flowWindowMs`: 6h from the simulator, the slice of chain
+actually read on live data, absent when nobody read), so the invalidation
+copy and the snapshot caption read the same field and cannot drift again.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

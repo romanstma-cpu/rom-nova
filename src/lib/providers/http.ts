@@ -64,6 +64,31 @@ export async function providerFetch<T>(
 }
 
 /**
+ * Record one call an adapter made WITHOUT `providerFetch`.
+ *
+ * Three adapters could not use it: SQD streams NDJSON and reads the body
+ * itself, the chain reader needs its own abort signal and must see a 429 as a
+ * cooldown rather than an error, and the holdings reader keys its rows under
+ * a different vendor endpoint. All three used raw `fetch`, so nothing was
+ * ever written under their /status keys and the table said "not asked yet"
+ * forever about providers that had just served a page. This is the same
+ * bookkeeping `providerFetch` does, exposed for the adapters that have to
+ * hold the request themselves.
+ */
+export function noteProviderCall(provider: string, ok: boolean, latencyMs: number): void {
+  const s = state(provider);
+  s.requests++;
+  s.latencies.push(Math.max(0, Math.round(latencyMs)));
+  if (s.latencies.length > 50) s.latencies.shift();
+  if (ok) {
+    s.lastSuccessTs = Date.now();
+    s.lastDataTs = Date.now();
+  } else {
+    s.errors++;
+  }
+}
+
+/**
  * A provider's health, or an honest admission that nothing has been asked of it.
  *
  * `requests === 0` used to produce `● ok / 0ms / 0% errors` — a clean bill of

@@ -49,7 +49,93 @@ import {
   subscribeMonitor,
 } from "@/lib/alerts/store";
 import { notifyState, notifyStateServer, requestNotifyPermission, subscribeNotify } from "@/lib/alerts/notify";
+import { nudgeStats } from "@/lib/alerts/cadence";
+import { describeSocket, socketsSnapshot, socketsSnapshotServer, subscribeSockets, ACK_TIMEOUT_MS, type SocketSnapshot } from "@/lib/live/socket";
+import { RPC_WS_NAME, rpcPlan, SUBSCRIPTION_CAP } from "@/lib/live/rpc-ws";
 import type { AlertEvent, AlertRule } from "@/lib/types";
+
+/**
+ * Whether a rule's source gets re-read the moment the chain mentions its
+ * account, and if not, why not — from the socket's own state, never from the
+ * fact that a subscription was requested.
+ *
+ * ON means: socket open, `logsSubscribe` on this address ACKNOWLEDGED. Every
+ * other combination is OFF with its reason, and OFF always says what the
+ * rule falls back to, because the fallback is the honest baseline: the
+ * polled cadence the rule already had. Exported for the regression test.
+ */
+export function instantReadState(
+  condition: LiveAlertCondition,
+  rpc: SocketSnapshot | undefined,
+  now: number,
+): { on: boolean; label: string; detail: string } | null {
+  const address =
+    condition.kind === "wallet_fills"
+      ? condition.wallet
+      : condition.kind === "price_cross" || condition.kind === "liquidity_floor"
+        ? condition.mint
+        : null;
+  if (address === null) {
+    if (condition.kind === "launch" || condition.kind === "graduation") {
+      const curves = rpc?.subscriptions.filter((s) => s.key.startsWith("account:") && s.state === "subscribed").length ?? 0;
+      return rpc?.state === "open" && curves > 0
+        ? {
+            on: true,
+            label: `curve watch: ${curves} on`,
+            detail: `${curves} bonding-curve account${curves === 1 ? "" : "s"} subscribed on the launch feed's behalf; a change makes the launch pass re-read now instead of at its ~10s cadence. The poll confirms any graduation.`,
+          }
+        : {
+            on: false,
+            label: "curve watch: off",
+            detail: "No bonding-curve account is subscribed — the launch feed page holds those while it is open. This rule runs on the launch pass's ~10s cadence.",
+          };
+    }
+    return null;
+  }
+  const cadence = condition.kind === "wallet_fills" ? `~${Math.round(WALLET_EVERY_MS / 60_000)}m` : `~${Math.round(DETAIL_EVERY_MS / 1000)}s`;
+  const fallback = `This rule is evaluated on its ${cadence} poll cadence regardless; the socket only ever moves a read forward.`;
+  const sub = rpc?.subscriptions.find((s) => s.key === `logs:${address}`);
+  if (!rpc || rpc.state !== "open") {
+    return {
+      on: false,
+      label: "instant re-read: off",
+      detail: `The chain socket is ${describeSocket(rpc, now).label}. ${fallback}`,
+    };
+  }
+  if (!sub) {
+    const plan = rpcPlan();
+    const over = plan.droppedWallets + plan.droppedMints > 0;
+    return {
+      on: false,
+      label: "instant re-read: off",
+      detail:
+        (over
+          ? `Not subscribed: ${plan.droppedWallets + plan.droppedMints} rule account${plan.droppedWallets + plan.droppedMints === 1 ? "" : "s"} fell over the ${SUBSCRIPTION_CAP}-subscription cap. `
+          : "Not subscribed yet — the monitor's next tick requests it. ") + fallback,
+    };
+  }
+  switch (sub.state) {
+    case "subscribed":
+      return {
+        on: true,
+        label: "instant re-read: on",
+        detail:
+          `logsSubscribe on ${address.slice(0, 4)}…${address.slice(-4)} acknowledged${sub.ackedAt ? ` ${fmtAgo(sub.ackedAt, now)}` : ""}` +
+          `${sub.messages ? `, ${sub.messages} notification${sub.messages === 1 ? "" : "s"} so far` : ""}. A transaction mentioning it makes the monitor ` +
+          `re-read this source within a second instead of at ${cadence}. The notification itself asserts nothing; the read does.`,
+      };
+    case "sent":
+      return { on: false, label: "instant re-read: pending", detail: `Subscribe request sent, no acknowledgement yet (${ACK_TIMEOUT_MS / 1000}s allowed). ${fallback}` };
+    case "unacked":
+      return {
+        on: false,
+        label: "instant re-read: OFF — no ack",
+        detail: `The subscribe request drew no acknowledgement in ${ACK_TIMEOUT_MS / 1000}s, which counts as NOT subscribed. It is re-sent on the next reconnect. ${fallback}`,
+      };
+    default:
+      return { on: false, label: "instant re-read: off", detail: `Subscription registered but the socket is not open. ${fallback}` };
+  }
+}
 
 /** Ticking clock so "evaluated 12s ago" counts without refetching. */
 function useNow(ms = 1000): number {
@@ -330,6 +416,9 @@ export default function AlertsPage() {
   // prerender has no Notification object, and the value changes exactly when
   // the permission prompt resolves.
   const notif = useSyncExternalStore(subscribeNotify, notifyState, notifyStateServer);
+  const sockets = useSyncExternalStore(subscribeSockets, socketsSnapshot, socketsSnapshotServer);
+  const rpc = sockets.find((s) => s.name === RPC_WS_NAME);
+  const nudges = nudgeStats();
   const [showSim, setShowSim] = useState(false);
 
   const unread = blob.events.filter((e) => !e.read).length;
@@ -474,6 +563,28 @@ export default function AlertsPage() {
           </div>
         )}
 
+        {/* The chain socket, in its two states, and what it has done for
+            the rules: how many reads it pulled forward. It never evaluates
+            anything and never fires anything; the per-rule chips below say
+            which rules it is armed for. */}
+        <div className="text-[10.5px] num flex flex-wrap gap-x-4 gap-y-1">
+          <span
+            className={rpc?.state === "open" ? "dim" : "faint"}
+            title={
+              rpc
+                ? `${rpc.url} — ${rpc.subscribed} subscribed, ${rpc.acksPending} awaiting ack, ${rpc.unacked} unacked, ${rpc.reconnects} reconnects. Per-account only, capped at ${SUBSCRIPTION_CAP}.`
+                : "The chain socket opens when a rule names a wallet or a mint and this tab is the evaluating tab."
+            }
+          >
+            {rpc?.state === "open" ? "●" : "○"} chain socket {describeSocket(rpc, now).label}
+            {rpc ? ` · ${rpc.subscribed} acked / ${rpc.subscriptions.length} requested` : ""}
+          </span>
+          <span className="faint" title="Reads the socket moved forward, instead of waiting for the poll cadence. Each is a normal evaluation pass with a normal record.">
+            socket-triggered re-reads this session: {nudges.nudges}
+            {nudges.last ? ` (last ${nudges.last.key} ${fmtAgo(nudges.last.at, now)})` : ""}
+          </span>
+        </div>
+
         {(status.gaps.length > 0 || openGapNow) && (
           <div className="text-[10.5px]">
             <span className="panel-title">coverage gaps this session</span>
@@ -532,6 +643,15 @@ export default function AlertsPage() {
                         armed {fmtAgo(st.armedAt, now)}
                       </span>
                     )}
+                    {r.enabled &&
+                      (() => {
+                        const ir = instantReadState(r.condition, rpc, now);
+                        return ir ? (
+                          <span className={`chip text-[9px] ${ir.on ? "chip-accent" : ""}`} title={ir.detail}>
+                            {ir.label}
+                          </span>
+                        ) : null;
+                      })()}
                   </div>
                 </div>
                 <button

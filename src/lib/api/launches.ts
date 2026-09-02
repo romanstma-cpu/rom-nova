@@ -203,6 +203,26 @@ export interface LaunchFeed {
    */
   windowSeconds: number | null;
   /**
+   * Rows that arrived by SOCKET PUSH this session, and how the push did.
+   *
+   * Its own statistic, on the same rule that keeps mints and graduations
+   * apart: averaging a socket's latency into the poll's would hide both. The
+   * push carries no timestamp, so its lag can only be measured on rows a
+   * polled source later DATED — `pushLagP50Ms` is the median of (receipt time
+   * on this machine's clock) minus (the pool-creation time Jupiter or
+   * GeckoTerminal published), over exactly those rows. Negative is possible
+   * and means this clock runs behind the source's; the page's clock-skew
+   * hint reads the poll minimum, not this one, because the two clocks differ.
+   *
+   * `undated` is how many pushed rows nobody has dated yet. They render an
+   * age since receipt and say so.
+   */
+  pushed: number;
+  undated: number;
+  pushLagP50Ms: number | null;
+  pushLagMinMs: number | null;
+  pushLagSamples: number;
+  /**
    * Launches added on the most recent pass, or null when that pass FAILED.
    *
    * Null rather than 0 for the reason this whole file exists. A failed pass
@@ -275,6 +295,8 @@ interface FeedState {
   lastSuccessAt: number;
   failures: number;
   lastError?: string;
+  /** Creation frames accepted from the push socket this session. */
+  pushed: number;
 }
 
 const state: FeedState = {
@@ -290,7 +312,11 @@ const state: FeedState = {
   sweepStartedAt: 0,
   lastSuccessAt: 0,
   failures: 0,
+  pushed: 0,
 };
+
+/** The push socket's source name, as every pushed row and event carries it. */
+export const PUSH_SOURCE = "pumpportal-ws";
 
 /** In-flight de-duplication, so two polls landing together share one fetch. */
 let inFlight: Promise<void> | null = null;
@@ -310,7 +336,15 @@ export function resetLaunchFeed(): void {
   state.lastSuccessAt = 0;
   state.failures = 0;
   state.lastError = undefined;
+  state.pushed = 0;
   inFlight = null;
+}
+
+/** The earlier of two claims, where either may be absent. */
+function earliest(a: number | undefined, b: number | undefined): number | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return Math.min(a, b);
 }
 
 /**
@@ -334,7 +368,12 @@ export function mergeLaunch(
 ): { added: boolean } {
   const existing = rows.get(obs.mint);
   if (!existing) {
-    rows.set(obs.mint, { ...obs, triage: triageLaunch(obs, risk, risk ? 0 : undefined) });
+    rows.set(obs.mint, {
+      ...obs,
+      // A row that arrives dated was dated by whoever brought it.
+      datedBy: obs.datedBy ?? (obs.poolCreatedAt !== undefined ? obs.source : undefined),
+      triage: triageLaunch(obs, risk, risk ? 0 : undefined),
+    });
     return { added: true };
   }
   // A graduation outranks a plain pool: once a curve has completed, that is
@@ -377,13 +416,23 @@ export function mergeLaunch(
      * So: a graduation row is dated by the graduation, a pool row by the
      * earliest creation claim anyone made, and a plain sighting can never move
      * a graduation's date.
+     *
+     * And a row nobody has dated takes the first date offered. A pushed row
+     * arrives with no creation time at all; the poll that lists it a few
+     * seconds later is what dates it, and `datedBy` records who.
      */
     poolCreatedAt:
       event !== "graduation" || (wasGrad && isGrad)
-        ? Math.min(existing.poolCreatedAt, obs.poolCreatedAt)
+        ? earliest(existing.poolCreatedAt, obs.poolCreatedAt)
         : isGrad
           ? obs.poolCreatedAt
           : existing.poolCreatedAt,
+    datedBy:
+      existing.datedBy ??
+      (existing.poolCreatedAt === undefined && obs.poolCreatedAt !== undefined ? obs.source : undefined),
+    // The curve key only ever comes from the push, and a later listing must
+    // not blank it — it is what the tab subscribes to.
+    curveAccount: obs.curveAccount ?? existing.curveAccount,
     // Spreading `obs` over `existing` overwrites with undefined wherever the
     // newer payload simply does not carry the field — and the primary listing
     // carries neither of these. Losing `graduatedAt` would un-date a graduation
@@ -402,6 +451,74 @@ export function mergeLaunch(
   const completedIn = existing.triage.completedInMs ?? (risk ? now - existing.firstSeenAt : undefined);
   rows.set(obs.mint, { ...merged, triage: triageLaunch(merged, risk, completedIn) });
   return { added: false };
+}
+
+/**
+ * One creation frame from the push socket, as the socket delivered it.
+ *
+ * Captured 2026-09-01 from `wss://pumpportal.fun/api/data` after
+ * `subscribeNewToken`: signature, mint, traderPublicKey, txType "create",
+ * initialBuy, solAmount, bondingCurveKey, vTokensInBondingCurve,
+ * vSolInBondingCurve, marketCapSol, name, symbol, uri, is_mayhem_mode, pool.
+ * No timestamp of any kind.
+ */
+export interface LaunchPush {
+  mint: string;
+  name?: string;
+  symbol?: string;
+  /** The creating wallet — the deployer. */
+  dev?: string;
+  curveAccount?: string;
+  /** The launchpad as the socket names it: "pump", "bonk"… */
+  pool?: string;
+  signature?: string;
+}
+
+/** How the socket's `pool` field is written on the rest of this app's rows. */
+const PUSH_LAUNCHPADS: Record<string, string> = { pump: "pump.fun", bonk: "bonk.fun" };
+
+/**
+ * A pushed creation, into the feed.
+ *
+ * `firstSeenAt` is the receipt time on this machine's clock and nothing else
+ * is dated: there is no `poolCreatedAt` because the frame carries none, and
+ * inventing one from the receipt would make the socket's lag measure itself.
+ * When a polled source later lists the same mint, `mergeLaunch` keeps THIS
+ * sighting time — that is the whole point of the push — and takes the date
+ * from the poll, recording who supplied it.
+ *
+ * `decimals` is pump.fun's fixed six — the program mints every token at six
+ * decimals, and the field is display-only on a launch row. Every other
+ * numeric field the frame could fill is left absent: `marketCapSol` is in SOL
+ * and this module has no SOL price to convert it honestly, and the reserves
+ * are curve state, not liquidity a pool holds.
+ */
+export function observeLaunchPush(push: LaunchPush, receivedAt = Date.now()): { added: boolean } {
+  const launchpad = push.pool ? (PUSH_LAUNCHPADS[push.pool] ?? push.pool) : "pump.fun";
+  const obs: LaunchObservation = {
+    mint: push.mint,
+    name: push.name ?? "",
+    symbol: push.symbol ?? "",
+    hue: jupHue(push.mint),
+    decimals: 6,
+    firstSeenAt: receivedAt,
+    event: "pool",
+    venue: launchpad,
+    launchpad,
+    dev: push.dev,
+    curveAccount: push.curveAccount,
+    mintAuthorityRevoked: false,
+    freezeAuthorityRevoked: false,
+    authorityKnown: false,
+    source: PUSH_SOURCE,
+  };
+  state.pushed++;
+  return mergeLaunch(state.rows, obs, state.riskByMint.get(push.mint), receivedAt);
+}
+
+/** Rows this feed currently holds — for the socket layer to pick curves from. */
+export function currentLaunches(): TokenLaunch[] {
+  return [...state.rows.values()];
 }
 
 /**
@@ -453,7 +570,9 @@ async function primaryPass(jup: JupiterTokenProvider, now: number): Promise<void
   const observed = await jup.getRecentLaunches(now);
   if (observed.length === 0) return;
 
-  const created = observed.map((o) => o.poolCreatedAt).sort((a, b) => a - b);
+  // Every polled row is dated by its source; only pushed rows are not, and
+  // none of those come through here.
+  const created = observed.map((o) => o.poolCreatedAt ?? now).sort((a, b) => a - b);
   state.lastWindowSeconds = (created[created.length - 1] - created[0]) / 1000;
   // The newest row on the first page, not `now`. Anything already visible when
   // the feed opened is backfill, and stamping the clock here excludes exactly
@@ -482,7 +601,10 @@ async function primaryPass(jup: JupiterTokenProvider, now: number): Promise<void
   // spending its budget on launches that have already stopped mattering, and
   // the backfill drains on its own once the arrival rate leaves headroom.
   const ungraded = [...state.rows.values()].filter((r) => !state.riskAsked.has(r.mint));
-  const targets = ungraded.sort((a, b) => b.poolCreatedAt - a.poolCreatedAt).slice(0, RISK_BUDGET_PER_PASS);
+  // Newest by whatever clock the row has: an undated push row is ordered by
+  // its receipt. Ordering is not a claim about creation time, and a pushed
+  // row is by construction the freshest thing in the feed.
+  const targets = ungraded.sort((a, b) => rowClock(b) - rowClock(a)).slice(0, RISK_BUDGET_PER_PASS);
   for (const o of targets) state.riskAsked.add(o.mint);
 
   await pooled(targets, 4, async (o) => {
@@ -573,7 +695,7 @@ async function poolSweep(jup: JupiterTokenProvider, gt: GeckoTerminalTokenProvid
         poolCreatedAt: p.createdAt,
         event: "graduation",
         venue: p.dex,
-        source: "coingecko+jupiter",
+        source: "geckoterminal+jupiter",
         // GeckoTerminal prices the pool it indexed. Jupiter's aggregate can lag
         // a brand-new pool by a poll, so the pool's own figures win here.
         priceUsd: p.priceUsd || enriched.priceUsd,
@@ -601,7 +723,7 @@ async function poolSweep(jup: JupiterTokenProvider, gt: GeckoTerminalTokenProvid
       mintAuthorityRevoked: false,
       freezeAuthorityRevoked: false,
       authorityKnown: false,
-      source: "coingecko",
+      source: "geckoterminal",
     }, undefined, now);
   }
 }
@@ -629,7 +751,7 @@ async function gemsPass(jup: JupiterTokenProvider, now: number): Promise<void> {
   // waited for, and everything at or before it is backfill whose apparent age
   // says when the tab opened.
   if (state.sweepStartedAt === 0 && graduations.length > 0) {
-    state.sweepStartedAt = Math.max(...graduations.map((g) => g.poolCreatedAt));
+    state.sweepStartedAt = Math.max(...graduations.map((g) => g.poolCreatedAt ?? now));
   }
 
   for (const g of graduations) {
@@ -755,6 +877,19 @@ function percentile(sorted: number[], p: number): number | null {
 }
 
 /**
+ * The moment a row is ORDERED by: the source's creation claim where one
+ * exists, the receipt time where none does yet.
+ *
+ * Ordering only. Nothing that renders a time or computes a lag reads this —
+ * those consult `poolCreatedAt` directly and render its absence — because a
+ * receipt time standing in for a creation time is precisely the fabrication
+ * the optional field exists to prevent.
+ */
+function rowClock(l: LaunchObservation): number {
+  return l.poolCreatedAt ?? l.firstSeenAt;
+}
+
+/**
  * The feed, refreshed at most as often as the measured ceiling allows.
  *
  * Returns null when no live token provider is configured. That is deliberately
@@ -773,7 +908,7 @@ export async function launchFeed(): Promise<LaunchFeed | null> {
   }
   await inFlight;
 
-  const launches = [...state.rows.values()].sort((a, b) => b.poolCreatedAt - a.poolCreatedAt);
+  const launches = [...state.rows.values()].sort((a, b) => rowClock(b) - rowClock(a));
   if (launches.length === 0) return null;
 
   // Two pipelines, two baselines, two numbers.
@@ -783,22 +918,40 @@ export async function launchFeed(): Promise<LaunchFeed | null> {
   // Jupiter page's baseline and every one of them fell out of the statistic.
   // The headline then described the fast half of the feed while appearing to
   // describe all of it.
-  const lagOf = (l: TokenLaunch) => l.firstSeenAt - l.poolCreatedAt;
+  /** Rows carrying a source-published creation time. The only rows a lag can be measured on. */
+  type Dated = TokenLaunch & { poolCreatedAt: number };
+  const dated = (l: TokenLaunch): l is Dated => l.poolCreatedAt !== undefined;
+  const lagOf = (l: Dated) => l.firstSeenAt - l.poolCreatedAt;
   // A promoted row — watched as a curve mint, then graduating — keeps its
   // original firstSeenAt while poolCreatedAt is re-dated to the graduation, so
   // measuring it with `lagOf` produced a negative lag the size of the curve's
   // lifetime and fed the clock-skew check a fabricated impossibility. The
   // graduation's own sighting time is the honest sample: how long after the
   // event the feed noticed it.
-  const gradLagOf = (l: TokenLaunch) => (l.gradSeenAt ?? l.firstSeenAt) - l.poolCreatedAt;
-  const pools = launches.filter((l) => l.event === "pool" && l.poolCreatedAt > state.startedAt);
+  const gradLagOf = (l: Dated) => (l.gradSeenAt ?? l.firstSeenAt) - l.poolCreatedAt;
+  // The POLL's lag, over rows the poll saw first. A pushed row that Jupiter
+  // later dates would put the socket's latency into the poll's median and
+  // flatter it — the same averaging this file already refuses between mints
+  // and graduations — so pushed rows are measured on their own, below.
+  const pools = launches.filter(
+    (l): l is Dated => l.event === "pool" && dated(l) && l.source !== PUSH_SOURCE && l.poolCreatedAt > state.startedAt,
+  );
   const grads = launches.filter(
-    (l) => l.event === "graduation" && state.sweepStartedAt > 0 && l.poolCreatedAt > state.sweepStartedAt,
+    (l): l is Dated =>
+      l.event === "graduation" && dated(l) && state.sweepStartedAt > 0 && l.poolCreatedAt > state.sweepStartedAt,
   );
   const lags = pools.map(lagOf).sort((a, b) => a - b);
   const gradLags = grads.map(gradLagOf).sort((a, b) => a - b);
+  // The PUSH's lag: receipt on this clock minus the creation time a poll
+  // later published. Only rows both saw can be measured, and the number
+  // carries the clock offset between this machine and the source.
+  const pushedRows = launches.filter((l) => l.source === PUSH_SOURCE);
+  const pushLags = pushedRows.filter(dated).map(lagOf).sort((a, b) => a - b);
   const now = Date.now();
-  const lastMinute = launches.filter((l) => now - l.poolCreatedAt <= 60_000).length;
+  // Counted by creation time where the source published one, and by receipt
+  // where it has not yet — a pushed row received in the last minute was
+  // created before it was received, so the count can only be an undercount.
+  const lastMinute = launches.filter((l) => now - rowClock(l) <= 60_000).length;
   const stale = state.lastSuccessAt === 0 || now - state.lastSuccessAt > STALE_AFTER_MS;
 
   return {
@@ -811,6 +964,11 @@ export async function launchFeed(): Promise<LaunchFeed | null> {
     gradLagP90Ms: percentile(gradLags, 0.9),
     gradLagSamples: gradLags.length,
     gradLagMinMs: gradLags[0] ?? null,
+    pushed: state.pushed,
+    undated: pushedRows.filter((l) => !dated(l)).length,
+    pushLagP50Ms: percentile(pushLags, 0.5),
+    pushLagMinMs: pushLags[0] ?? null,
+    pushLagSamples: pushLags.length,
     windowSeconds: state.lastWindowSeconds,
     addedLastPass: state.addedLastPass,
     lastSuccessAt: state.lastSuccessAt,
@@ -821,7 +979,7 @@ export async function launchFeed(): Promise<LaunchFeed | null> {
     awaitingTriage: launches.filter((l) => l.triage.completedInMs === undefined).length,
     polledAt: state.lastPrimaryAt,
     provenance: {
-      source: FLAGS.coingecko() ? "jupiter+coingecko" : "jupiter",
+      source: FLAGS.coingecko() ? "jupiter+geckoterminal" : "jupiter",
       real: true,
       // Provenance must say when it stopped being true. A source name with no
       // freshness attached is exactly the "LIVE" label this codebase refuses

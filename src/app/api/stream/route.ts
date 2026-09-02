@@ -18,8 +18,11 @@ export async function GET(req: NextRequest) {
         }
       };
       send({ hello: true, ts: Date.now() });
+      // Server mode has no sockets, so every event down this stream is the
+      // simulator's — stamped as such, the way the static build's bus stamps
+      // its demo half, so the renderers read one field on both paths.
       const unsub = store.onEvent((e) =>
-        send({ ...e, symbol: e.mint ? store.token(e.mint)?.info.symbol : undefined }),
+        send({ ...e, symbol: e.mint ? store.token(e.mint)?.info.symbol : undefined, real: false, source: "demo" }),
       );
       const heartbeat = setInterval(() => send({ heartbeat: Date.now() }), 15_000);
       req.signal.addEventListener("abort", () => {

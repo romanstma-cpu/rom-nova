@@ -1,12 +1,71 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { apiGet, fmtUsd, fmtNum } from "@/lib/client";
 import { TokenMark, Empty } from "@/components/ui/bits";
 import { triageHeadline } from "@/lib/engine/triage";
+import { holdPumpPortal, PUMPPORTAL_NAME } from "@/lib/live/pumpportal";
+import { CURVE_CAP, RPC_WS_NAME, setWatched } from "@/lib/live/rpc-ws";
+import { describeSocket, socketsSnapshot, socketsSnapshotServer, subscribeSockets, type SocketSnapshot } from "@/lib/live/socket";
 import type { LaunchFeed } from "@/lib/api/launches";
 import type { LaunchCheck, TokenLaunch } from "@/lib/types";
+
+/**
+ * The push chip's three honest states, from the socket snapshot alone.
+ *
+ * CONNECTED means the socket is open AND the creation subscription was
+ * acknowledged. Open-but-unacked is not connected for this page's purposes:
+ * the server may not be sending creations at all, and "push: connected"
+ * over a feed the poll is actually carrying is the silent-stale lie this
+ * chip exists to refuse. Exported for the regression test.
+ */
+export function pushChip(
+  s: SocketSnapshot | undefined,
+  pushed: number,
+  now: number,
+): { up: boolean; label: string; cls: string; title: string } {
+  const sub = s?.subscriptions.find((x) => x.key === "newToken");
+  const d = describeSocket(s, now);
+  const receipt =
+    "\n\nPushed rows are stamped with RECEIPT time on this machine's clock, uncorrected — the frame carries no " +
+    "timestamp — and stay undated until a poll lists the mint. Only then is a push lag stateable.";
+  if (d.up && sub?.state === "subscribed") {
+    return {
+      up: true,
+      label: `push: ${d.label} · ${pushed} pushed this session`,
+      cls: "pos",
+      title:
+        `PumpPortal creation stream is open and the subscription was acknowledged ${sub.ackedAt ? `${Math.round((now - sub.ackedAt) / 1000)}s ago` : ""}. ` +
+        `${pushed} creation frame${pushed === 1 ? "" : "s"} accepted into the feed since this tab opened; reconnects ${s?.reconnects ?? 0}. ` +
+        "The 3s poll keeps running beside it — the push adds rows sooner, the poll dates and prices them." +
+        receipt,
+    };
+  }
+  if (d.up) {
+    return {
+      up: false,
+      label: `push: open, ${sub?.state === "unacked" ? "subscribe UNACKED" : "subscribe pending"} — polling`,
+      cls: "warn",
+      title:
+        "The socket is open but the creation subscription has " +
+        (sub?.state === "unacked" ? "not been acknowledged in 10s, which counts as NOT subscribed" : "not been acknowledged yet") +
+        ". Rows come from the 3s poll until it is." +
+        receipt,
+    };
+  }
+  return {
+    up: false,
+    label: `push: ${s ? d.label : "not started"} — polling`,
+    cls: s?.wanted ? "neg" : "faint",
+    title:
+      (s
+        ? `The PumpPortal socket is ${s.state}${s.lastCloseReason ? ` (${s.lastCloseReason})` : ""}${s.nextRetryAt ? `, retrying in ${Math.max(0, Math.round((s.nextRetryAt - now) / 1000))}s with backoff` : ""}.`
+        : "The PumpPortal socket has not been opened.") +
+      ` Rows come from the 3s poll alone until it connects; ${pushed} were pushed earlier this session.` +
+      receipt,
+  };
+}
 
 // New Solana pools and launchpad graduations, triaged as they land.
 //
@@ -144,8 +203,28 @@ const NEAR_GRADUATION = 0.8;
  */
 export function sightingLine(l: TokenLaunch): string {
   const secs = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+  // A pushed row that no poll has listed yet has no creation time at all —
+  // the socket frame carries none — so the only honest sentence is when it
+  // was received, and by whose clock.
+  if (l.poolCreatedAt === undefined) {
+    return (
+      `pushed by ${l.source}, received ${new Date(l.firstSeenAt).toISOString()} on this machine's clock (uncorrected) — ` +
+      "dated by: not yet; no polled source has listed this mint, so no lag can be stated"
+    );
+  }
   if (l.event === "graduation") {
     return `graduation seen ${secs((l.gradSeenAt ?? l.firstSeenAt) - l.poolCreatedAt)} after the source's pool-creation time`;
+  }
+  // Seen by push, dated by a poll: the difference is the socket's lead over
+  // the source's own timestamp, and it can be negative on a clock that runs
+  // behind — which is stated rather than clamped.
+  if (l.datedBy && l.datedBy !== l.source) {
+    const delta = l.firstSeenAt - l.poolCreatedAt;
+    return (
+      `seen by push (${l.source}) ${secs(Math.abs(delta))} ${delta < 0 ? "BEFORE" : "after"} the pool-creation time ` +
+      `${l.datedBy} published — receipt is this machine's clock, uncorrected` +
+      (delta < 0 ? "; a negative reading means this clock runs behind the source's, not that the push beat the chain" : "")
+    );
   }
   return `seen ${secs(l.firstSeenAt - l.poolCreatedAt)} after the source's pool-creation time`;
 }
@@ -299,6 +378,17 @@ export default function LaunchesPage() {
         }
         setFeed(body.feed);
         setArrived(fresh);
+        // The twenty newest rows still on a curve whose curve account is
+        // known — only the push carries it — get an accountSubscribe, so a
+        // graduation is noticed when the account changes and the poll then
+        // confirms it. Diffed inside `setWatched`; asking every poll is free.
+        setWatched("launches", {
+          curves: body.feed.launches
+            .filter((l) => l.event === "pool" && l.curveAccount)
+            .sort((a, b) => b.firstSeenAt - a.firstSeenAt)
+            .slice(0, CURVE_CAP)
+            .map((l) => ({ account: l.curveAccount!, mint: l.mint, symbol: l.symbol || undefined })),
+        });
         if (flashTimer) clearTimeout(flashTimer);
         flashTimer = setTimeout(() => {
           if (!dead) setArrived(new Set());
@@ -318,13 +408,21 @@ export default function LaunchesPage() {
     // every three seconds, indefinitely, on someone's battery — for rows that
     // will have aged out of relevance long before they are looked at.
     let timer: ReturnType<typeof setInterval> | undefined;
+    // The push socket is held on exactly the poll's terms: open while this
+    // page is visible, released when it is hidden or gone. A socket left
+    // open for a tab nobody is reading is the background-battery bug the
+    // poll already fixed, wearing a WebSocket.
+    let releasePush: (() => void) | undefined;
     const start = () => {
       if (timer !== undefined) return;
       timer = setInterval(load, POLL_MS);
+      releasePush ??= holdPumpPortal();
     };
     const stop = () => {
       if (timer !== undefined) clearInterval(timer);
       timer = undefined;
+      releasePush?.();
+      releasePush = undefined;
     };
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
@@ -345,10 +443,15 @@ export default function LaunchesPage() {
     return () => {
       dead = true;
       stop();
+      setWatched("launches", { curves: [] });
       document.removeEventListener("visibilitychange", onVisibility);
       if (flashTimer) clearTimeout(flashTimer);
     };
   }, [paused]);
+
+  const sockets = useSyncExternalStore(subscribeSockets, socketsSnapshot, socketsSnapshotServer);
+  const pushSock = sockets.find((s) => s.name === PUMPPORTAL_NAME);
+  const rpcSock = sockets.find((s) => s.name === RPC_WS_NAME);
 
   const venues = useMemo(() => {
     const set = new Set<string>();
@@ -418,11 +521,51 @@ export default function LaunchesPage() {
     "inflates it. `npm run probe:launches` brackets the offset against three independent servers and " +
     "reports every figure both raw and corrected.";
   const skew = clockSkewHint(feed);
+  const push = pushChip(pushSock, feed?.pushed ?? 0, now);
+  const curveSubs = rpcSock?.subscriptions.filter((s) => s.key.startsWith("account:")) ?? [];
+  const curvesOn = curveSubs.filter((s) => s.state === "subscribed").length;
 
   return (
     <div className="p-3 flex flex-col gap-2 h-full min-h-0">
       <div className="flex items-center gap-2 flex-wrap">
         <h1 className="text-[15px] font-semibold tracking-wide">LAUNCH FEED</h1>
+        {/* The push, in the same two states the socket has. Never "live"
+            without a last-frame age, never silent about falling back. */}
+        {!paused && (
+          <span className={`flex items-center gap-1.5 text-[10.5px] num ${push.cls}`} title={push.title}>
+            {push.up ? <span className="live-dot" /> : <span>○</span>}
+            {push.label}
+          </span>
+        )}
+        {feed && feed.pushLagSamples > 0 && (
+          <span
+            className="text-[10.5px] num dim"
+            title={
+              "Median of (receipt time of the push on this machine's clock) minus (the pool-creation time a poll later " +
+              `published), over the ${feed.pushLagSamples} pushed row${feed.pushLagSamples === 1 ? "" : "s"} a poll has dated ` +
+              "— seen by push, dated by jupiter. Kept separate from the poll's own lag so neither flatters the other. " +
+              `Minimum ${feed.pushLagMinMs === null ? "—" : `${(feed.pushLagMinMs / 1000).toFixed(1)}s`}; a negative figure means this ` +
+              "clock runs behind the source's, not that the push beat the chain." +
+              (feed.undated > 0 ? `\n\n${feed.undated} pushed row${feed.undated === 1 ? "" : "s"} still undated — no poll has listed them yet.` : "") +
+              clockNote
+            }
+          >
+            push lag {feed.pushLagP50Ms === null ? "—" : `${(feed.pushLagP50Ms / 1000).toFixed(1)}s`}
+            <span className="faint"> n={feed.pushLagSamples}</span>
+          </span>
+        )}
+        {!paused && rpcSock && curveSubs.length > 0 && (
+          <span
+            className={`text-[10.5px] num ${rpcSock.state === "open" && curvesOn > 0 ? "dim" : "warn"}`}
+            title={
+              `accountSubscribe on the bonding curve of the ${CURVE_CAP} newest on-curve rows whose curve account is known (only the push carries it). ` +
+              `${curvesOn} acknowledged, ${curveSubs.filter((s) => s.state === "sent").length} awaiting ack, ${curveSubs.filter((s) => s.state === "unacked").length} unacked (= not subscribed). ` +
+              `Socket ${describeSocket(rpcSock, now).label}. A curve account changing makes the alert monitor re-read the feed now; the 3s poll confirms any graduation.`
+            }
+          >
+            curves {curvesOn}/{curveSubs.length} watched
+          </span>
+        )}
         {feed && (
           <span
             className="flex items-center gap-1.5 text-[10.5px] dim num ml-2"
@@ -714,10 +857,42 @@ export default function LaunchesPage() {
                     onClick={() => setOpen(expanded ? null : l.mint)}
                     style={isNew ? { background: "rgba(56,225,255,0.10)" } : undefined}
                   >
-                    <td className="px-3 py-[6px] faint" title={`pool created ${new Date(l.poolCreatedAt).toISOString()}\nfirst seen here ${new Date(l.firstSeenAt).toISOString()}`}>
-                      {ageLabel(now - l.poolCreatedAt)}
-                      {l.event === "graduation" && <span className="chip chip-accent ml-1 text-[9px]">GRAD</span>}
-                    </td>
+                    {/* Two different ages, never one column pretending to be
+                        the other. A dated row's age runs from the creation
+                        time its source published; an undated push row has
+                        only its receipt, and the cell says which it is
+                        showing rather than painting a receipt as a birth. */}
+                    {l.poolCreatedAt === undefined ? (
+                      <td
+                        className="px-3 py-[6px] faint"
+                        title={
+                          `received ${new Date(l.firstSeenAt).toISOString()} by push (${l.source}), this machine's clock, uncorrected.\n` +
+                          "dated by: not yet — the socket frame carries no creation time, and no polled source has listed this mint. " +
+                          "This age counts from RECEIPT, so it can only understate the token's real age."
+                        }
+                      >
+                        {ageLabel(now - l.firstSeenAt)}
+                        <span className="chip chip-warn ml-1 text-[9px]">PUSH · undated</span>
+                      </td>
+                    ) : (
+                      <td
+                        className="px-3 py-[6px] faint"
+                        title={
+                          `pool created ${new Date(l.poolCreatedAt).toISOString()}` +
+                          (l.datedBy && l.datedBy !== l.source ? ` (dated by ${l.datedBy})` : "") +
+                          `\nfirst seen here ${new Date(l.firstSeenAt).toISOString()}` +
+                          (l.source === "pumpportal-ws" ? " — by push" : "")
+                        }
+                      >
+                        {ageLabel(now - l.poolCreatedAt)}
+                        {l.event === "graduation" && <span className="chip chip-accent ml-1 text-[9px]">GRAD</span>}
+                        {l.source === "pumpportal-ws" && (
+                          <span className="chip ml-1 text-[9px]" title={sightingLine(l)}>
+                            PUSH
+                          </span>
+                        )}
+                      </td>
+                    )}
                     <td className="px-2">
                       <Link
                         href={`/token?m=${l.mint}`}

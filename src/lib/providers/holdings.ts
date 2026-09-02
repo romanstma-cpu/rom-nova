@@ -79,12 +79,21 @@ export interface WalletHoldingsResult {
 }
 
 export class JupiterHoldingsProvider {
-  readonly name = "jupiter";
+  /**
+   * Its own /status key. This read `"jupiter"` and reported into the token
+   * list's row, so the Ultra endpoint — a different host path with a
+   * different failure mode (it 500s on wallets with tens of thousands of
+   * accounts, which the token endpoints never do) — had no row of its own,
+   * and the `jupiter-holdings` row the registry already rendered said "not
+   * asked yet" forever. The price and symbol lookups below stay under
+   * `jupiter`: they ARE the token endpoints.
+   */
+  readonly name = "jupiter-holdings";
 
   async getHoldings(address: string): Promise<WalletHoldingsResult | null> {
     let body: JupHoldingsResponse;
     try {
-      body = await providerFetch<JupHoldingsResponse>("jupiter", `${HOLDINGS_URL}/${address}`, {
+      body = await providerFetch<JupHoldingsResponse>(this.name, `${HOLDINGS_URL}/${address}`, {
         // Slower than the token endpoints because it walks every account the
         // wallet ever opened. Measured at 110-175ms for normal wallets; the
         // pathological ones (an AMM authority with tens of thousands of

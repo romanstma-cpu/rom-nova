@@ -327,11 +327,30 @@ export async function trendingRows(
     listInFlight = null;
   });
   const fresh = await listInFlight;
-  if (fresh) listCache = { at: Date.now(), value: fresh };
+  if (fresh) {
+    const at = Date.now();
+    // `builtAt` travels with the payload so a cache hit reports the scan's
+    // real age. `handleTokens` used to stamp `asOf: Date.now()` on every
+    // response, so a thirty-second-old scan — or an arbitrarily old one
+    // served after a failed refresh — rendered "updated now", unconditionally.
+    listCache = { at, value: { ...fresh, builtAt: at } };
+    return listCache.value;
+  }
   // A failed refresh serves the last good scan rather than dropping to the
   // simulator — stale real data beats fresh fake data, as long as the age is
-  // reported, which `listCacheAge` exists for.
-  return fresh ?? listCache?.value ?? null;
+  // reported. It is reported twice: `builtAt` dates it, and the provenance
+  // note says the refresh that should have replaced it did not happen.
+  if (listCache) {
+    const age = Math.round((Date.now() - listCache.at) / 1000);
+    return {
+      ...listCache.value,
+      provenance: {
+        ...listCache.value.provenance,
+        note: `refresh failed — showing the scan from ${age}s ago`,
+      },
+    };
+  }
+  return null;
 }
 
 async function fetchTrendingRows(
@@ -625,6 +644,11 @@ async function buildWalletProfile(
       : Promise.resolve(null),
     providers.holdings?.getHoldings(address).catch(() => null) ?? Promise.resolve(null),
   ]);
+  // What each read DID, for the "what is real" panel — which decided these
+  // two capabilities from configuration while their /status rows said "not
+  // asked yet". Recorded per capability, the way candles already are.
+  if (stage === "full") noteOutcome("wallet activity", Boolean(activity), activity ? undefined : "the chain read returned nothing");
+  if (providers.holdings) noteOutcome("wallet positions", Boolean(holdings), holdings ? undefined : "the balance read returned nothing");
   // The full stage needs the chain read; the balances stage never asked for one
   // and reports a coverage block that says exactly that, so nothing downstream
   // reads its empty fill list as "this wallet has never traded".

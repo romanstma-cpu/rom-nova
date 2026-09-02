@@ -1006,7 +1006,30 @@ export interface LaunchObservation {
   symbol: string;
   hue: number;
   decimals: number;
-  poolCreatedAt: number;
+  /**
+   * The source's claim about when the pool was created. ABSENT on a row that
+   * arrived by push and has not yet been listed by a polled source.
+   *
+   * PumpPortal's creation frame carries no timestamp at all — signature, mint,
+   * curve key, reserves, and nothing about when. Stamping the receipt time in
+   * here would fabricate a pool-creation time out of this machine's clock, and
+   * every lag figure downstream would then measure the socket against itself
+   * and report zero. So a pushed row stays undated, renders "dated by: not
+   * yet", and gains this field only when Jupiter or GeckoTerminal lists the
+   * mint — at which point `datedBy` names who dated it.
+   */
+  poolCreatedAt?: number;
+  /** Which adapter supplied `poolCreatedAt`, when it was not the row's own source. */
+  datedBy?: string;
+  /**
+   * The launchpad bonding-curve account, when the source published it.
+   *
+   * Only the push carries it. It is what lets the tab `accountSubscribe` the
+   * curve and notice a graduation the moment the account changes, instead of
+   * a poll later.
+   */
+  curveAccount?: string;
+  /** When this process first laid eyes on the row — receipt time, local clock, uncorrected. */
   firstSeenAt: number;
   /**
    * When the GRADUATION was first sighted, for rows that graduate.

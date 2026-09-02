@@ -187,10 +187,10 @@ describe("merging a re-sighting", () => {
     expect(row.event).toBe("graduation");
     expect(row.poolCreatedAt).toBe(gradAt);
     // The poisoned sample this replaces: firstSeenAt predates the graduation.
-    expect(row.firstSeenAt - row.poolCreatedAt).toBeLessThan(0);
+    expect(row.firstSeenAt - row.poolCreatedAt!).toBeLessThan(0);
     // The honest one: when did the feed notice the graduation.
     expect(row.gradSeenAt).toBe(noticedAt);
-    expect((row.gradSeenAt ?? row.firstSeenAt) - row.poolCreatedAt).toBe(3_000);
+    expect((row.gradSeenAt ?? row.firstSeenAt) - row.poolCreatedAt!).toBe(3_000);
     // And it is stamped ONCE — a later re-sighting must not move it.
     mergeLaunch(m, { ...first, event: "graduation", poolCreatedAt: gradAt }, undefined, noticedAt + 60_000);
     expect(m.get(first.mint)!.gradSeenAt).toBe(noticedAt);
@@ -392,7 +392,7 @@ describe("a mint that graduates while the feed is already watching it", () => {
     // and it is what makes the lag arithmetic a measurement.
     expect(row.firstSeenAt).toBe(Date.parse("2026-08-30T04:05:54Z"));
     // The number this whole path exists to keep honest: 3 seconds, not 1,478.
-    expect(row.poolCreatedAt - Date.parse("2026-08-30T04:05:51Z")).toBe(1_478_000);
+    expect(row.poolCreatedAt! - Date.parse("2026-08-30T04:05:51Z")).toBe(1_478_000);
   });
 
   it("never lets a later plain sighting drag a graduation back to its curve", () => {
@@ -488,7 +488,7 @@ describe("a launch nobody can audit is still a launch", () => {
       mintAuthorityRevoked: false,
       freezeAuthorityRevoked: false,
       authorityKnown: false,
-      source: "coingecko",
+      source: "geckoterminal",
     };
     const m = new Map<string, TokenLaunch>();
     mergeLaunch(m, orphan);

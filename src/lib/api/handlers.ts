@@ -18,7 +18,7 @@ const MAX_EDGES = 420;
  *  and static positions must not be able to crowd them out. */
 const MAX_TRADE_EDGES = 160;
 import { buildFlowSeries, buildTokenRows, buildWalletRows } from "./rows";
-import { DEMO, candlesFor, measuredInterval, trendingRows, walletProfile } from "./source";
+import { DEMO, candlesFor, listCacheAge, measuredInterval, trendingRows, walletProfile } from "./source";
 import type { ChartInterval } from "../providers/jupiter-chart";
 import { liveTokenDetail } from "./detail";
 import { isPlausibleAddress } from "../providers/wallet-chain";
@@ -83,7 +83,11 @@ export async function handleTokens(store: DemoStore, q: TokensQuery) {
         // The demo path was sorted the whole time, which is why nothing looked
         // wrong in the simulator.
         rows: sortRows(live.data, sort, dir).slice(0, Math.min(limit, 500)),
-        asOf: Date.now(),
+        // When the scan was BUILT, not when this response was assembled.
+        // `Date.now()` here made "updated now" unconditional and true only
+        // by coincidence once every thirty seconds.
+        asOf: live.builtAt ?? Date.now(),
+        cacheAgeMs: listCacheAge(),
         provenance: live.provenance,
         demo: false,
       };
@@ -619,9 +623,14 @@ export function handleNetwork(store: DemoStore, asOf?: number) {
 
 export function handleEvents(store: DemoStore, limit = 60) {
   return {
+    // Stamped at the source, the same way the stream stamps them, so the
+    // activity feed's seed list and its live arrivals carry one truth and no
+    // renderer has to remember that this endpoint is the simulator.
     events: store.recentEvents(Math.min(200, limit)).map((e) => ({
       ...e,
       symbol: e.mint ? store.token(e.mint)?.info.symbol : undefined,
+      real: false,
+      source: "demo",
     })),
     demo: true,
   };

@@ -34,7 +34,10 @@ export default function LegalPage() {
         <p>
           <b className="text-[var(--text)]">Real, from keyless public sources, fetched in your browser:</b> the token list
           and its holder counts, top-holder share, dev balance, organic-activity score, launchpad and creator mint history
-          (Jupiter); hourly price history (GeckoTerminal); mint and freeze authority read from the chain (Solana JSON-RPC);
+          (Jupiter); the price chart — minute bars from Jupiter&apos;s chart endpoint, which is the default view, and the
+          hourly view from GeckoTerminal, falling back to Jupiter when GeckoTerminal throttles (each chart names which one
+          drew it); mint and freeze authority read from the chain (Solana JSON-RPC); token creations pushed over a
+          keyless socket (PumpPortal) and per-account chain notifications (Solana JSON-RPC over WebSocket);
           wallet-level flow (SQD); rug risk and liquidity-pool lock state (RugCheck); and the SOL reference price
           (CoinGecko and Crypto.com, cross-checked).
         </p>

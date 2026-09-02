@@ -368,6 +368,21 @@ trap: never assume the pane's IndexedDB survives a `preview_start`.
 
 677 tests, tsc clean, build clean, lint clean.
 
+### 🚢 1.10.0 SHIPPED and proven, site and app (2026-09-02 ~6:05 PM)
+
+`c33d6bb` (cadence fix) → `3d707c8` (1.10.0) → tag → CI green in ~5 min.
+Installer SHA256 `f1314580…dc5a` = GitHub digest = SHA256SUMS = local;
+`latest.yml` 1.10.0; the download button redirects to the v1.10.0 asset.
+Site: 2×1.10.0, 0 stale, track page 200 and carrying LAUNCH RECORD,
+wallets page 200. Desktop: installed the verified build, titled window,
+four processes, 1.10.0.0, clean close, fresh leveldb write at the real
+profile path.
+
+Three releases in one day — 1.8.0 live signals and sockets, 1.9.0 the
+ledger and the declutter, 1.10.0 the launch scorecard and the two buttons
+that turn the ledger into action — and every one proven on the site and
+in the installed app before being called shipped.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

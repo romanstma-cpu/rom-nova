@@ -149,6 +149,36 @@ connection honesty, PumpPortal push into the launch feed with NO fabricated
 monitor, `/status` LIVE SOCKETS block, and the health-log plumbing the
 review found broken). Blind critic after.
 
+### Killed by the session limit, resumed from the disk (2026-09-02)
+
+Both builders died mid-turn at about 20:10 on 2026-09-01 when the session's
+usage limit hit. Resumed this morning by message, each ordered to trust
+`git status` over its own memory before touching a file, because a kill
+lands anywhere — between an edit and its commit, or halfway through a file.
+What the disk actually held at the moment of resume:
+
+- **B1 (`live/signals`)** — one commit landed, `efd65da` "One definition
+  each of 'smart money' and 'a whale'" (that is M1: the `>=70` / `>=65`
+  split collapsed to one constant). Uncommitted on disk: edits to the
+  signal page, `features.ts`, `live-features.ts`, `signals.ts`, `types.ts`,
+  and two new files, `engine/flow-window.ts` with its test — the M2 work
+  (the caption must say what was computed) in progress when the lights
+  went out.
+- **B2 (`live/transport`)** — **zero commits.** The whole socket layer
+  existed only as uncommitted files: `live/socket.ts` and
+  `alerts/cadence.ts` new, `api/launches.ts`, `client.ts` and `types.ts`
+  modified. B2's last report described `observeLaunchPush()` as the thing
+  it was about to write; whether it exists is for B2's audit to say, not
+  for me to assume. It was told to run `tsc` first, since a half-written
+  function shows up there before anywhere else.
+
+Housekeeping while they audit: five worktrees left over from the W1–W5
+rounds were clean and fully merged, so they and their branches are gone.
+The sixth, a detached checkout at `7df5ff1`, held an eight-line eslint
+ignore for the Electron build output written around 1.3.0 — main had since
+landed the identical change under another hash, so it was superseded and
+went too. The worktree list is back to main plus the two builders.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

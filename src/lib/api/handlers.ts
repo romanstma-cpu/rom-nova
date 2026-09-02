@@ -18,9 +18,11 @@ const MAX_EDGES = 420;
  *  and static positions must not be able to crowd them out. */
 const MAX_TRADE_EDGES = 160;
 import { buildFlowSeries, buildTokenRows, buildWalletRows } from "./rows";
-import { DEMO, candlesFor, measuredInterval, trendingRows, walletProfile } from "./source";
+import { DEMO, LIVE_LIST_LIMIT, candlesFor, measuredInterval, trendingRows, walletProfile } from "./source";
 import type { ChartInterval } from "../providers/jupiter-chart";
 import { liveTokenDetail } from "./detail";
+import { lastLivePass, liveSignalsFor, liveTrackFor, resolveLiveMint } from "../live/signals";
+import { noteOutcome } from "../providers/health-log";
 import { isPlausibleAddress } from "../providers/wallet-chain";
 import { resolveRpcRoute } from "../providers/rpc-endpoint";
 import { identifyAccount, isOnCurve, KNOWN_ADDRESSES, type AccountIdentity } from "../providers/account-kind";
@@ -512,7 +514,52 @@ export function handleWalletDetail(store: DemoStore, address: string) {
   };
 }
 
-export function handleSignals(store: DemoStore, profile: StrategyProfileId = "balanced", asOf?: number) {
+/**
+ * The signal feed, real where it can be.
+ *
+ * Live when the token list resolves: the signals are the ones `scoreRows`
+ * built for the trending rows, materialised by the live registry with stable
+ * ids and a lifecycle across passes. Until this branch existed the terminal
+ * served thirty synthetic position-sizing cards under no marker while the
+ * scanner beside them scored real tokens — the whole-build review's H5 and
+ * H7 in one handler.
+ *
+ * `asOf` forces the simulator for the same reason it does on `handleTokens`:
+ * a replay of a past moment is not something a live source can answer, and
+ * the payload says so rather than quietly serving "now".
+ *
+ * `asOf` in the reply is the PASS time, not the reply time. The list is
+ * cached for thirty seconds and served stale after a failed refresh, so the
+ * moment the answer was assembled is the only honest date on it.
+ */
+export async function handleSignals(store: DemoStore, profile: StrategyProfileId = "balanced", asOf?: number) {
+  if (asOf === undefined) {
+    const live = await trendingRows();
+    const feed = live ? liveSignalsFor(profile) : null;
+    if (live && feed) {
+      return {
+        signals: feed.signals,
+        asOf: feed.pass.at,
+        profile,
+        demo: false,
+        provenance: live.provenance,
+        live: {
+          pass: feed.pass,
+          stats: feed.stats,
+          cadence: feed.cadence,
+          corpus: LIVE_LIST_LIMIT,
+          // The corpus is twelve trending tokens, and the page must say so:
+          // "signals" over a dozen rows is a different claim from signals over
+          // the chain, and the review found two pages that never said which.
+          note:
+            `signals over the ${feed.pass.mints} tokens on ${live.provenance.source}'s trending list ` +
+            `(capped at ${LIVE_LIST_LIMIT}) — not the whole chain. A token not on that list has no signal here, ` +
+            `which is an absence of coverage, not a verdict`,
+        },
+      };
+    }
+    noteOutcome("signals", false, live ? "the list answered but no scored pass was recorded" : "no live token source answered");
+  }
   const at = asOf ?? store.simulatedUntil;
   const signals = signalsAt(store, at, profile).map((s) => ({
     ...s,
@@ -520,24 +567,152 @@ export function handleSignals(store: DemoStore, profile: StrategyProfileId = "ba
     name: store.token(s.mint)?.info.name ?? "?",
     hue: store.token(s.mint)?.info.hue ?? 0,
   }));
-  return { signals, asOf: at, profile, demo: true };
+  return {
+    signals,
+    asOf: at,
+    profile,
+    demo: true,
+    provenance: {
+      ...DEMO,
+      note:
+        asOf !== undefined
+          ? "a replay of a past moment — no live source can answer that, so this is the simulator, labelled"
+          : "live signals unavailable — no live token source answered, so this is the simulator, labelled",
+    },
+  };
 }
 
-export function handleSignalById(store: DemoStore, id: string) {
+/**
+ * One signal by id, real where it can be.
+ *
+ * A live id resolves through the 8-character mint prefix the registry has
+ * seen this session, then recomputes the signal on the detail path — the
+ * full risk report, the audit, the provenance — because the list pass only
+ * ever paid for the summary. The lifecycle comes from the registry, so a
+ * link to a signal that has since expired shows the expiry and points at the
+ * current one rather than pretending the old label still holds.
+ *
+ * A live failure and an unknown id are different answers: the first is a
+ * 503 carrying the reason, the second falls to the simulator's own lookup.
+ */
+export async function handleSignalById(store: DemoStore, id: string) {
   const m = id.match(/^sig-([A-Za-z0-9]{8})-(\d+)-([a-z_]+)$/);
   if (!m) throw new ApiError(400, "malformed signal id");
-  const [, mint8, bucketStr, profile] = m;
+  const [, mint8, bucketStr, profileRaw] = m;
+  const profile = profileRaw as StrategyProfileId;
+
+  let mint = resolveLiveMint(mint8);
+  if (!mint) {
+    // A cold tab with a bookmarked id: one list pass may put the mint back
+    // in reach. Null from here means the simulator gets its turn.
+    await trendingRows();
+    mint = resolveLiveMint(mint8);
+  }
+  if (mint) {
+    let liveError: string | null = null;
+    try {
+      const detail = await liveTokenDetail(mint, profile);
+      if (detail) {
+        const active = liveTrackFor(mint, profile);
+        const named = liveTrackFor(mint, profile, id) ?? active;
+        return {
+          signal: {
+            ...detail.signal,
+            id,
+            createdAt: named?.createdAt ?? detail.asOf,
+            updatedAt: detail.asOf,
+            lifecycle: named?.lifecycle ?? [
+              {
+                state: "created" as const,
+                ts: detail.asOf,
+                note:
+                  "scored on demand — this session has not carried this mint on the live list under this " +
+                  "profile, so there is no earlier history to show",
+              },
+            ],
+          },
+          symbol: detail.info.symbol,
+          name: detail.info.name,
+          hue: detail.info.hue,
+          demo: false,
+          provenance: detail.provenance,
+          source: detail.source,
+          audit: detail.audit,
+          live: {
+            asOf: detail.asOf,
+            passes: named?.passes ?? 0,
+            expiredAt: named?.expiredAt,
+            /** The signal that replaced this one, when the requested id has ended. */
+            currentId: active && active.id !== id ? active.id : undefined,
+            authorityChecked: detail.authorityChecked,
+            authoritySource: detail.authoritySource,
+            // No outcome is graded here. The simulator can read its own
+            // future candles; the live path cannot, and the page that can —
+            // against real later prices, by whole passes — is Track Record.
+            measuredOn: "/track",
+          },
+        };
+      }
+    } catch (err) {
+      liveError = err instanceof Error ? err.message : String(err);
+    }
+    throw new ApiError(
+      503,
+      `live data unavailable — ${liveError ?? "the token provider no longer lists this mint"}. ` +
+        "This is a source problem, not a verdict on the signal.",
+    );
+  }
+
   const tok = store.tokenList().find((t) => t.info.mint.startsWith(mint8));
   if (!tok) throw new ApiError(404, "unknown signal token");
   const asOf = Number(bucketStr) * 2 * HOUR + 1;
-  let sig = computeSignal(store, tok.info.mint, Math.min(asOf, store.simulatedUntil), profile as StrategyProfileId);
+  let sig = computeSignal(store, tok.info.mint, Math.min(asOf, store.simulatedUntil), profile);
   if (!sig) throw new ApiError(404, "signal not computable");
   sig = evaluateOutcome(store, sig);
-  return { signal: sig, symbol: tok.info.symbol, name: tok.info.name, demo: true };
+  return { signal: sig, symbol: tok.info.symbol, name: tok.info.name, demo: true, provenance: DEMO };
 }
 
-export function handleAccuracy(store: DemoStore, profile: StrategyProfileId = "balanced") {
-  return { stats: accuracyStats(store, profile), demo: true };
+/**
+ * Accuracy, without fabrication.
+ *
+ * The simulator grades itself against its own future candles, and that is a
+ * fine demonstration of the METHOD. It is not a measurement of the live
+ * signals, and once a live pass has landed this handler refuses to hand back
+ * synthetic statistics under a live page. The live accuracy is measured on
+ * the Track Record page — every live score this browser recorded, against
+ * the real price 1h, 6h and 24h later, resampled by whole scan passes, and
+ * allowed to answer "no edge" — so this points there instead.
+ *
+ * `scope: "simulated"` lets a page that is itself showing the simulator ask
+ * for the simulator's numbers explicitly, labelled. It cannot ask for live
+ * numbers here; there are none to give.
+ */
+export function handleAccuracy(
+  store: DemoStore,
+  profile: StrategyProfileId = "balanced",
+  scope: "auto" | "simulated" = "auto",
+) {
+  const pass = lastLivePass();
+  if (scope === "auto" && pass) {
+    return {
+      stats: null,
+      demo: false,
+      measuredOn: {
+        href: "/track",
+        label: "Track Record",
+        note:
+          "Live signal accuracy is not computed here, and never from the simulator. The Track Record page " +
+          "grades every live score this browser has recorded against the real price 1h, 6h and 24h later, " +
+          "resampled by whole scan passes, and is allowed to say there is no edge.",
+      },
+      pass: { at: pass.at, source: pass.source },
+    };
+  }
+  return {
+    stats: accuracyStats(store, profile),
+    demo: true,
+    note: "measured on synthetic data — the simulator grading itself; the method is the product, not the numbers",
+  };
 }
 
 export function handleNetwork(store: DemoStore, asOf?: number) {

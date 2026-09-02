@@ -12,12 +12,14 @@
 // Deliberately its own file: source.test.ts mocks the whole registry module to
 // drive a fake adapter, so these assertions would be testing the mock.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { dataMode, FLAGS } from "@/lib/providers/registry";
+import { noteOutcome, resetOutcomes } from "@/lib/providers/health-log";
 
 /** Every capability the chip is responsible for describing. */
 const CAPABILITIES = [
   "tokens",
+  "signals",
   "prices & candles",
   "mint & freeze authority",
   "whale flow",
@@ -125,5 +127,35 @@ describe("dataMode — the chip cannot outlive the truth", () => {
   // worst.
   it("reports mixed on the default keyless configuration", () => {
     expect(dataMode().overall).toBe("mixed");
+  });
+});
+
+// Signals descend from the token list. They were never listed at all, so the
+// chip could not say whether the thirty cards on /signals were real — and
+// the review found they were not, under no marker.
+describe("dataMode — signals follow the token list, and the last outcome wins", () => {
+  afterEach(resetOutcomes);
+
+  it("lists signals with the token list's own answer", () => {
+    const m = dataMode();
+    expect(FLAGS.jupiter() || FLAGS.dexscreener() || FLAGS.coingecko() ? m.live : m.simulated).toContain("signals");
+  });
+
+  it("stays live after a pass that answered", () => {
+    noteOutcome("signals", true);
+    expect(dataMode().live).toContain("signals");
+  });
+
+  it("moves to bounded, with the reason, after a pass that failed", () => {
+    if (!(FLAGS.jupiter() || FLAGS.dexscreener() || FLAGS.coingecko())) return;
+    noteOutcome("signals", false, "no live token source answered");
+    const m = dataMode();
+    expect(m.live).not.toContain("signals");
+    expect(m.simulated).not.toContain("signals");
+    const bound = m.bounded.find((b) => b.startsWith("signals"));
+    expect(bound).toBeTruthy();
+    expect(bound).toMatch(/FAILED/);
+    expect(bound).toMatch(/no live token source answered/);
+    expect(bound).toMatch(/simulator/);
   });
 });

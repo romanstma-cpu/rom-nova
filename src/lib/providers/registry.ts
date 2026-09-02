@@ -298,6 +298,30 @@ export function dataMode(): DataMode {
   const bounded: string[] = [];
 
   (p.token.name === "demo" ? simulated : live).push("tokens");
+  // Signals descend from the token list, so they are live exactly when it is
+  // — and, like candles below, the last OUTCOME wins where there is one. The
+  // live path records an outcome on every pass; a failed one moves this to
+  // the bounded column with its reason, because /signals is then serving the
+  // simulator under a SIMULATED label and the chip must not say otherwise.
+  //
+  // Configuration first, outcome second, deliberately: the nav chip fetches
+  // /status once on mount, before any list pass has landed, and a rule of
+  // "simulated until the first pass answers" would freeze a wrong label on the
+  // chip for the whole session while the dashboard beside it rendered live
+  // signals under a vendor's name.
+  if (p.token.name === "demo") {
+    simulated.push("signals");
+  } else {
+    const sig = lastOutcome("signals");
+    if (sig && !sig.ok) {
+      bounded.push(
+        `signals — the last live scan FAILED${sig.note ? ` (${sig.note})` : ""}; ` +
+          "/signals is on the simulator and says so",
+      );
+    } else {
+      live.push("signals");
+    }
+  }
   // Candles are the one capability here whose CONFIGURATION and whose BEHAVIOUR
   // routinely disagree. The provider name says a real adapter is wired; it says
   // nothing about whether the vendor is answering, and GeckoTerminal rate-limits

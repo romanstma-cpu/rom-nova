@@ -117,6 +117,38 @@ negative. That is the measurement itself, it matches the header statistic,
 and `clockSkewHint` exists to flag exactly that. The fabricated
 curve-lifetime-sized negative is gone. Report: `W2-ROUND4-REPORT.md`.
 
+## 🔴 The desktop app has been headless since 1.4.0 — found, fixed, 1.7.1
+
+The most serious finding of the entire campaign, and no critic could have
+seen it: **every desktop release from 1.4.0 to 1.7.0 launched without a
+window.**
+
+Chasing why the updated 1.7.0 install had an empty title: its main process
+was alive with two Electron helpers, its only window handles were IME
+plumbing, and its localStorage was last written **at the exact second the
+OLD instance closed** — the new one had executed no page JS at all. The
+shell diff between the last working version and 1.7.0 was five lines in
+`main.js`: `require("./rpc-proxy")`. Reading the installed `app.asar`
+header: **`rpc-proxy.js` is not in it.** electron-builder's `files` list
+said `["main.js", "icon.ico"]` and nobody added the module main.js had
+started requiring. MODULE_NOT_FOUND at load, before `whenReady` could
+register a window — and before the auto-updater could start, so **a
+headless install cannot update itself out of this.**
+
+Why nine review rounds missed it: the critics reviewed the WEB build,
+served from the same static export. The desktop shell shares that export
+and nothing else, and nobody ever launched the installer. The Aug 29
+download sitting in this machine's pending slot was 1.4.0 — the first
+broken one. Had the app been quit cleanly that day, it would have been
+dead since.
+
+**Fixed:** `rpc-proxy.js` added to `files`; a test now reads `main.js`'s
+local requires the way Node will and the bundle list the way
+electron-builder will, transitively, and fails naming the file — verified
+against the shipped package.json. **1.7.1 tagged.** Desktop installs on
+1.4.0–1.7.0 need one manual reinstall from the download link; after that
+auto-update works again. The web build is unchanged.
+
 ## Post-ship verification — "make sure it's live on site and app"
 
 **Site:** v1.7.0 in both places, zero stale strings; `/nova/` and

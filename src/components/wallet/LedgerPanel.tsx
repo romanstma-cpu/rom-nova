@@ -11,7 +11,9 @@
 // most memorable number on the page and the caveat under it the least.
 
 import { useSyncExternalStore } from "react";
+import Link from "next/link";
 import { fmtUsd, fmtAgo } from "@/lib/client";
+import { alertsRaw, alertsRawServer, ensureWalletFillsRule, parseAlerts, subscribeAlerts, walletFillsRule } from "@/lib/alerts/store";
 import type { WalletProfile } from "@/lib/types";
 import {
   forgetWallet,
@@ -31,6 +33,10 @@ export function LedgerPanel({ address, profile }: { address: string; profile: Wa
   const snap = useSyncExternalStore(subscribeLedger, ledgerSnapshot, ledgerSnapshotServer);
   const entry = snap.wallets.find((w) => w.address === address);
   const rep = entry?.reputation;
+  // The alerts blob through its own external store, so an armed rule shows
+  // here the moment it exists and never desyncs the prerendered HTML.
+  const alertsBlob = useSyncExternalStore(subscribeAlerts, alertsRaw, alertsRawServer);
+  const fillsRule = walletFillsRule(address, parseAlerts(alertsBlob).rules.filter((r) => r.enabled));
   const full = snap.wallets.filter((w) => w.recording).length >= WALLET_CAP && !entry?.recording;
 
   const toggle = () => {
@@ -74,9 +80,27 @@ export function LedgerPanel({ address, profile }: { address: string; profile: Wa
           </span>
         )}
         {entry && (
-          <button className="link text-[10.5px] ml-auto" onClick={() => forgetWallet(address)} title="delete this wallet's recorded history">
-            forget
-          </button>
+          <span className="ml-auto flex items-center gap-3">
+            {/* Reputation into action: one press arms a fills alert on this
+                wallet, evaluated on the monitor's cadence and pulled forward
+                by the socket the moment the chain mentions the address. */}
+            {fillsRule ? (
+              <Link href="/alerts" className="chip chip-accent text-[9.5px]" title={`rule "${fillsRule.name}" is armed — manage it on the alerts page`}>
+                ● ALERTING ON FILLS
+              </Link>
+            ) : (
+              <button
+                className="chip cursor-pointer text-[9.5px]"
+                onClick={() => ensureWalletFillsRule(address, `${rep?.smart ? "smart money " : ""}${address.slice(0, 4)}…${address.slice(-4)} fills`)}
+                title="arm an alert that fires on this wallet's next fill — re-read every few minutes while the app is open, sooner when the socket sees the address"
+              >
+                ○ ALERT ON FILLS
+              </button>
+            )}
+            <button className="link text-[10.5px]" onClick={() => forgetWallet(address)} title="delete this wallet's recorded history">
+              forget
+            </button>
+          </span>
         )}
       </div>
 

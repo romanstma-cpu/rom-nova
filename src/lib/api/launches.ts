@@ -66,6 +66,7 @@
 
 import { FLAGS, getProviders } from "../providers/registry";
 import { JupiterTokenProvider, jupHue } from "../providers/jupiter";
+import { noteLaunchMerged, setLaunchLookup } from "../launch-record/store";
 import { GeckoTerminalTokenProvider, GRADUATION_DEXES } from "../providers/geckoterminal";
 import { triageLaunch } from "../engine/triage";
 import type { LaunchObservation, TokenLaunch } from "../types";
@@ -318,6 +319,19 @@ const state: FeedState = {
 /** The push socket's source name, as every pushed row and event carries it. */
 export const PUSH_SOURCE = "pumpportal-ws";
 
+// The launch record resolves its horizons through the same batched Jupiter
+// lookup that already dates GeckoTerminal's pools — a hundred mints in one
+// ~200ms call. Registered here so the record module never imports a provider.
+setLaunchLookup(async (mints, now) => {
+  const jup = new JupiterTokenProvider();
+  const found = await jup.getLaunchesByMint(mints, now);
+  const out = new Map<string, { priceUsd?: number; liquidityUsd?: number; graduatedAt?: number }>();
+  for (const [mint, row] of found) {
+    out.set(mint, { priceUsd: row.priceUsd, liquidityUsd: row.liquidityUsd, graduatedAt: row.graduatedAt });
+  }
+  return out;
+});
+
 /** In-flight de-duplication, so two polls landing together share one fetch. */
 let inFlight: Promise<void> | null = null;
 
@@ -368,12 +382,16 @@ export function mergeLaunch(
 ): { added: boolean } {
   const existing = rows.get(obs.mint);
   if (!existing) {
-    rows.set(obs.mint, {
+    const fresh: TokenLaunch = {
       ...obs,
       // A row that arrives dated was dated by whoever brought it.
       datedBy: obs.datedBy ?? (obs.poolCreatedAt !== undefined ? obs.source : undefined),
       triage: triageLaunch(obs, risk, risk ? 0 : undefined),
-    });
+    };
+    rows.set(obs.mint, fresh);
+    // The launch record listens here rather than polling the feed: every row
+    // the feed ever shows is written down with the verdict it was shown with.
+    if (rows === state.rows) noteLaunchMerged(fresh, true, now);
     return { added: true };
   }
   // A graduation outranks a plain pool: once a curve has completed, that is
@@ -449,7 +467,9 @@ export function mergeLaunch(
   // growing. The probe caught it; nothing else would have, because the number
   // stayed plausible the whole way up.
   const completedIn = existing.triage.completedInMs ?? (risk ? now - existing.firstSeenAt : undefined);
-  rows.set(obs.mint, { ...merged, triage: triageLaunch(merged, risk, completedIn) });
+  const refreshed: TokenLaunch = { ...merged, triage: triageLaunch(merged, risk, completedIn) };
+  rows.set(obs.mint, refreshed);
+  if (rows === state.rows) noteLaunchMerged(refreshed, false, now);
   return { added: false };
 }
 

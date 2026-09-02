@@ -271,6 +271,36 @@ export function addRule(rule: LiveAlertRule): void {
   save({ ...blob, rules: [rule, ...blob.rules] });
 }
 
+/** The rule watching this wallet's fills, if one exists — any state. */
+export function walletFillsRule(wallet: string, rules: readonly LiveAlertRule[] = loadAlerts().rules): LiveAlertRule | undefined {
+  return rules.find((r) => r.condition.kind === "wallet_fills" && r.condition.wallet === wallet);
+}
+
+/**
+ * Arm a fills alert on a wallet, once.
+ *
+ * The ledger's "alert on fills" button and the movers list both call this;
+ * a second press re-enables an existing rule rather than stacking a
+ * duplicate that would fire twice for every fill.
+ */
+export function ensureWalletFillsRule(wallet: string, name: string, now = Date.now()): LiveAlertRule {
+  const existing = walletFillsRule(wallet);
+  if (existing) {
+    if (!existing.enabled) patchRule(existing.id, { enabled: true });
+    return { ...existing, enabled: true };
+  }
+  const rule: LiveAlertRule = {
+    id: nextAlertId("wallet"),
+    name,
+    condition: { kind: "wallet_fills", wallet },
+    enabled: true,
+    notify: true,
+    createdAt: now,
+  };
+  addRule(rule);
+  return rule;
+}
+
 export function patchRule(id: string, patch: Partial<Pick<LiveAlertRule, "enabled" | "notify" | "name">>): void {
   const blob = loadAlerts();
   save({ ...blob, rules: blob.rules.map((r) => (r.id === id ? { ...r, ...patch } : r)) });

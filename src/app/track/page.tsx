@@ -20,6 +20,8 @@ import {
   subscribeLedger,
 } from "@/lib/track-store";
 import { Empty } from "@/components/ui/bits";
+import { clearLaunchRecord, launchSnapshot, launchSnapshotServer, subscribeLaunchRecord } from "@/lib/launch-record/store";
+import { ALIVE_LIQUIDITY_USD, LAUNCH_MIN_RESOLVED, launchReport, type LaunchBucketStat } from "@/lib/launch-record/report";
 
 const pct = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
 
@@ -30,6 +32,117 @@ function ago(ts: number): string {
   if (d < 3_600_000) return `${Math.round(d / 60_000)}m ago`;
   if (d < 86_400_000) return `${Math.round(d / 3_600_000)}h ago`;
   return `${Math.round(d / 86_400_000)}d ago`;
+}
+
+const rate = (num: number, den: number) => (den > 0 ? `${Math.round((100 * num) / den)}%` : "—");
+
+/**
+ * One bucket table: verdicts, deployer history, or launchpad.
+ *
+ * A row prints its rates only past the floor; below it the row says how many
+ * of thirty it has, in the cell where the rate would go, so "no number" and
+ * "zero" can never be confused.
+ */
+function BucketTable({ title, rows }: { title: string; rows: LaunchBucketStat[] }) {
+  return (
+    <div className="panel overflow-auto">
+      <div className="panel-title px-3 pt-2.5 pb-1">{title}</div>
+      <table className="w-full text-[12px] min-w-[720px]">
+        <thead className="thead">
+          <tr>
+            <th className="text-left px-3 py-2 font-medium">Bucket</th>
+            <th className="text-right px-2 font-medium">seen</th>
+            <th className="text-right px-2 font-medium" title="looked up 24h after first sight, inside the window">resolved 24h</th>
+            <th className="text-right px-2 font-medium" title="graduated into a real pool within 24h of first sight, by the feed's own sighting or the lookup">graduated</th>
+            <th className="text-right px-2 font-medium" title={`still listed with $${ALIVE_LIQUIDITY_USD.toLocaleString()}+ liquidity at 24h`}>alive 24h</th>
+            <th className="text-right px-2 font-medium" title="rows that had a price within two minutes of first sight AND at the horizon — most launchpad mints have neither">priced</th>
+            <th className="text-right px-2 font-medium">median 1h</th>
+            <th className="text-right px-2 font-medium">median 24h</th>
+            <th className="text-right px-3 font-medium">above water 24h</th>
+          </tr>
+        </thead>
+        <tbody className="num">
+          {rows.map((b) => (
+            <tr key={b.bucket} className="trow">
+              <td className="px-3 py-[6px]" style={{ fontFamily: "var(--font-sans)" }}>{b.bucket}</td>
+              <td className="text-right px-2 dim">{b.n.toLocaleString()}</td>
+              <td className="text-right px-2 dim">{b.resolved24h.toLocaleString()}</td>
+              {b.enough24h ? (
+                <>
+                  <td className="text-right px-2">{rate(b.graduated24h, b.resolved24h)}</td>
+                  <td className="text-right px-2">{rate(b.alive24h, b.resolved24h)}</td>
+                  <td className="text-right px-2 dim">{b.priced24h}</td>
+                  <td className={`text-right px-2 ${(b.medianReturn1h ?? 0) >= 0 ? "pos" : "neg"}`}>
+                    {b.medianReturn1h === undefined ? <span className="faint">—</span> : pct(b.medianReturn1h)}
+                  </td>
+                  <td className={`text-right px-2 ${(b.medianReturn24h ?? 0) >= 0 ? "pos" : "neg"}`}>
+                    {b.medianReturn24h === undefined ? <span className="faint">—</span> : pct(b.medianReturn24h)}
+                  </td>
+                  <td className="text-right px-3 dim">{b.aboveWater24h === undefined ? "—" : `${(b.aboveWater24h * 100).toFixed(0)}%`}</td>
+                </>
+              ) : (
+                <>
+                  <td className="text-right px-2 faint" colSpan={6} title={`a rate prints at ${LAUNCH_MIN_RESOLVED} resolved launches in this bucket`}>
+                    {b.resolved24h} of {LAUNCH_MIN_RESOLVED} resolved — no rate yet
+                  </td>
+                </>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * The launch feed's own scorecard: what its verdicts turned out to be worth.
+ * Same discipline as the score's track record above it — forward only,
+ * refused below a floor, and the comparison is between buckets over the same
+ * period, never against a market that lifts every curve.
+ */
+function LaunchRecord({ tick }: { tick: number }) {
+  const snap = useSyncExternalStore(subscribeLaunchRecord, launchSnapshot, launchSnapshotServer);
+  const report = useMemo(
+    () => launchReport(snap.obs),
+    // `tick` is a deliberate input: elapsed time expires horizons.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [snap, tick],
+  );
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2 flex-wrap pt-2">
+        <h2 className="text-[14px] font-semibold tracking-wide">LAUNCH RECORD</h2>
+        <span className="text-[10.5px] dim num ml-2">
+          {report.total.toLocaleString()} launches seen · {report.settled.toLocaleString()} verdicts settled ·{" "}
+          {report.pending.toLocaleString()} awaiting a horizon · {report.expired.toLocaleString()} expired unresolved
+          {snap.lookups > 0 && ` · ${snap.lookups} lookups${snap.lookupFailures ? `, ${snap.lookupFailures} failed` : ""}`}
+          {snap.lastError && <span className="neg"> · last error: {snap.lastError}</span>}
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <button className="btn text-[11px]" onClick={() => clearLaunchRecord()}>
+            clear launch record
+          </button>
+        </div>
+      </div>
+      <div className="panel p-3">
+        <div className="panel-title pb-1.5">VERDICT</div>
+        <p className="text-[13px] leading-[1.6]">{report.verdict}</p>
+        <div className="text-[10.5px] dim num pt-2 flex gap-4 flex-wrap">
+          <span>first launch {ago(report.firstTs)}</span>
+          <span>last {ago(report.lastTs)}</span>
+          <span>stored in this browser only ({snap.backend})</span>
+        </div>
+      </div>
+      {report.total > 0 && (
+        <>
+          <BucketTable title="By verdict the feed gave" rows={report.byVerdict} />
+          <BucketTable title="By deployer history" rows={report.byDeployer} />
+          <BucketTable title="By launchpad" rows={report.byLaunchpad} />
+        </>
+      )}
+    </div>
+  );
 }
 
 export default function TrackPage() {
@@ -213,6 +326,8 @@ export default function TrackPage() {
           </div>
         ))
       )}
+
+      <LaunchRecord tick={tick} />
 
       <Hint id="track" className="px-1 pb-2">
         ✳ marks a band whose lift interval excludes zero. That is a measured separation over{" "}

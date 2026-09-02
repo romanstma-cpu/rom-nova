@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
+import { ledgerSnapshot, ledgerSnapshotServer, setRecording, subscribeLedger, WALLET_CAP } from "@/lib/ledger/store";
+import { MIN_OBSERVED_DAYS, MIN_ROUND_TRIPS } from "@/lib/ledger/reputation";
 import { useRouter } from "next/navigation";
 import { useApi, fmtUsd, fmtAgo } from "@/lib/client";
 import { Score, Empty } from "@/components/ui/bits";
@@ -77,13 +79,52 @@ function LiveMovers() {
     30_000,
   );
   const movers = data?.movers ?? [];
+  // The ledger, so each mover can say whether it is being recorded and what
+  // the record says so far — and so one press can record the whole list.
+  const ledger = useSyncExternalStore(subscribeLedger, ledgerSnapshot, ledgerSnapshotServer);
+  const byAddress = new Map(ledger.wallets.map((w) => [w.address, w]));
+  const recordingCount = ledger.wallets.filter((w) => w.recording).length;
+  const notYet = movers.filter((m) => !byAddress.get(m.owner)?.recording);
+  const room = Math.max(0, WALLET_CAP - recordingCount);
+  const [lastPress, setLastPress] = useState<string | null>(null);
+  const recordAll = () => {
+    let on = 0;
+    let refused = 0;
+    for (const m of notYet) {
+      if (setRecording(m.owner, true)) on++;
+      else refused++;
+    }
+    setLastPress(
+      refused > 0
+        ? `recorded ${on}, ${refused} refused — at the cap of ${WALLET_CAP}; forget a wallet to make room`
+        : `recorded ${on} — the monitor reads each on its cadence; first grades need ${MIN_ROUND_TRIPS} closed round trips over ${MIN_OBSERVED_DAYS} observed days`,
+    );
+  };
   return (
     <div className="panel">
       <div className="panel-title px-3 pt-2.5 pb-1 flex items-baseline gap-2 flex-wrap">
         <span>Moving right now</span>
         {data?.real && <span className="chip chip-accent">REAL · {data.source?.toUpperCase() ?? "SQD"}</span>}
         <span className="faint normal-case">{data?.note}</span>
+        {/* Size moved is where to START recording, not a verdict: these are the
+            wallets the ledger can turn into reputations fastest, because they
+            trade. One press instead of twenty page visits. */}
+        {movers.length > 0 && (
+          <button
+            className={`chip cursor-pointer ml-auto normal-case ${notYet.length > 0 ? "chip-accent" : ""}`}
+            disabled={notYet.length === 0 || room === 0}
+            onClick={recordAll}
+            title={
+              room === 0
+                ? `the ledger is at its cap of ${WALLET_CAP} recording wallets`
+                : `mark every wallet below RECORD: the alert monitor re-reads each on its cadence and the ledger keeps the fills until there is enough history to grade`
+            }
+          >
+            {notYet.length === 0 ? "all recording" : `record all ${notYet.length}${notYet.length > room ? ` (room for ${room})` : ""}`}
+          </button>
+        )}
       </div>
+      {lastPress && <div className="px-3 pb-1 text-[10.5px] dim">{lastPress}</div>}
       <div className="max-h-[320px] overflow-y-auto">
         <table className="w-full text-[12px]">
           <thead className="thead">
@@ -95,12 +136,27 @@ function LiveMovers() {
             </tr>
           </thead>
           <tbody className="num">
-            {movers.map((m) => (
+            {movers.map((m) => {
+              const rec = byAddress.get(m.owner);
+              const rep = rec?.reputation;
+              return (
               <tr key={m.owner} className="trow">
                 <td className="px-3 py-1.5">
                   <Link href={`/whale?a=${m.owner}`} className="hover:text-[var(--accent)]">
                     {shortAddr(m.owner)}
                   </Link>
+                  {rec?.recording && (
+                    <span
+                      className={`chip ml-2 text-[9.5px] ${rep?.smart ? "chip-accent" : ""}`}
+                      title={
+                        rep?.verdict === "measured"
+                          ? `grade ${rep.grade} · ${rep.score}/100 over ${rep.roundTrips} round trips`
+                          : `recording · ${rec.fills} fills · ${rep?.needs.join(", ") ?? "reading"}`
+                      }
+                    >
+                      {rep?.verdict === "measured" ? `${rep.grade}${rep.smart ? " · SMART" : ""}` : "● REC"}
+                    </span>
+                  )}
                 </td>
                 <td className={`text-right px-2 ${m.netUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(m.netUsd)}</td>
                 <td className="text-right px-2 dim">{fmtUsd(m.grossUsd)}</td>
@@ -108,7 +164,8 @@ function LiveMovers() {
                   {m.tokens.slice(0, 4).join(", ")}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
         {movers.length === 0 && (

@@ -68,6 +68,7 @@ import { deliverNotification } from "@/lib/alerts/notify";
 import { due, lastAttemptAt, noteAttempt, subscribeNudges } from "@/lib/alerts/cadence";
 import { setWatched } from "@/lib/live/rpc-ws";
 import { recordedWallets } from "@/lib/ledger/store";
+import { tickLaunchRecord } from "@/lib/launch-record/store";
 
 interface DetailResp {
   snapshot?: { priceUsd: number; liquidityUsd: number; ts?: number; unmeasured?: readonly string[] };
@@ -429,6 +430,10 @@ export function AlertMonitor() {
       inTick = true;
       wakeSoon = false;
       const now = Date.now();
+      // The launch record resolves its day-old rows from here, on every
+      // page, rate-gated inside — so a launch seen yesterday is looked up
+      // today whether or not the launch feed is the page that is open.
+      void tickLaunchRecord(now);
       const visible = typeof document === "undefined" || document.visibilityState === "visible";
       const { rules, states, settings } = loadAlerts();
       const enabled = rules.filter((r) => r.enabled);

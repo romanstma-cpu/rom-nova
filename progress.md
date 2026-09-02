@@ -228,7 +228,32 @@ Second smoke, all real, all in the built export:
 - Dashboard: ACTIONABLE SIGNALS · score ≥ 64 · live trending list;
   Highest Conviction wearing LIVE.
 
-Tagging v1.8.0; site copy and installer verification follow.
+### 🚢 1.8.0 SHIPPED and proven, site and app (2026-09-02 ~4:25 PM)
+
+- Tag `v1.8.0` → CI green in ~4 minutes. Installer SHA256
+  `2408bfe7…53dc` matches GitHub's own digest, `SHA256SUMS.txt`, and the
+  local hash of the downloaded file; `latest.yml` says 1.8.0, so every
+  1.7.1 desktop will pull this on its next clean quit.
+- Site: static export mirrored into rom-apps, both version strings bumped
+  with the Edit tool, pushed. Live check: exactly two `1.8.0` on the page,
+  zero stale `1.7.x`, `/nova/signals/` serving 200, and the download
+  button's redirect resolves to the v1.8.0 asset.
+- Desktop: installed the hash-verified build, and the app opened a titled
+  window ("ROM Nova — Solana On-Chain Intelligence", four processes),
+  reports 1.8.0.0, closed cleanly, and left a fresh localStorage leveldb
+  write — the exact checks the headless regression taught us to run.
+- One trap found during the proof, for the next release: this shell runs
+  under MSIX file virtualization, so `$env:APPDATA` here is the Claude
+  package's LocalCache mirror, not the real Roaming folder. The first
+  storage check read the stale mirror and looked like a failure. Desktop
+  proofs must check the explicit real path
+  (`C:\Users\W\AppData\Roaming\ROM Nova`) — recorded in memory.
+
+The ask was "make the app have live signals and real time new data."
+Both halves are now true, shipped, and verifiable by anyone: open
+/signals and the provenance strip names the vendor; open the launch feed
+and the push chip counts frames as pump.fun mints them; open /status and
+every socket is connected with a last-frame age or down with a reason.
 
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 

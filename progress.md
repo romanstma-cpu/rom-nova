@@ -301,6 +301,31 @@ track-record explainers fold to one line + "how to read this",
 remembered per page — every paragraph was earned by a review finding, so
 they stay one click down rather than disappearing.
 
+### 🚢 1.9.0 SHIPPED and proven, site and app (2026-09-02 ~5:10 PM)
+
+Smoke of the export before tagging, all real: dashboard down to three
+tiles (live SOL, one labelled simulated-market tile, live actionable
+signals); the rail at six links with "more" opening the grouped rest; the
+launch-feed explainer folded to 40px; and the ledger loop end to end —
+RECORD on a live mover (an exchange hot wallet, 143k SOL) took 261 fills
+on the click, all of them transfers and correctly excluded, the panel said
+"insufficient — needs 10 more closed round trips, 5.9 more observed days",
+/status listed it under Wallet Ledger, and after a reload it was still
+recording with three reads, two of them the monitor's own. Persistence and
+the auto re-read both proven before a byte was published.
+
+Then: `c48a291` (ledger + declutter, 665 tests) → `635a52b` (1.9.0) →
+tag → CI green in ~5 min. Installer SHA256 `2a3b1d54…277d` = GitHub
+digest = SHA256SUMS = local; `latest.yml` 1.9.0. Site: 2×1.9.0, 0 stale,
+wallet page 200, status page carries the ledger block, download button
+redirects to the v1.9.0 asset. Desktop: installed the verified build,
+titled window, four processes, 1.9.0.0, clean close, fresh leveldb write
+at the REAL profile path (not the MSIX mirror).
+
+What LO has now that he did not have this morning: an app that, for any
+wallet he chooses, keeps the receipts — and will only call it smart money
+once the receipts say so.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

@@ -187,6 +187,49 @@ feature vector (`flowWindowMs`: 6h from the simulator, the slice of chain
 actually read on live data, absent when nobody read), so the invalidation
 copy and the snapshot caption read the same field and cannot drift again.
 
+## 🚢 1.8.0 — live signals and real-time data, built, merged, shipping
+
+Both builders died to the limit a second time mid-afternoon, so I finished
+their remaining work by hand rather than respawn them. What the disk held:
+B1 needed only its gates run and its last two pieces committed (the feed
+core was already at `75c1623`; the handler wiring and its thirteen tests
+landed as `a61ac09` + `09dd168`). B2 was one import line short of
+compiling — `noteProviderCall` used in the chain reader, never imported —
+and otherwise whole: the reconnecting socket wrapper, the PumpPortal
+pusher, the per-account RPC planner, the alert cadence with its nudge, the
+status/launches/alerts pages, and 23 transport tests, all uncommitted.
+One line added, gates run, committed as `910d540`.
+
+Merged both to main (one conflict, a shared import line, union taken).
+650 tests, tsc clean, build clean on the merged tree — and then the first
+smoke of the export crashed /signals, which is why smoke tests outrank
+green gates: `handleAccuracy` now honestly returns `stats: null` on the
+live path, and the accuracy strip read `.windowDays` off the null. B1 had
+changed the API and never updated the page that renders it. Fixed the
+strip to render the Track Record pointer, gave /signals the provenance
+strip the API was already supplying, made the dashboard KPI say which
+universe it counted (H7), and put SIMULATED on the 72h flow chart and the
+/flow page — the surfaces that stay synthetic (H5). `651d2d1`.
+
+Second smoke, all real, all in the built export:
+
+- **/signals: LIVE · JUPITER**, twelve scored trending tokens (Fartcoin
+  STRONG POSITIVE 77 with a measured 382% volume dislocation), the
+  coverage note that twelve tokens are not the chain, pass turnover, and
+  the accuracy pointer instead of a fabricated history.
+- **Launch feed: push connected, last frame under a second old, a token
+  pushed this session, 1/1 curves watched** over the RPC socket, mint lag
+  1.2s and push lag reported separately because they come down different
+  pipes.
+- **/status: the LIVE SOCKETS block** — connected-or-down with no third
+  state, the subscription plan against its caps, and the measured
+  program-wide rates (pump.fun 567/s, 612 KB/s) printed as the reason
+  everything is per-account.
+- Dashboard: ACTIONABLE SIGNALS · score ≥ 64 · live trending list;
+  Highest Conviction wearing LIVE.
+
+Tagging v1.8.0; site copy and installer verification follow.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

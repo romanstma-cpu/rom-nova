@@ -145,9 +145,43 @@ dead since.
 **Fixed:** `rpc-proxy.js` added to `files`; a test now reads `main.js`'s
 local requires the way Node will and the bundle list the way
 electron-builder will, transitively, and fails naming the file — verified
-against the shipped package.json. **1.7.1 tagged.** Desktop installs on
-1.4.0–1.7.0 need one manual reinstall from the download link; after that
-auto-update works again. The web build is unchanged.
+against the shipped package.json. The web build is unchanged.
+
+**A detour on the way to the tag, worth recording:** the version bump was
+written with `Set-Content -Encoding utf8`, which on PowerShell 5.1
+prepends a UTF-8 BOM, and the first v1.7.1 tag carried it in the manifest
+electron-builder reads. Three text-level checks said the committed file
+was clean — PowerShell strips BOMs on read, so text checks lie. Only
+`git cat-file blob` through cmd redirection showed EF BB BF. Node and npm
+tolerate it; whether electron-builder 25 does was a guess, and a release
+tag is not the place for one. CI cancelled at 1m47s, BOM stripped with an
+explicit no-BOM encoder, tag force-moved to a byte-verified commit, rebuilt.
+
+### 🚢 1.7.1 SHIPPED and proven on the desktop
+
+Release verified three ways: `latest.yml` reads 1.7.1; the installer I
+downloaded hashes to exactly the published `2d029217…ca144`;
+`releases/latest` redirects to v1.7.1. Site live at 1.7.1, zero stale
+strings.
+
+Then the proof the campaign never had: installed 1.7.1 here (the manual
+reinstall a headless build requires), read the `app.asar` header —
+**`rpc-proxy.js` present** — and launched it. **One visible titled window,
+"ROM Nova — Solana On-Chain Intelligence", four renderer processes**
+(the headless build had three and only IME handles), and the storage log
+written at 19:37:33, squarely inside the run, by page JS the headless
+build never executed. Clean close, zero processes left, exe still 1.7.1.
+
+One honest caveat: the window opened minimized behind a fullscreen game
+on this machine, so the page was `hidden` and the alert monitor paused
+rather than writing its lease — which is the app doing what round 3 of
+W5 made it do. I did not pull focus to force the visible path; the
+render proof does not need it.
+
+**Anyone on desktop 1.4.0–1.7.0 needs one manual reinstall from the
+download link. After that, auto-update works again** — verified end to
+end on this machine: 1.1.1 pulled 1.7.0 in five seconds and installed it
+on a clean quit; it was only 1.7.0 itself that could not run.
 
 ## Post-ship verification — "make sure it's live on site and app"
 

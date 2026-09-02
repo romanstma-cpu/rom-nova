@@ -91,6 +91,19 @@ interface ProfileResp {
  */
 export const NUDGE_WAKE_MS = 250;
 
+/**
+ * How often a wallet that is only RECORDED — no alert rule — is re-read.
+ *
+ * Slower than a rule wallet on purpose. A full wallet read is up to ~400
+ * RPC calls against a public budget of about 2,400 a minute; twenty-five
+ * recorded wallets at the alert cadence would spend the whole budget on the
+ * ledger and leave the wallet page itself getting 429s — which is exactly
+ * what the first smoke of "record all" produced. The ledger needs days of
+ * history, not minutes of freshness; the retention window it reads is two
+ * days wide, so ten minutes between reads loses nothing.
+ */
+export const LEDGER_EVERY_MS = 10 * 60_000;
+
 function stateFor(states: Record<string, RuleEvalState>, rule: LiveAlertRule): RuleEvalState {
   return states[rule.id] ?? { ruleId: rule.id };
 }
@@ -530,7 +543,7 @@ export function AlertMonitor() {
         // nothing evaluates, nothing fires, the ledger grows.
         for (const w of recorded) if (!byWallet.has(w)) byWallet.set(w, []);
         const dueWallets = [...byWallet.keys()]
-          .filter((w) => due(`wallet:${w}`, WALLET_EVERY_MS, now))
+          .filter((w) => due(`wallet:${w}`, byWallet.get(w)!.length > 0 ? WALLET_EVERY_MS : LEDGER_EVERY_MS, now))
           .sort((a, b) => lastAttemptAt(`wallet:${a}`) - lastAttemptAt(`wallet:${b}`))
           .slice(0, 1);
         for (const w of dueWallets) jobs.push(passWallet(w, byWallet.get(w)!, states, now));

@@ -326,6 +326,48 @@ What LO has now that he did not have this morning: an app that, for any
 wallet he chooses, keeps the receipts — and will only call it smart money
 once the receipts say so.
 
+## 1.10.0 — close the loop (2026-09-02, evening)
+
+LO: "start with 1, 2, and 3 together as one release." Built by hand,
+committed as `4961250`:
+
+- **The launch record.** The feed triages every mint in ~130ms and nothing
+  ever checked whether AVOID / CAUTION / UNVERIFIED predicted anything.
+  `src/lib/launch-record` listens to the feed's own merge, writes every row
+  down with its verdict (settled when the risk read lands or after 90s),
+  keeps the first price inside two minutes as "at first sight", notes a
+  graduation the feed itself sees as a free outcome, and an hour and a day
+  later asks Jupiter one batched question per hundred mints: listed, price,
+  liquidity, graduated. The track page gains a LAUNCH RECORD: by verdict,
+  by deployer history (first / repeat / serial), by launchpad — graduation
+  rate, survival with $1,000+ liquidity, median return — each refused below
+  thirty resolved per bucket. Resolves from the monitor's tick on every
+  page; a closed laptop expires a horizon. IndexedDB, 20,000 cap, 14 days.
+- **Record all.** One button on the movers list marks every wallet moving
+  right now RECORD, up to the cap, and each row shows REC or its grade.
+- **Alert on fills.** One press on a recorded wallet arms a `wallet_fills`
+  rule (`ensureWalletFillsRule` — re-enables rather than duplicates).
+
+Smoke in the export: 72 launches recorded in half a minute (10 unverified /
+8 caution / 54 avoid; 13 first-mint / 19 repeat / 36 serial), every rate
+honestly "0 of 30 resolved". RECORD ALL 25 took all 25; within three
+minutes one of them had 380 fills and 6 round trips. RECORD → IndexedDB
+25→26, survived reload, ALERTING chip rendered off the alerts store.
+
+**Two findings from the smoke, both fixed before tagging.** (1) Recording
+25 wallets at the alert cadence ate the public RPC budget — a wallet read
+is up to ~400 calls against ~2,400/min — and the wallet page itself got
+429s. Recorded-only wallets now re-read every 10 minutes
+(`LEDGER_EVERY_MS`); the ledger needs days of history, not minutes of
+freshness, and the two-day retention window loses nothing at that pace.
+(2) A wallet recorded in the 1.9.0 smoke was missing from the store —
+traced to the preview server restart resetting the browser pane's
+storage, not to the app: a fresh RECORD persisted, survived a reload, and
+25 others sat in the same database. Noted in memory as a verification
+trap: never assume the pane's IndexedDB survives a `preview_start`.
+
+677 tests, tsc clean, build clean, lint clean.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

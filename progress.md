@@ -427,6 +427,33 @@ with parsed encoding: the launch transactions already name each buyer's
 token account, so one batched call now reads all of them at once, a null
 entry meaning the account was closed after selling out. Twelve lookups
 became one request, and the column says whose account it is reading.
+(Refined by probe: ten accounts per call answer, eleven are blocked —
+chunks of eight.)
+
+### 🚢 1.11.0 SHIPPED and proven, site and app (2026-09-03 ~12:00 PM)
+
+One detour first: the overnight build began referencing a chunk that was
+never written — every page half-dead, all-demo chip, empty feeds — traced
+to a corrupted node_modules (next's compiled edge-runtime had lost its
+index.js). `npm ci` repaired it; the pre-ship check now includes walking
+every chunk's references against the files on disk (36 chunks, 0 missing).
+
+Second live proof, on a mint SECONDS old from the launch feed: creation
+transaction read, supply measured at 1,000,000,000, dev bought 0.36% and
+still holds all of it, sold 0%, balance read 1 of 1 via the batched call,
+no bundle, no snipers — 3 RPC calls in 0.3s. Together with yesterday's
+21.3%-sniped read, both shapes of the answer are proven in the export.
+
+Then the flow: `bacb7cb` (forensics) → `ae5b0dd` (1.11.0) → tag → CI
+green. Installer SHA256 `998d3712…41cb` = digest = SUMS; `latest.yml`
+1.11.0; site 2×1.11.0, 0 stale; installed app titled window, 1.11.0.0,
+clean close, fresh storage write at the real profile path.
+
+The pitch, for LO: open any token page and press READ THE LAUNCH — or
+just open a fresh mint, where it runs itself. BUNDLED, SNIPED, DEV
+BOUGHT/SOLD, and who is still in, measured from the chain in your own
+browser, fed straight into the score. The readout GMGN charges for,
+keyless, with the receipts printed underneath.
 
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 

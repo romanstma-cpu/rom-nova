@@ -62,6 +62,12 @@ export interface LiveSources {
    * `liveFeatures` for why a vendor's opinion stays out of the weighted mean.
    */
   risk?: TokenRiskProvider;
+  /**
+   * Optional: a finished launch-forensics read for the mint, if someone asked
+   * for one. Synchronous because it is a cache lookup — the read itself costs
+   * ~60 RPC calls and is never made on the scorer's behalf, only on a page's.
+   */
+  forensics?: (mint: string) => { bundlerPct?: number; sniperPct?: number; devSoldPct?: number; supplyTokens?: number } | undefined;
 }
 
 /**
@@ -594,6 +600,25 @@ export async function liveFeatures(
     provenance.push("no flow provider configured — whale and smart-money flow unmeasured");
   }
 
+  // A launch-forensics read, if a page has made one for this mint. It closes
+  // three gaps the vendors never will — bundled share, sniped share, and
+  // whether the deployer has sold — and the provenance line says how.
+  const forensic = sources.forensics?.(mint);
+  if (forensic) {
+    if (forensic.bundlerPct !== undefined && forensic.sniperPct !== undefined) {
+      unmeasured.delete("bundlerPct");
+      unmeasured.delete("sniperPct");
+    }
+    if (forensic.devSoldPct !== undefined) unmeasured.delete("devSold");
+    provenance.push(
+      `launch forensics (solana-rpc): ` +
+        (forensic.supplyTokens !== undefined
+          ? `bundled ${((forensic.bundlerPct ?? 0) * 100).toFixed(1)}%, sniped ${((forensic.sniperPct ?? 0) * 100).toFixed(1)}% of the supply measured in the creation transaction`
+          : "creation carried no balances — bundled and sniped shares stay unmeasured") +
+        (forensic.devSoldPct !== undefined ? `; deployer has sold ${(forensic.devSoldPct * 100).toFixed(0)}% of its launch buy` : "; deployer balance not looked up"),
+    );
+  }
+
   const features: FeatureVector = {
     asOf: now,
     // Zero here is a placeholder while "smartMoney" is in `unmeasured`, and a
@@ -642,14 +667,19 @@ export async function liveFeatures(
     // The risk provider is the only source here that flags insider-linked
     // holders, and only from the full report where the graph analysis ran.
     insiderPct: risk?.insiderPct ?? snapshot.insiderPct,
-    bundlerPct: snapshot.bundlerPct,
-    sniperPct: snapshot.sniperPct,
+    // From the chain, when a launch-forensics read exists for this mint: the
+    // share of the measured supply bought inside the creation transaction
+    // (bundled) and in the creation slot plus the next three (sniped). No
+    // vendor in this stack publishes either, so without the read they stay
+    // the provider's placeholder under the unmeasured flag.
+    bundlerPct: forensic?.bundlerPct ?? snapshot.bundlerPct,
+    sniperPct: forensic?.sniperPct ?? snapshot.sniperPct,
     devHoldsPct: snapshot.devHoldsPct,
-    // Nothing in this stack watches the deployer's balance over time, so this
-    // is a placeholder and NOT a finding. It is declared unmeasured above; the
-    // Dev Selling factor stands down and the invalidation copy stops promising
-    // a flag that could never fire.
-    devSold: false,
+    // The deployer's balance against its own launch buy, from the same read.
+    // Without it, a placeholder and NOT a finding: declared unmeasured above,
+    // the Dev Selling factor stands down and the invalidation copy stops
+    // promising a flag that could never fire.
+    devSold: forensic?.devSoldPct !== undefined ? forensic.devSoldPct >= 0.5 : false,
     // The deployer's mint history, into the vector at last. It has been on the
     // scanner row and the deployer card since they shipped, described there as
     // "a warning", and the scorer could not see it — CATE rendered POSITIVE/73

@@ -20,7 +20,8 @@ const MAX_TRADE_EDGES = 160;
 import { buildFlowSeries, buildTokenRows, buildWalletRows } from "./rows";
 import { DEMO, LIVE_LIST_LIMIT, candlesFor, listCacheAge, measuredInterval, trendingRows, walletProfile } from "./source";
 import type { ChartInterval } from "../providers/jupiter-chart";
-import { liveTokenDetail } from "./detail";
+import { liveTokenDetail, invalidateDetail } from "./detail";
+import { readLaunchForensics } from "../providers/launch-forensics";
 import { lastLivePass, liveSignalsFor, liveTrackFor, resolveLiveMint } from "../live/signals";
 import { isRecording, recordFills } from "../ledger/store";
 import { noteOutcome } from "../providers/health-log";
@@ -490,6 +491,23 @@ export async function handleWalletProfile(address: string, stage: "balances" | "
   // response: this path is cached for 45 seconds, and anything that stamps its
   // own clock on a cached profile overstates how fresh the chain read was.
   return { profile: sourced.data, provenance: sourced.provenance, builtAt: sourced.builtAt, demo: false };
+}
+
+/**
+ * Read a mint's launch: who bought in the creation transaction and the slots
+ * after it, against the supply the creation minted, and what they still hold.
+ *
+ * On demand only — ~60 RPC calls against the shared budget — and cached ten
+ * minutes. A finished read invalidates the detail cache so the next score
+ * reads the bundled and sniped shares instead of standing those factors down.
+ */
+export async function handleLaunchForensics(mint: string) {
+  if (!isPlausibleAddress(mint)) {
+    throw new ApiError(400, "That is not a Solana address. They are 32-44 characters of base58 — no 0, O, I or l.");
+  }
+  const result = await readLaunchForensics(mint);
+  if (result.ok) invalidateDetail(mint);
+  return { forensics: result, demo: false };
 }
 
 export function handleWalletDetail(store: DemoStore, address: string) {

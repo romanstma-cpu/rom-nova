@@ -24,6 +24,7 @@ import { Score, RiskBadge, Skel, TokenMark, Freshness, Empty } from "@/component
 import { PriceChart, type ChartMarker } from "@/components/charts/PriceChart";
 import { asChartInterval, NAMED_INTERVALS, type ChartInterval } from "@/lib/providers/jupiter-chart";
 import { FlowChart } from "@/components/charts/FlowChart";
+import { ForensicsPanel } from "@/components/token/ForensicsPanel";
 import { LineChart } from "@/components/charts/LineChart";
 import type {
   Candle,
@@ -637,6 +638,7 @@ function LiveToken({
         <div className="flex flex-col gap-3">
           <SecurityPanel detail={d} />
           <CreatorCard detail={d} />
+          <ForensicsPanel mint={info.mint} createdAt={info.createdAt} asOf={d.asOf} />
 
           {/* why / bear / invalidation */}
           <div className="panel p-3">

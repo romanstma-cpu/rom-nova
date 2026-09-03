@@ -383,6 +383,51 @@ ledger and the declutter, 1.10.0 the launch scorecard and the two buttons
 that turn the ledger into action — and every one proven on the site and
 in the installed app before being called shipped.
 
+## 1.11.0 — launch forensics (2026-09-02, night)
+
+LO: "add a feature that would make the app extremely useful for memecoin
+traders." Picked the check every memecoin trader makes before buying and
+pays GMGN or Axiom to see: who bought inside the creation transaction,
+who sniped the first slots, what share of the supply that was, and
+whether the deployer and those wallets are still holding. Nova's risk
+model has carried `bundlerPct` and `sniperPct` since day one and could
+never measure either — no keyless vendor publishes them.
+
+`src/lib/providers/launch-forensics.ts` reads them off the chain, on
+demand, per token: the mint's own signatures paged back to its creation
+(five pages, deeper refused), the first 48 bodies, the supply summed from
+the creation's post balances (measured, not assumed), the fee payer as
+deployer, other on-curve owners inside the create as bundled, the
+creation slot and the next three as sniped, PDAs never counted. It goes
+through the wallet reader's shared RPC limiter (new `rpcCall` export)
+because a second reader with its own copy would spend the same 2,400
+requests twice. The scorer reads it through `LiveSources.forensics`:
+bundled and sniped leave the unmeasured set, dev-sold becomes a
+measurement, and a finished read invalidates the detail cache so the
+next poll re-scores. The token page's new panel auto-runs on mints under
+a day old.
+
+**First live read, on a one-minute-old pump.fun mint:** 464 signatures
+back to creation, 48 bodies, 25 slots, supply 1,000,000,000 measured;
+BUNDLED 0.0%, SNIPED 21.3% across seven creation-slot wallets and four
+in the next slots, dev bought 3.5%; 61 RPC calls in 16.9s.
+
+**Two findings from that read, both fixed before tagging.** (1) The
+first attempt at forty seconds old found NO signatures — publicnode's
+account index lags a brand-new mint by a minute or two (empty at 40s,
+462 at three minutes) — and "re-read" returned the same answer because
+refusals were cached ten minutes. Now refusals cache thirty seconds and
+the panel retries four times at fifteen-second intervals, saying it is
+waiting for the index. (2) Every current-balance lookup failed:
+publicnode refuses `getTokenAccountsByOwner` outright — "Indexed
+requests require a personal token", HTTP 403 — a fact no probe had hit
+before — and so is `getTokenAccountBalance`, which the second attempt
+found gated the same way. What is not gated is `getMultipleAccounts`
+with parsed encoding: the launch transactions already name each buyer's
+token account, so one batched call now reads all of them at once, a null
+entry meaning the account was closed after selling out. Twelve lookups
+became one request, and the column says whose account it is reading.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

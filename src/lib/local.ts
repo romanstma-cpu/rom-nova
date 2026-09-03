@@ -35,6 +35,7 @@ import {
   handleTokens,
   handleWalletDetail,
   handleWalletProfile,
+  handleLaunchForensics,
   handleWallets,
   handleWatchlistOp,
   handleWatchlists,
@@ -150,6 +151,12 @@ export async function localGet(url: string): Promise<LocalResponse> {
           status: 200,
           body: await handleTokenDetail(store, m[1], num(q.get("asOf")), (q.get("profile") ?? "balanced") as StrategyProfileId),
         };
+    }
+    {
+      // The launch read: the visitor's own browser walking the mint's first
+      // transactions on the public RPC. On demand, never from a list.
+      const m = p.match(/^\/api\/tokens\/([^/]+)\/forensics$/);
+      if (m) return { status: 200, body: await handleLaunchForensics(m[1]) };
     }
     // Awaited, like candles: in the static build this is a real fetch from the
     // visitor's own browser. The feed's rolling state lives in this module for

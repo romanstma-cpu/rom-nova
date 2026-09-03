@@ -38,6 +38,7 @@ import type { MarketDataProvider, TokenFlow, TokenRisk } from "../providers/type
 import { auditFactors, type ScoreAudit } from "../engine/signals";
 import { liveSignal } from "../engine/live-features";
 import { getProviders } from "../providers/registry";
+import { forensicsFor } from "../providers/launch-forensics";
 import type { StrategyProfileId } from "../types";
 
 /**
@@ -233,6 +234,17 @@ const MAX_CACHED = 24;
  * which is the right answer for a demo mint and the honest answer for a mint
  * nobody lists.
  */
+/**
+ * Drop the cached assembly for a mint, so the next detail read re-scores.
+ *
+ * Called when a launch-forensics read lands: the vector it feeds is built
+ * inside `assemble`, and a page that just paid sixty RPC calls to measure
+ * the bundled share should not wait out the cache to see the score move.
+ */
+export function invalidateDetail(mint: string): void {
+  for (const key of [...cache.keys()]) if (key.startsWith(`${mint}:`)) cache.delete(key);
+}
+
 export async function liveTokenDetail(
   mint: string,
   profile: StrategyProfileId = "balanced",
@@ -279,6 +291,9 @@ async function assemble(
       security: providers.security.name === "demo" ? undefined : providers.security,
       flow: providers.flow,
       risk: providers.risk,
+      // A finished forensics read for this mint reaches the scorer here; the
+      // read itself is only ever made by the token page, never by a list.
+      forensics: forensicsFor,
     },
     profile,
     now,

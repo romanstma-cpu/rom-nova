@@ -102,14 +102,14 @@ const LAMPORTS_PER_SOL = 1_000_000_000;
 
 // ---------------------------------------------------------------- RPC shapes
 
-interface SignatureRow {
+export interface SignatureRow {
   signature: string;
   slot: number;
   blockTime: number | null;
   err: unknown;
 }
 
-interface TokenBalanceRow {
+export interface TokenBalanceRow {
   accountIndex: number;
   mint: string;
   owner?: string;
@@ -318,9 +318,26 @@ async function rpc<T>(
   throw last;
 }
 
+/**
+ * The same call, for readers outside this file.
+ *
+ * Exported rather than duplicated because the LIMITER is the point: the
+ * budget window and the shared cooldown are module state, and a second
+ * reader with its own copy would spend the same 2,400 requests twice and get
+ * both of them blacklisted. The launch forensics reader goes through here.
+ */
+export function rpcCall<T>(
+  endpoint: string,
+  method: string,
+  params: unknown[],
+  opts: { timeoutMs?: number; signal?: AbortSignal } = {},
+): Promise<T> {
+  return rpc<T>(endpoint, method, params, opts);
+}
+
 // ---------------------------------------------------------------- extraction
 
-const keyAt = (k: { pubkey: string } | string): string => (typeof k === "string" ? k : k.pubkey);
+export const keyAt = (k: { pubkey: string } | string): string => (typeof k === "string" ? k : k.pubkey);
 
 /** Per-mint raw balance change for the token accounts this wallet owns. */
 export interface MintDelta {

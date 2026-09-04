@@ -25,6 +25,7 @@
 
 import { emitLiveEvent } from "@/lib/live/bus";
 import { isSignalBuy } from "./engine/classify.js";
+import { HeliusStream } from "./engine/helius.js";
 import { startPumpPortal } from "./engine/pumpportal.js";
 import { startRpcStream } from "./engine/rpcstream.js";
 import { applyFill, newWallet, scoreOf } from "./engine/score.js";
@@ -47,8 +48,13 @@ const PUMPPORTAL_URL = "wss://pumpportal.fun/api/data";
 const RPC_WS_URL = "wss://solana-rpc.publicnode.com";
 
 const CONFIG_KEY = "whalenova_radar_hunt_v1";
+const HELIUS_KEY = "whalenova_radar_helius_v1";
 const FLUSH_MS = 500;
 const CLOCK_MS = 5_000;
+/** Top-scored wallets the optional Helius stream follows off the curve. */
+const HELIUS_WALLET_SUBS = 20;
+/** Helius getTransaction budget, req/s — free tier allows 10; leave headroom. */
+const HELIUS_RPS = 6;
 
 export interface HunterGates {
   whaleThresholdSol: number;
@@ -115,6 +121,18 @@ export interface HunterLaunch {
   at: number;
 }
 
+export interface HunterHeliusStatus {
+  /** A key is saved in this browser. */
+  keySet: boolean;
+  /** The stream is running (hunting + key). */
+  active: boolean;
+  connected: boolean;
+  following: number;
+  txFetches: number;
+  txErrors: number;
+  offCurveFills: number;
+}
+
 export interface HunterSnapshot {
   running: boolean;
   phase: "off" | "starting" | "hunting";
@@ -122,6 +140,7 @@ export interface HunterSnapshot {
   gates: HunterGates;
   counts: { launches: number; tradesSeen: number; whales: number; journaled: number; signals: number; tracked: number };
   streams: { pump: HunterStream | null; rpc: HunterStream | null };
+  helius: HunterHeliusStatus;
   /** What the journal handed back at start — the proof persistence works. */
   hydrated: { wallets: number; fills: number };
   top: HunterWalletRow[];
@@ -132,6 +151,16 @@ export interface HunterSnapshot {
   asOf: number;
 }
 
+const HELIUS_OFF: HunterHeliusStatus = {
+  keySet: false,
+  active: false,
+  connected: false,
+  following: 0,
+  txFetches: 0,
+  txErrors: 0,
+  offCurveFills: 0,
+};
+
 const SERVER_SNAPSHOT: HunterSnapshot = {
   running: false,
   phase: "off",
@@ -139,6 +168,7 @@ const SERVER_SNAPSHOT: HunterSnapshot = {
   gates: HUNTER_DEFAULTS,
   counts: { launches: 0, tradesSeen: 0, whales: 0, journaled: 0, signals: 0, tracked: 0 },
   streams: { pump: null, rpc: null },
+  helius: HELIUS_OFF,
   hydrated: { wallets: 0, fills: 0 },
   top: [],
   signals: [],
@@ -161,6 +191,7 @@ const listeners = new Set<() => void>();
 let state: InstanceType<typeof RadarState> | null = null;
 let pumpSock: EngineSocket | null = null;
 let rpcSock: EngineSocket | null = null;
+let helius: InstanceType<typeof HeliusStream> | null = null;
 let clock: ReturnType<typeof setInterval> | null = null;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let startSeq = 0;
@@ -196,6 +227,63 @@ function saveConfig(cfg: { on: boolean; thresholdSol: number }): void {
   } catch {
     /* still applies for this page load */
   }
+}
+
+// ------------------------------------------------------- optional Helius key
+//
+// Stored in this browser alone (same contract as the AI key on settings),
+// sent to helius-rpc.com and nowhere else — it rides the WebSocket URL and
+// the RPC POSTs because that is Helius's own auth scheme. What it buys: the
+// program firehose goes blind when a token migrates off the bonding curve;
+// with a key the hunter also follows its top-scored wallets' transactions
+// on every venue, so a proven wallet's record keeps growing after
+// graduation instead of freezing at the curve's edge.
+
+export function heliusKeyValue(): string {
+  try {
+    return typeof localStorage === "undefined" ? "" : (localStorage.getItem(HELIUS_KEY) ?? "");
+  } catch {
+    return "";
+  }
+}
+
+/** Helius keys are UUIDs. Loose on purpose — the live stream is the real test. */
+export function looksLikeHeliusKey(k: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(k.trim());
+}
+
+export function maskHeliusKey(k: string): string {
+  return k.length <= 8 ? "····" : `${k.slice(0, 4)}····${k.slice(-4)}`;
+}
+
+/** Save (or clear, with "") and apply live — the Helius leg restarts alone;
+ * the firehose and the journal never notice. */
+export function setHeliusKey(raw: string): void {
+  const key = raw.trim();
+  try {
+    if (key) localStorage.setItem(HELIUS_KEY, key);
+    else localStorage.removeItem(HELIUS_KEY);
+  } catch {
+    /* applies for this page load regardless */
+  }
+  restartHelius();
+  scheduleFlush();
+}
+
+function restartHelius(): void {
+  helius?.stop();
+  helius = null;
+  const key = heliusKeyValue();
+  if (!state || !key) return;
+  const h = new HeliusStream(
+    { heliusApiKey: key, heliusWalletSubs: HELIUS_WALLET_SUBS, heliusRps: HELIUS_RPS },
+    () => state?.top(HELIUS_WALLET_SUBS).map((w: { wallet_address: string }) => w.wallet_address) ?? [],
+    (t) => {
+      state?.onTrade(t);
+    },
+  );
+  h.start();
+  helius = h;
 }
 
 function scheduleFlush(): void {
@@ -236,6 +324,28 @@ function streamOf(name: string, sock: EngineSocket | null): HunterStream | null 
   };
 }
 
+function heliusStatusOf(): HunterHeliusStatus {
+  const keySet = heliusKeyValue() !== "";
+  if (!helius) return { ...HELIUS_OFF, keySet };
+  const s = helius.status() as {
+    enabled: boolean;
+    socket?: { connected?: boolean } | null;
+    following?: number;
+    txFetches?: number;
+    txErrors?: number;
+    offCurveFills?: number;
+  };
+  return {
+    keySet,
+    active: s.enabled === true,
+    connected: s.socket?.connected === true,
+    following: s.following ?? 0,
+    txFetches: s.txFetches ?? 0,
+    txErrors: s.txErrors ?? 0,
+    offCurveFills: s.offCurveFills ?? 0,
+  };
+}
+
 /** Rebuild the immutable snapshot from the buffers. At most twice a second —
  * the trade stream would otherwise render this app at 220fps. */
 function flush(): void {
@@ -250,6 +360,7 @@ function flush(): void {
       ? { ...state.counts, tracked: state.tracked.size }
       : { launches: 0, tradesSeen: 0, whales: 0, journaled: 0, signals: 0, tracked: journalCounts().wallets },
     streams: { pump: streamOf("pump", pumpSock), rpc: streamOf("rpc", rpcSock) },
+    helius: heliusStatusOf(),
     hydrated,
     top: state ? (state.top(10) as HunterWalletRow[]) : [],
     signals: [...rings.signals],
@@ -407,6 +518,7 @@ export async function startHunting(thresholdSol?: number): Promise<void> {
   rpcSock = startRpcStream(cfgLike, (t) => {
     state?.onTrade(t);
   }) as EngineSocket;
+  restartHelius();
   clock = setInterval(scheduleFlush, CLOCK_MS);
   scheduleFlush();
 }
@@ -417,8 +529,10 @@ export function stopHunting(): void {
   startSeq++;
   pumpSock?.stop();
   rpcSock?.stop();
+  helius?.stop();
   pumpSock = null;
   rpcSock = null;
+  helius = null;
   state = null;
   if (clock) clearInterval(clock);
   clock = null;

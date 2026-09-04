@@ -7,6 +7,7 @@
 // after boot is event-driven; the only clocks are flush ticks, heartbeats
 // and the leaderboard push.
 
+import { HeliusStream } from "../../src/lib/radar/engine/helius.js";
 import { startPumpPortal } from "../../src/lib/radar/engine/pumpportal.js";
 import { startRpcStream } from "../../src/lib/radar/engine/rpcstream.js";
 import { RadarState } from "../../src/lib/radar/engine/state.js";
@@ -14,7 +15,6 @@ import { log, short } from "../../src/lib/radar/engine/util.js";
 import { loadConfig } from "./config.js";
 import { Db } from "./db.js";
 import { dexScreenerLookup, dexScreenerStatus } from "./dexscreener.js";
-import { HeliusStream } from "./helius.js";
 import { Feed } from "./io.js";
 
 const startedAt = Date.now();

@@ -11,7 +11,7 @@ const PROVIDERS: { name: string; healthKey: string; env: string[]; role: string;
   { name: "Crypto.com Exchange", healthKey: "cryptocom", env: ["keyless"], role: "live SOL_USD ticker from the public exchange API — cross-checks CoinGecko", keyless: true },
   { name: "Jupiter Tokens V2 + Swap V2", healthKey: "jupiter", env: ["JUPITER_API_KEY"], role: "token info, verification, organic score, swap routing (Ultra is superseded — not used)" },
   { name: "Birdeye", healthKey: "birdeye", env: ["BIRDEYE_API_KEY"], role: "OHLCV market data, token security, holder positions & labels (smart_trader / insider / dev / sniper / bundler)" },
-  { name: "Helius", healthKey: "helius", env: ["HELIUS_API_KEY"], role: "enhanced wallet transactions, webhooks, Solana RPC/WebSocket" },
+  { name: "Helius", healthKey: "helius", env: ["HELIUS_API_KEY"], role: "enhanced wallet transactions, webhooks, Solana RPC/WebSocket — the Whale Radar can also take a key pasted on its own page, stored in your browser, for off-curve coverage" },
   { name: "Nansen", healthKey: "nansen", env: ["NANSEN_API_KEY"], role: "optional premium wallet labels and smart-money datasets" },
   { name: "InfStones", healthKey: "infstones", env: ["INFSTONES_API_KEY"], role: "blockchain intelligence: third-opinion price cross-check" },
   { name: "DEX Screener", healthKey: "dexscreener", env: ["ENABLE_DEXSCREENER=true"], role: "keyless fallback for pairs, liquidity and price", keyless: true },
@@ -77,8 +77,10 @@ export default function SettingsPage() {
 
       <div className="panel p-3.5 text-[11.5px] dim leading-relaxed">
         <span className="panel-title block mb-1.5">Security posture</span>
-        No accounts, no personal data collected, no cookies beyond your browser&apos;s own storage of your workspace. API
-        keys exist only server-side in server mode and never reach a browser in any mode. There is no private-key or
+        No accounts, no personal data collected, no cookies beyond your browser&apos;s own storage of your workspace.
+        Vendor API keys exist only server-side in server mode; the two exceptions are keys YOU choose to paste into the
+        app — the optional AI key above and the Whale Radar&apos;s optional Helius key — which are stored in your
+        browser alone and sent only to their own vendors. There is no private-key or
         seed-phrase handling anywhere in this application, and live trading is not implemented: real-wallet integration is
         spec&apos;d to use wallet-adapter signatures with explicit per-trade confirmation, behind ENABLE_REAL_TRADING, and
         ships disabled. See <Link href="/legal" className="link">the disclaimer</Link> for the full data-honesty statement.

@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 import { PUMP_PROGRAM } from "../src/lib/radar/engine/decode.js";
-import { parseHeliusTx } from "../worker/src/helius.js";
+import { parseHeliusTx } from "../src/lib/radar/engine/helius.js";
 
 const WALLET = "TrackedWallet1111111111111111111111111111111";
 

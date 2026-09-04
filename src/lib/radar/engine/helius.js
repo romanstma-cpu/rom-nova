@@ -8,15 +8,19 @@
 // request budget, and reads the wallet's own token/SOL balance deltas into
 // the same fill shape the program stream produces.
 //
-// Without the key the module is inert and /health says so — coverage is
-// then "pump.fun bonding curve only", printed, not implied otherwise.
+// Without the key the module is inert and the driver's status surface — the
+// worker's /health, the app's radar page — says so: coverage is then
+// "pump.fun bonding curve only", printed, not implied otherwise.
 // UNMEASURED until run with a real key: this path ships structurally tested
 // (fixture transactions through parseHeliusTx) but has never spoken to
 // Helius from this codebase; its first live run belongs to the operator.
+// Both drivers use it — the Render worker and the in-app hunter; in a
+// browser the key comes from a field the visitor filled themselves and is
+// sent to helius-rpc.com and nowhere else.
 
-import { PUMP_PROGRAM } from "../../src/lib/radar/engine/decode.js";
-import { ReconnectingWs } from "../../src/lib/radar/engine/sockets.js";
-import { LruSet, log } from "../../src/lib/radar/engine/util.js";
+import { PUMP_PROGRAM } from "./decode.js";
+import { ReconnectingWs } from "./sockets.js";
+import { LruSet, log } from "./util.js";
 
 const RESUB_MS = 5 * 60_000;
 

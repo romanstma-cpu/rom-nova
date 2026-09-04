@@ -55,10 +55,15 @@ describe("follows store", () => {
   it("the plan sizes a signal from bankroll and risk, with defaults that survive nonsense", async () => {
     const f = await import("../src/lib/radar/follows");
     expect(f.copyPlanSnapshot()).toEqual(f.DEFAULT_PLAN);
-    f.setCopyPlan({ bankrollSol: 20, riskPct: 1 });
+    f.setCopyPlan({ bankrollSol: 20, riskPct: 1, costPct: 2.5 });
     expect(f.suggestedSizeSol(f.copyPlanSnapshot())).toBe(0.2);
-    store.set("whalenova_copyplan_v1", JSON.stringify({ bankrollSol: -3, riskPct: 42 }));
+    store.set("whalenova_copyplan_v1", JSON.stringify({ bankrollSol: -3, riskPct: 42, costPct: 9 }));
     expect(f.copyPlanSnapshot()).toEqual(f.DEFAULT_PLAN);
+    // The record nets the cost the reader set.
+    const closed = [{ id: "z", signalKey: null, mint: "M", name: null, wallet: null, entryPriceSol: 1, entryAt: 0, sizeSol: 2, exitPriceSol: 1.1, closedAt: 1 }];
+    expect(f.copyRecord(closed, 2.5).median).toBeCloseTo(0.075, 9);
+    expect(f.copyRecord(closed, 2.5).pnlSol).toBeCloseTo(0.15, 9);
+    expect(f.copyRecord(closed, 2.5).hitRate).toBe(0);
   });
 
   it("the record ignores open follows and counts hits at +10%", async () => {

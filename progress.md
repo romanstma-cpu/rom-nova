@@ -1007,6 +1007,28 @@ SNIPER with a 20% win rate, −$727 realized and an 11.7 SOL drawdown —
 the kind of row a copier needs to see before the score. Migration 002
 (now also carrying the four wallet columns) still unrun on LO's side.
 
+## 1.20.0 — the radar's own track record, net of cost (2026-09-04, evening)
+
+LO: "1 done 2 pick the best options then next." Migration 002 confirmed
+from /health (schema current, 32 signals and their first patch written).
+The three calls, made: **no execution** (the handoff already trades in
+the reader's own wallet; automation is custody, and adds exposure without
+edge); **accounts and payments yes, in V2** (Supabase Auth + Stripe, only
+once the hosted radar is the paid thing; the free app stays keyless and
+account-free); **no paid data** (social stays out until a budget exists).
+
+**The record.** `record.ts` `signalRecord(rows, costPct)`: per horizon
+the graded count, median gross, median net, hit rate at +10% (the bar a
+curve round trip needs), stale count; peak median; the signal wallets'
+exits (n, median return, median delay, how many inside 60s — before a
+person could have bought); wallets ranked by +5m median once two of their
+signals are graded; fourteen day buckets. Medians only. `RadarRecord.tsx`
+sits at the top of /track, reading this browser's journal (up to the
+300-signal cap) and re-reading whenever the hunter fires, grades or hears
+an exit. **Fee honesty.** The copy plan carries `costPct` (1 / 2.5 / 5);
+the desk shows net returns with gross in the tooltip; `copyRecord` nets
+before counting hits and summing SOL.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

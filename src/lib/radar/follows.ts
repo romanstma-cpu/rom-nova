@@ -39,10 +39,18 @@ export interface CopyPlan {
   bankrollSol: number;
   /** per-signal size as a percentage of the bankroll */
   riskPct: number;
+  /**
+   * What a round trip costs the reader, in percent: the curve's fee both
+   * ways plus priority fees and slippage. Every return the desk shows is
+   * netted against it, because a +2% grade is a loss after the curve has
+   * taken its cut twice.
+   */
+  costPct: number;
 }
 
-export const DEFAULT_PLAN: CopyPlan = { bankrollSol: 5, riskPct: 2 };
+export const DEFAULT_PLAN: CopyPlan = { bankrollSol: 5, riskPct: 2, costPct: 2.5 };
 export const RISK_CHOICES = [0.5, 1, 2, 5] as const;
+export const COST_CHOICES = [1, 2.5, 5] as const;
 
 // ------------------------------------------------------------- the stores
 
@@ -107,9 +115,11 @@ function parsePlan(raw: string): CopyPlan {
     const p = JSON.parse(raw) as Record<string, unknown>;
     const bankrollSol = num(p.bankrollSol);
     const riskPct = num(p.riskPct);
+    const costPct = num(p.costPct);
     return {
       bankrollSol: bankrollSol > 0 ? bankrollSol : DEFAULT_PLAN.bankrollSol,
       riskPct: (RISK_CHOICES as readonly number[]).includes(riskPct) ? riskPct : DEFAULT_PLAN.riskPct,
+      costPct: (COST_CHOICES as readonly number[]).includes(costPct) ? costPct : DEFAULT_PLAN.costPct,
     };
   } catch {
     return DEFAULT_PLAN;
@@ -229,10 +239,16 @@ export function openFollowMints(): string[] {
   return [...new Set(followsSnapshot().filter((f) => f.closedAt === null).map((f) => f.mint))];
 }
 
-/** A follow's return against a mark, as a fraction; null without a mark. */
+/** A follow's gross return against a mark, as a fraction; null without a mark. */
 export function followReturn(f: Follow, markPriceSol: number | null): number | null {
   const mark = f.closedAt !== null ? f.exitPriceSol : markPriceSol;
   return mark && mark > 0 ? mark / f.entryPriceSol - 1 : null;
+}
+
+/** The same return net of the plan's round-trip cost. */
+export function followReturnNet(f: Follow, markPriceSol: number | null, plan: CopyPlan): number | null {
+  const gross = followReturn(f, markPriceSol);
+  return gross === null ? null : gross - plan.costPct / 100;
 }
 
 /**
@@ -241,14 +257,15 @@ export function followReturn(f: Follow, markPriceSol: number | null): number | n
  * they recorded. Honest by construction — every number is one the reader
  * typed, which is why an empty record says nothing at all.
  */
-export function copyRecord(rows: Follow[]): { closed: number; median: number | null; hitRate: number | null; pnlSol: number } {
+export function copyRecord(rows: Follow[], costPct = 0): { closed: number; median: number | null; hitRate: number | null; pnlSol: number } {
   const closed = rows.filter((f) => f.closedAt !== null && f.exitPriceSol !== null);
   if (closed.length === 0) return { closed: 0, median: null, hitRate: null, pnlSol: 0 };
-  const rets = closed.map((f) => f.exitPriceSol! / f.entryPriceSol - 1).sort((a, b) => a - b);
+  // Net of the round-trip cost: what was banked, not what the chart did.
+  const rets = closed.map((f) => f.exitPriceSol! / f.entryPriceSol - 1 - costPct / 100).sort((a, b) => a - b);
   const mid = rets.length >> 1;
   const median = rets.length % 2 ? rets[mid] : (rets[mid - 1] + rets[mid]) / 2;
   const hits = rets.filter((r) => r >= 0.1).length;
-  const pnlSol = closed.reduce((acc, f) => acc + f.sizeSol * (f.exitPriceSol! / f.entryPriceSol - 1), 0);
+  const pnlSol = closed.reduce((acc, f) => acc + f.sizeSol * (f.exitPriceSol! / f.entryPriceSol - 1 - costPct / 100), 0);
   return { closed: closed.length, median, hitRate: hits / rets.length, pnlSol };
 }
 

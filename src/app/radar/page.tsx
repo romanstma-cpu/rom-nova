@@ -57,7 +57,9 @@ import {
   copyPlanServerSnapshot,
   copyPlanSnapshot,
   copyRecord,
+  COST_CHOICES,
   followReturn,
+  followReturnNet,
   followsServerSnapshot,
   followsSnapshot,
   removeFollow,
@@ -205,7 +207,7 @@ export default function RadarPage() {
   const walletsByAddr = new Map(view.wallets.map((w) => [w.wallet_address, w]));
   const signalsByKey = new Map(view.signals.map((s) => [s.signal_key ?? signalKeyOf(s), s]));
   const sizeSol = suggestedSizeSol(plan);
-  const record = copyRecord(follows);
+  const record = copyRecord(follows, plan.costPct);
   const openFollows = follows.filter((f) => f.closedAt === null).length;
 
   /** The best mark the app has for a mint right now: the last trade the radar saw. */
@@ -367,6 +369,21 @@ export default function RadarPage() {
         <span className="num text-[11.5px]">
           = <b className="text-[var(--accent)]">{sizeSol} SOL</b> a signal
         </span>
+        <label className="num text-[10.5px] faint flex items-center gap-1.5" title="what a round trip costs you: the curve's fee both ways plus priority fees and slippage; every return on the desk is shown net of it">
+          round trip costs
+          <select
+            className="input text-[11px]"
+            value={plan.costPct}
+            onChange={(e) => setCopyPlan({ ...plan, costPct: Number(e.target.value) })}
+            aria-label="Round-trip cost, percent"
+          >
+            {COST_CHOICES.map((c) => (
+              <option key={c} value={c}>
+                {c}%
+              </option>
+            ))}
+          </select>
+        </label>
         {notif === "default" && (
           <button type="button" className="btn text-[10px]" onClick={() => void requestNotifyPermission()} title="signals and exits will also reach your OS notification center, so a tab you are not looking at still gets through">
             Enable OS notifications
@@ -690,7 +707,7 @@ export default function RadarPage() {
             {record.closed > 0 && (
               <>
                 {" · "}
-                {record.closed} closed · median{" "}
+                {record.closed} closed · net of {plan.costPct}% · median{" "}
                 <span className={retCls(record.median ?? 0)}>{fmtRet(record.median ?? 0)}</span>
                 {" · "}
                 {Math.round((record.hitRate ?? 0) * 100)}% at or above +10% ·{" "}
@@ -719,7 +736,9 @@ export default function RadarPage() {
                   <th className="text-right px-2 font-medium" title="open: the last trade the radar saw on this mint; closed: your exit">
                     Mark
                   </th>
-                  <th className="text-right px-2 font-medium">Return</th>
+                  <th className="text-right px-2 font-medium" title={`net of your ${plan.costPct}% round-trip cost; the gross figure is in the tooltip`}>
+                    Net return
+                  </th>
                   <th className="text-right px-2 font-medium">SOL</th>
                   <th className="text-left px-2 font-medium">Signal wallet</th>
                   <th className="text-right px-3 font-medium"></th>
@@ -729,7 +748,8 @@ export default function RadarPage() {
                 {follows.map((f: Follow) => {
                   const open = f.closedAt === null;
                   const mark = open ? markOf(f.mint) : f.exitPriceSol;
-                  const ret = followReturn(f, mark);
+                  const gross = followReturn(f, mark);
+                  const ret = followReturnNet(f, mark, plan);
                   const sig = f.signalKey ? signalsByKey.get(f.signalKey) : undefined;
                   const closing = closeDraft?.id === f.id;
                   return (
@@ -744,7 +764,9 @@ export default function RadarPage() {
                       <td className="text-right px-2 dim" title={open ? (mark !== null ? "last trade the radar saw" : "no trade seen on this mint since you followed — arm the radar, or the token is off the curve") : "your exit"}>
                         {mark !== null ? fmtPriceSol(mark) : "—"}
                       </td>
-                      <td className={`text-right px-2 ${ret !== null ? retCls(ret) : "faint"}`}>{ret !== null ? fmtRet(ret) : "—"}</td>
+                      <td className={`text-right px-2 ${ret !== null ? retCls(ret) : "faint"}`} title={gross !== null ? `gross ${fmtRet(gross)}, net of ${plan.costPct}%` : undefined}>
+                        {ret !== null ? fmtRet(ret) : "—"}
+                      </td>
                       <td className={`text-right px-2 ${ret !== null ? retCls(ret) : "faint"}`}>
                         {ret !== null && f.sizeSol > 0 ? `${ret * f.sizeSol >= 0 ? "+" : ""}${(ret * f.sizeSol).toFixed(3)}` : "—"}
                       </td>

@@ -992,6 +992,21 @@ Worker carries the same on the feed; migration 002 (still unrun by LO)
 gains the four wallet columns rather than a 003. `medianOf` moved to
 util.js to break a score↔behaviour import cycle. Dry run 45s clean.
 
+### 🚢 1.19.0 SHIPPED and proven (2026-09-04 ~5:55 PM)
+
+`db289e6` (15 files, +668/−35) → `2dd504b` (1.19.0) → tag → CI green.
+Installer SHA256 `7a4c928f…9426` = GitHub digest = SHA256SUMS; latest.yml
+1.19.0; 83,310,463 bytes. Site `ef347ed`, Pages built, live 3×1.19.0 /
+0×1.18.2, the Wallet intelligence bullet and the 1,510-test band live,
+the Behaviour panel on live /radar. Desktop 1.19.0.0: packaged radar HTML
+carries the panel, titled window, 4 procs → 0, leveldb LOG 17:51 at the
+real profile path. Worker redeployed from the engine change (uptime 36s,
+`behaviours` in counts, five reads inside the first minute). 779 tests.
+The first armed frame said it all: a tracked wallet labelled DEV and
+SNIPER with a 20% win rate, −$727 realized and an 11.7 SOL drawdown —
+the kind of row a copier needs to see before the score. Migration 002
+(now also carrying the four wallet columns) still unrun on LO's side.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

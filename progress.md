@@ -635,6 +635,61 @@ on the live /nova/radar/. Desktop 1.14.0.0: titled window, 4 procs →
 clean close to 0, leveldb LOG rotated at launch at the real profile
 path. 747 tests throughout.
 
+## 1.15.0 — the visual pass, app and site (2026-09-04, early morning)
+
+LO: "improve rom nova and the website to look better and look amazing."
+A design job, held to the same rules as a data job: no invented
+number anywhere, every label intact, and nothing shipped unseen.
+
+**Seeing it first.** The browser pane could not paint (window
+minimized), so the offscreen Electron capture from the radar
+screenshot became a general tool — scratchpad `shot.js`: any URL, any
+viewport, optional scroll, optional arming, `img.isEmpty()` guard —
+and every change below was judged against before/after frames it
+produced from the built export and the local site.
+
+**Nova (`ea85f91`, five files, +181/−21).** Atmosphere: two slow
+aurora blobs (cyan/violet, a trace of pink) on a 52s transform-only
+loop behind a vignette, on body pseudo-elements at z-index −1, so
+every panel's backdrop blur now samples real colour and glass reads
+as glass; off under reduced motion. Primitives: the primary button is
+filled (brand gradient, dark text, glow) — ARM THE RADAR finally looks
+like the action the page exists for; chips are pills; inputs get a
+focus halo; panels a 10px radius and saturating blur; score bars a
+sheen (Score sets background-color, not the shorthand, so the sheen
+survives); toasts a cyan edge and glow; an accent focus ring for
+keyboard users; the top bar wears the site's brand hairline and NOVA
+in the cyan→violet gradient; the active rail link an accent bar and
+glow. Radar: a sweep ring that only turns while hunting, a live dot
+in the HUNTING chip, a size bar per discovery scaled to the largest in
+view, concentric rings behind an empty signals panel while armed.
+First frames read the aurora as too faint behind the glass; raised
+once (0.075→0.115 / 0.085→0.13) and re-captured. 747 tests unchanged.
+
+**Site (`a194b97`, then `0b86061` for versions).** Anchor nav (Nova ·
+Trader · Downloads · Is this safe?) with a gradient underline; the duo
+cards open with real frames in window chrome (the radar capture, the
+Trader signals page); a by-the-numbers band — 11 whales in ten minutes,
+7/7 strategies lost after fees, 0 keys, 1,478 tests — each with where
+it came from, because the headline says trust the numbers; window
+chrome on every screenshot; cyan and pink section glows for Nova and
+Trader (clamped inside the section so a phone never scrolls sideways);
+a redrawn social card rendered from an HTML comp with the radar
+leaning into frame. **Pre-existing bug found in the frames and fixed:**
+the platform note's `display:flex` outranked its `hidden` attribute,
+so every Windows visitor saw an empty bordered bar above the downloads
+table. The pane-side "horizontal overflow" alarm was the hidden pane's
+zero-width viewport, not the page — the 1440px frames show none.
+
+### 🚢 1.15.0 SHIPPED and proven (2026-09-04 ~4:30 AM)
+
+`ea85f91` → `8d56c7d` (1.15.0) → tag → CI green; stat line read five
+files before tagging. Installer SHA256 `095fe806…9890` = GitHub digest
+= SHA256SUMS; latest.yml 1.15.0; chunks 39/0. Site `0b86061` with
+2×1.15.0. Desktop 1.15.0.0: packaged CSS contains the aurora rules
+(provenance from the artifact), titled window, 4 procs → clean close
+to 0, leveldb LOG rotated at launch at the real profile path.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

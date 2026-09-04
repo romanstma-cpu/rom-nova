@@ -1,7 +1,7 @@
 {
   "name": "rom-nova-desktop",
   "productName": "ROM Nova",
-  "version": "1.18.1",
+  "version": "1.18.2",
   "description": "Solana on-chain intelligence terminal: track any wallet off the chain, watch new pools triaged within seconds of launch, and audit every token's score against the security panel beside it. Part of ROM Apps.",
   "author": "ROM <roman3165@icloud.com>",
   "license": "MIT",

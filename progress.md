@@ -858,6 +858,74 @@ worker/supabase/migrations/002-copy-desk.sql" exactly as designed. That
 paste is the one step left on LO's side; grades and exits write the moment
 the columns exist, no restart.
 
+## 1.18.0 — grades that survive graduation (2026-09-04, late afternoon)
+
+LO: "dont stop till its complete." What was incomplete, in order of how
+much it would have misled a copier: grades froze the moment a token left
+the bonding curve (the stream is blind there, and graduation is exactly
+where a winner goes); a signal from a wallet that flips in four seconds
+looked like an entry; enabling notifications meant a detour to Alerts;
+the front door did not know the radar existed; the site did not mention
+the desk.
+
+**Marks from outside the stream.** `state.marksWanted(now)` names the
+mints a driver should quote — a horizon passed with no trade since, or a
+pinned follow quiet for 30s — capped at thirty. `state.markExternal`
+resolves due horizons from the quote exactly as a trade would, tagged
+`source: "lookup"`; the tick's fallback is tagged `last-mark` and is the
+only thing still called stale. `engine/pricelookup.js` fetches DexScreener
+keylessly from browser or Node, thirty mints a call, taking the deepest
+SOL-quoted pair (`priceNative` is SOL per token there) and never a zero.
+Proven against the real endpoint: BONK and PUMP quoted, a fake mint
+absent. Both drivers run a lookup-aware clock (≤ one call per 10s) and a
+signal whose launch the tab never saw takes its name from the same quote.
+
+**The uncopyable flag.** A median hold under a minute is a record nobody
+can follow: the signal row says "usually out in 4s — likely gone before
+you can buy", the Hold column turns amber. **OS notifications** can be
+enabled from the copy plan strip. **The dashboard** gains a Whale Radar
+tile (tracked · hunting, signals and exits this session, or disarmed).
+**Worker:** /health reports the lookup; the schema probe keys on
+`graded_lookup`, the newest column, so an earlier draft of the migration
+reads as pending and the re-run adds the rest. Site: the Nova card gains
+the grades/exits sentence and a Copy desk bullet; JSON-LD description
+updated. Dry-run 45s: streams up, lookup idle (no signals to grade),
+schema current.
+
+### 1.18.0 tagged, then caught in production; 1.18.1 is the fix
+
+1.18.0's CI went green and the worker auto-deployed, and four minutes
+later its /health read `price_lookup: calls 14, failures 9, lastError
+http 429`. The dry run could not have shown it: DexScreener throttles
+by address, and a Render box shares its egress with strangers. 1.18.0
+was never installed or advertised. **1.18.1:** the lookup backs off
+after any failure (30s, doubling to five minutes, Retry-After honoured),
+resets on success, counts skips separately; `STALE_GRACE_MS` 45s → 90s
+so one backoff still lands a quote before a grade goes stale; the state
+tests' boundaries moved with it. Production lesson for the memory: a
+new outbound dependency is only proven by /health after the deploy, and
+the first thing to read there is its failure counter.
+
+### 🚢 1.18.1 SHIPPED and proven (2026-09-04 ~4:20 PM)
+
+`8b6f29c`/`7b7d9d0` (1.18.0, tagged, never installed) → `b79012c`/`215f8a9`
+(1.18.1) → CI green. Installer SHA256 `1d7524e2…de09` = GitHub digest =
+SHA256SUMS; latest.yml 1.18.1; 83,307,999 bytes; chunks 39/0; middleware
+tracked. Site `75aa2be`, Pages built, live 3×1.18.1 / 0×1.17.0, the Copy
+desk bullet and the 1,500-test band live; live /nova carries the Whale
+Radar tile, live /radar the new lede. Desktop 1.18.1.0: packaged chunk
+carries the backoff, titled window, 4 procs → 0, leveldb LOG 16:15 at the
+real profile path. 769 tests.
+
+**Second production lesson, same hour.** 1.18.1 changed only the shared
+engine and Render did not deploy it: a rootDir service redeploys only
+when a commit touches rootDir. Fifteen minutes of /health at the old
+uptime was the tell. `render.yaml` now carries a `buildFilter` naming
+`worker/**`, `src/lib/radar/engine/**` and itself (`7feb5d1`); that push
+redeployed, uptime reset to 14s, `price_lookup` reporting
+`backoffMs`/`skipped`. Migration 002 still pending on LO's side; the
+worker keeps saying so.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

@@ -690,6 +690,77 @@ files before tagging. Installer SHA256 `095fe806…9890` = GitHub digest
 (provenance from the artifact), titled window, 4 procs → clean close
 to 0, leveldb LOG rotated at launch at the real profile path.
 
+## 1.16.0 — cleaner and friendlier (2026-09-04, afternoon)
+
+LO: "Make the UI and features inside rom nova cleaner and more user
+friendly." Judged from frames of the built export, before and after,
+the way the visual pass was.
+
+**What was actually unfriendly.** The rail said Wallets and the page
+said WHALE INTELLIGENCE; Scanner opened LIVE DISCOVERY SCANNER; Signals
+opened SIGNAL TERMINAL; two links were called Radar and only one hunts.
+The command palette still offered "Open Research Desk" and "Run
+Backtest" while Launch Feed, Whale Radar and Track Record — the three
+pages the app is now for — were not in it. The header printed the meme
+index, the smart-money flow and the regime chip beside a price marked
+LIVE, none of them labelled as the simulator's. Settings was titled
+DATA PROVIDERS and led with eight vendors, seven of which a browser
+cannot configure, while the Helius key lived three panels down the
+radar page and the intro and explainers had no way back. The radar page
+put two setup cards between the switch and the data. The folded
+explainer clipped mid-sentence ("…gets tracked; every…"). Empty panels
+said "—". Settings and Status hid behind "▸ more".
+
+**What changed (twenty-five files, +680/−380).**
+- `PageTitle`: every page's first line is the rail label plus a one-line
+  lede (WALLETS · "Who is moving size right now, and the real record of
+  any wallet you paste"). Fourteen pages retitled by a script that
+  swapped the exact `<h1>` and added the import; nothing else touched.
+- The rail exports its own lists; the palette is generated from them
+  plus two real actions — Arm/Disarm the whale radar (state-aware) and
+  Show the introduction again. Status and Settings pinned at the foot;
+  "Token Radar" → "Tokens"; the data chip repeats in the rail only below
+  `sm`, where the header has no room.
+- Header: slot and the cross-checked SOL price only. Footer: one line.
+- `Hint` takes a hand-written `summary` for the folded state; the radar
+  has one, the other four keep the clamp until they get theirs.
+- Radar: switch → signals/wallets → pipeline → one folded "Extend
+  coverage" holding the Helius card (now `HeliusKeyCard`, shared) and
+  the remote worker; opens itself when either is in use. Threshold
+  reads "track wallets entering with ≥ 10 SOL". Empty panels say what
+  fills them, in the state they are in.
+- Settings: your keys (AI, Helius) → what this browser remembers
+  (Introduction · Show it again / Explainers · Fold them all / Whale
+  Radar journal · Forget it, two-click, with `forgetRadarJournal` that
+  clears IndexedDB and restarts a running hunt from zero, reporting if
+  the disk refused) → providers folded → security posture.
+- First run: the three steps are now Launch Feed, Whale Radar, Track
+  Record — the live loop — instead of 3D Network and Signals twice.
+- Also: the shell's offline text was a setState-in-effect the linter
+  had been flagging since before this pass; moved to the store seam.
+- 748 tests (one new: the journal clear).
+
+**Seen.** Disarmed radar: the switch is the first thing on the page and
+the extension fold is one line. Armed for twenty seconds at 5 SOL: 10
+launches, 724 trades, one whale caught 4s post-launch, its two fills
+journaled, score 0 on 1 settled sell — the honest column doing its job.
+Settings reads top to bottom as things a person can do. The palette
+opens on "/" with "Arm the whale radar" in it. On a 375px phone the
+drawer lists the seven, "more tools", Status, Settings and the data
+chip, with no sideways scroll.
+
+### 🚢 1.16.0 SHIPPED and proven (2026-09-04 ~2:35 PM)
+
+`fc5bd69` (30 files) → `c678969` (1.16.0) → tag → CI green in ~5 min;
+both stat lines read before tagging. Installer SHA256
+`e8ffc2ea…4d5d` = GitHub digest = SHA256SUMS; latest.yml 1.16.0;
+83,299,117 bytes; chunks 39/0; middleware tracked. Site `a673505`,
+Pages built, live 3×1.16.0 / 0×1.15.0; live Nova CSS carries
+`page-lede`, live /radar carries the fold. Desktop 1.16.0.0: packaged
+CSS has `page-lede` + `fold-body`, packaged radar HTML has the fold,
+titled window, 4 procs → 0 on close, leveldb LOG rotated 14:33 at the
+real profile path. 748 tests.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

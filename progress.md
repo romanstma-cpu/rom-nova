@@ -455,6 +455,74 @@ BOUGHT/SOLD, and who is still in, measured from the chain in your own
 browser, fed straight into the score. The readout GMGN charges for,
 keyless, with the receipts printed underneath.
 
+## 1.12.0 — Whale Radar: the autonomous scanner (2026-09-03, night)
+
+LO sent a three-part spec: autonomous whale detection, PNL scoring,
+signals, Socket.io push, a worker on Render with Supabase, Helius keys
+to come. Most of it Nova already had in-browser (ledger, scoring,
+alerts); the genuinely new plane was AUTONOMY — something that watches
+while the machine is off and finds wallets by itself. Built as
+`worker/` in the repo plus a /radar page, nothing existing replaced.
+
+Two probes decided the architecture before a line of worker code:
+
+- PumpPortal's trade subscriptions are pay-gated, re-confirmed verbatim
+  ("only available when connecting with an API key funded with at least
+  0.02 SOL") — the 1.8.0 comment was right. Creations stay keyless.
+- publicnode's WebSocket serves `logsSubscribe` on the WHOLE pump.fun
+  program keylessly: ~220 notifications/s, ~284 KB/s, and the anchor
+  TradeEvent decodes clean at ~34 trades/s (disc bddb7fd34ee661ee, then
+  mint/sol/token/isBuy/user/timestamp/reserves). ONE subscription sees
+  every bonding-curve trade by every wallet, so discovery and
+  journaling are filters, not subscription budgets.
+
+The worker: PumpPortal creations + the program firehose → whale gate
+(10+ SOL inside 10 min of a seen launch) → track → journal every fill →
+average-cost ledger that refuses sells whose buys it never observed
+(`unmeasured_sells` is a column, not a guess) → score shrunk by sample
+size until six settled sells → signal when a 70+ wallet buys again,
+scored on what it had BEFORE the buy. Supabase batched behind the
+filter; boot rehydrates by replaying the journal so Render restarts
+cost coverage, not memory. Optional HELIUS_API_KEY follows top wallets
+off-curve (structurally tested, awaiting a live key — /health says so).
+DRY_RUN=1 runs the whole live pipeline with an in-memory store.
+
+In the app: /radar (More live) connects to the operator's own worker
+URL, browser-stored; signals, leaderboard with settled/unmeasured,
+discoveries, journal, launch ticker; radar signals join the live toast
+bus. socket.io-client is the app's only new dependency.
+
+**Smoked live in DRY_RUN, real streams, lowered gates:** 10 whales in
+the first 90s (one 85 SOL snipe 3s post-launch), a sniper's buy and
+4-part exit journaled fill by fill, top wallet scored 83 on 5 settled
+sells at 100% win rate — held under 70 earlier at 4 settles by the
+shrink, exactly as designed. First signal at +4 min: a discovered
+wallet flipped its snipe, scored 50, bought 2.93 SOL of "Marques
+Baldee", gate fired on the walking-in score with the name from the
+worker's own launch record. By minute 7: 110 launches, 11,965 trades
+seen, 25 whales, 127 fills, 6 signals; the rpc stream survived a
+mid-run drop (reconnected in 1.8s). Verified in BOTH the dev build and
+the static export, snapshot-on-connect included. 50 new tests (737
+total) pin the decoder against the probed layout, the ledger's
+refusals, both gates, and the pipeline end to end.
+
+### 🚢 1.12.0 SHIPPED and proven (2026-09-03 ~8:45 PM)
+
+`cf66e0d` (radar) → `6cc266c` (1.12.0) → tag → CI green. Installer
+SHA256 `8804ea2d…0c93` = GitHub digest = SHA256SUMS; latest.yml 1.12.0;
+chunk check 38/0 missing; site `306754d` live with 2×1.12.0, 0 stale,
+/nova/radar/ 200. Installed app: 1.12.0.0, titled window, 4 procs,
+clean close to 0, leveldb LOG freshly rotated at the real profile path
+(8:41:50 PM; LOG.old preserves the 1.11.0 noon proof).
+
+Still LO's to do, keys never through me: create the Supabase project
+and run worker/supabase/schema.sql; deploy the Render blueprint and
+paste SUPABASE_URL + SUPABASE_SERVICE_KEY (and optionally
+HELIUS_API_KEY) into Render's dashboard; paste the service URL into
+/radar. Render's free plan sleeps after ~15 idle minutes — starter
+plan or a free /health pinger makes it truly 24/7, and the README
+says so instead of pretending otherwise.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

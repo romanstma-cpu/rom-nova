@@ -568,9 +568,11 @@ and the leaderboard rebuilt from replayed evidence alone (top sniper
 the 70 gate). The 8788 tab's mystery bounce to /nova/ turned out to be
 the browser pane restoring a discarded tab to its opening URL —
 environmental; it accidentally proved shell-level resume on a
-non-radar page. 757 tests; ten new pin the journal (dedupe, caps,
-eviction, and the replay contract: journaled evidence recomputes the
-exact score direct application produced).
+non-radar page. 747 tests (the ship commit and the first version of
+this entry said 757 — my arithmetic, not the suite; corrected here);
+ten new pin the journal (dedupe, caps, eviction, and the replay
+contract: journaled evidence recomputes the exact score direct
+application produced).
 
 ### 🚢 1.13.0 SHIPPED and proven (2026-09-03 ~9:25 PM)
 
@@ -582,6 +584,56 @@ Nova card now leads with the radar. Desktop: 1.13.0.0, titled window,
 4 procs → clean close to 0, leveldb LOG rotated at launch at the real
 profile path, and the app://rom-nova IndexedDB origin present — where
 the desktop journal lives.
+
+## 1.14.0 — the Helius key gets a home in the app (2026-09-03, last of the night)
+
+LO: "how do i add the helius key". The only home it had was the worker
+he never deployed — wrong answer twice over. Now: a card on /radar,
+same contract as the AI key on settings — pasted by the visitor,
+stored in that browser alone, sent to helius-rpc.com and nowhere else.
+With it the hunter follows its top-20 scored wallets' trades on every
+venue, the leg the program firehose loses when a token graduates off
+the curve.
+
+helius.js moved worker→engine (one implementation, both drivers named
+in its header). `setHeliusKey` applies live: only the Helius leg
+restarts; the firehose and journal never notice. The snapshot carries
+keySet/active/connected/following/txFetches/txErrors/offCurveFills;
+the card prints them and says plainly what a rejected key looks like.
+Settings' security posture stopped claiming no key ever reaches a
+browser — the two the visitor pastes themselves are named. The
+off-curve read path itself is still structurally-tested-only until a
+real key runs it, and the card says to watch the error count.
+
+Export smoke: an all-zeros UUID through the real field armed the leg
+live without disturbing the pipeline (which resumed 49 wallets / 571
+fills mid-smoke — the armed radar had been compounding on its own the
+whole build), showed the honest not-connected state, removed cleanly.
+
+**Release stumble, caught in-flight:** the feature commit's `git add`
+listed the pre-move `worker/src/helius.js` path; git add aborts the
+WHOLE add on a bad pathspec, so the commit carried only the rename and
+tag v1.14.0 went out incomplete. Caught on the "1 file changed, 0
+insertions" line; CI run cancelled, files committed (`f4ac075`, 6
+files, 210 insertions), tag force-moved, new run triggered — the 1.5.0
+maneuver. The desktop proof below greps the PACKAGED static files for
+the Helius card, so provenance is proven from the artifact, not
+assumed from the run. Lesson for the drill: after `git mv`, never
+reuse the old path in an add list — and read the commit's stat line
+before tagging, every time.
+
+### 🚢 1.14.0 SHIPPED and proven (2026-09-03 ~9:50 PM)
+
+`74685eb` (the mv-only stub) + `f4ac075` (the actual 6 files) +
+`228cf39` (1.14.0) → tag force-moved to include f4ac075 → old CI run
+confirmed CANCELLED, corrected run green. Installer SHA256
+`e2502cbf…de78` = GitHub digest = SHA256SUMS; latest.yml 1.14.0;
+chunks 39/0. Provenance proven from the ARTIFACT: the installed app's
+packaged radar page contains "HELIUS OFF-CURVE COVERAGE", which only
+exists in f4ac075. Site `5e0514c` live: 2×1.14.0, 0 stale, the card
+on the live /nova/radar/. Desktop 1.14.0.0: titled window, 4 procs →
+clean close to 0, leveldb LOG rotated at launch at the real profile
+path. 747 tests throughout.
 
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 

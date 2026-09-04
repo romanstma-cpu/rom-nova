@@ -49,6 +49,8 @@ export interface RadarSignalRow {
   peak_ret_1h?: number | null;
   /** at least one grade was marked to the last trade seen, not to a trade at the horizon */
   graded_stale?: boolean;
+  /** at least one grade came from a DexScreener quote — the token had left the curve */
+  graded_lookup?: boolean;
   // The signal wallet's own first sell after the signal: the exit.
   whale_exit_ret?: number | null;
   whale_exit_after_ms?: number | null;

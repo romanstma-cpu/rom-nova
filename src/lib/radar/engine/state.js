@@ -27,6 +27,8 @@ export const HORIZONS = /** @type {const} */ ({ m1: 60_000, m5: 300_000, m15: 90
 export const STALE_GRACE_MS = 45_000;
 /** An open signal older than this stops listening for the wallet's exit. */
 export const EXIT_WATCH_MS = 24 * 3_600_000;
+/** A pinned mint quiet for this long is worth a price lookup off the stream. */
+export const PIN_REFRESH_MS = 30_000;
 
 /** @param {{ wallet_address: string, token_address: string, timestamp: string }} s */
 export const signalKeyOf = (s) => `${s.wallet_address}:${s.token_address}:${s.timestamp}`;
@@ -238,10 +240,66 @@ export class RadarState {
     for (const rec of entry.grading) {
       if (trade.priceSol > rec.peak) rec.peak = trade.priceSol;
       for (const h of [...rec.pending]) {
-        if (trade.chainTs >= rec.at + HORIZONS[h]) this.resolve(rec, h, trade.priceSol, trade.chainTs, false);
+        if (trade.chainTs >= rec.at + HORIZONS[h]) this.resolve(rec, h, trade.priceSol, trade.chainTs, "stream");
       }
     }
     this.sweep(entry, trade.mint);
+  }
+
+  /**
+   * Mints whose price the driver should fetch from outside the stream: a
+   * grading horizon has passed with no trade at or after it (the stream is
+   * blind off the curve, and quiet tokens stay quiet), or a pinned mint has
+   * not traded for a while. Capped so a burst of dead tokens cannot become a
+   * fetch storm; the rest come round on the next tick.
+   *
+   * @param {number} now
+   * @param {number} [cap]
+   * @returns {string[]}
+   */
+  marksWanted(now, cap = 30) {
+    const out = [];
+    for (const [mint, entry] of this.watched) {
+      let want = false;
+      for (const rec of entry.grading) {
+        for (const h of rec.pending) {
+          const due = rec.at + HORIZONS[h];
+          if (now >= due && entry.lastAt < due) {
+            want = true;
+            break;
+          }
+        }
+        if (want) break;
+      }
+      if (!want && entry.pinned && now - entry.lastAt >= PIN_REFRESH_MS) want = true;
+      if (want) out.push(mint);
+      if (out.length >= cap) break;
+    }
+    return out;
+  }
+
+  /**
+   * A price from outside the stream — a DexScreener quote for a token that
+   * left the curve. Marks the mint and resolves the horizons it covers, the
+   * way a trade would, tagged so the grade says where it came from. A
+   * lookup older than the last trade seen changes nothing.
+   *
+   * @param {string} mint
+   * @param {number} priceSol
+   * @param {number} at
+   */
+  markExternal(mint, priceSol, at) {
+    const entry = this.watched.get(mint);
+    if (!entry || !(priceSol > 0) || at < entry.lastAt) return;
+    entry.lastPriceSol = priceSol;
+    entry.lastAt = at;
+    for (const rec of entry.grading) {
+      if (priceSol > rec.peak) rec.peak = priceSol;
+      for (const h of [...rec.pending]) {
+        if (at >= rec.at + HORIZONS[h]) this.resolve(rec, h, priceSol, at, "lookup");
+      }
+    }
+    this.sweep(entry, mint);
   }
 
   /**
@@ -254,11 +312,12 @@ export class RadarState {
       for (const rec of entry.grading) {
         for (const h of [...rec.pending]) {
           if (now >= rec.at + HORIZONS[h] + STALE_GRACE_MS) {
-            // No trade at or after the horizon: the last trade seen is the
-            // only price there is. Before any trade at all, that is the
-            // signal fill itself — a flat grade, flagged stale.
+            // No trade at or after the horizon and no lookup landed inside
+            // the grace: the last mark is the only price there is. Before
+            // any mark at all, that is the signal fill itself — a flat
+            // grade, flagged stale.
             const mark = entry.lastPriceSol ?? rec.priceSol;
-            this.resolve(rec, h, mark, now, true);
+            this.resolve(rec, h, mark, now, "last-mark");
           }
         }
       }
@@ -274,9 +333,12 @@ export class RadarState {
    * @param {keyof typeof HORIZONS} h
    * @param {number} priceSol
    * @param {number} at
-   * @param {boolean} stale
+   * @param {"stream" | "lookup" | "last-mark"} source where the price came
+   *   from: a trade at or after the horizon, an external quote, or the last
+   *   mark seen because nothing else arrived (that one is `stale`)
    */
-  resolve(rec, h, priceSol, at, stale) {
+  resolve(rec, h, priceSol, at, source) {
+    const stale = source === "last-mark";
     rec.pending.delete(h);
     const ret = priceSol / rec.priceSol - 1;
     const peakRet = rec.peak / rec.priceSol - 1;
@@ -298,6 +360,7 @@ export class RadarState {
       peak_ret: Number(peakRet.toFixed(4)),
       price_sol: Number(priceSol.toPrecision(9)),
       stale,
+      source,
       at,
       done: rec.pending.size === 0,
     });

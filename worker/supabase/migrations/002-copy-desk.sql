@@ -23,6 +23,7 @@ alter table signals
   add column if not exists ret_1h decimal,
   add column if not exists peak_ret_1h decimal,
   add column if not exists graded_stale boolean not null default false,
+  add column if not exists graded_lookup boolean not null default false,
   add column if not exists whale_exit_ret decimal,
   add column if not exists whale_exit_after_ms bigint,
   add column if not exists whale_exit_fraction decimal;

@@ -8,6 +8,7 @@
 // the grader's stale-mark tick and the leaderboard push.
 
 import { HeliusStream } from "../../src/lib/radar/engine/helius.js";
+import { lookupSolPrices, lookupStatus } from "../../src/lib/radar/engine/pricelookup.js";
 import { startPumpPortal } from "../../src/lib/radar/engine/pumpportal.js";
 import { startRpcStream } from "../../src/lib/radar/engine/rpcstream.js";
 import { RadarState } from "../../src/lib/radar/engine/state.js";
@@ -49,6 +50,7 @@ function status() {
     },
     db: db.status(),
     dexscreener: dexScreenerStatus(),
+    price_lookup: lookupStatus(),
     coverage:
       "pump.fun bonding-curve trades, program-wide" +
       (helius.enabled ? ", plus Helius off-curve coverage for top wallets" : " — off-curve trades are NOT observed (set HELIUS_API_KEY to extend)"),
@@ -61,7 +63,32 @@ feed = new Feed(cfg, status);
 function outcomePatch(e) {
   const patch = { [HORIZON_COLUMN[e.horizon]]: e.ret, peak_ret_1h: e.peak_ret };
   if (e.stale) patch.graded_stale = true;
+  if (e.source === "lookup") patch.graded_lookup = true;
   return patch;
+}
+
+// Marks the stream cannot give: a horizon that passed with no trade since
+// (the token left the curve, or died) gets a DexScreener quote before the
+// tick would mark it stale. Capped batch, one call at a time.
+const LOOKUP_EVERY_MS = 10_000;
+let lookupBusy = false;
+let lastLookupAt = 0;
+async function gradeTick() {
+  const now = Date.now();
+  if (!lookupBusy && now - lastLookupAt >= LOOKUP_EVERY_MS) {
+    const wanted = state.marksWanted(now);
+    if (wanted.length > 0) {
+      lookupBusy = true;
+      lastLookupAt = now;
+      try {
+        const marks = await lookupSolPrices(wanted);
+        for (const [mint, m] of marks) state.markExternal(mint, m.priceSol, m.at);
+      } finally {
+        lookupBusy = false;
+      }
+    }
+  }
+  state.tick(Date.now());
 }
 
 /** Effects out of the pipeline, fanned to the database and the feed. */
@@ -130,9 +157,11 @@ const pump = startPumpPortal(cfg, (launch, at) => state.onLaunch(launch, at));
 const rpc = startRpcStream(cfg, (t) => state.onTrade(t));
 helius.start();
 
-// The grader's clock: horizons no trade will ever mark, and exit watches
-// past their day.
-setInterval(() => state.tick(Date.now()), 5_000);
+// The grader's clock: off-curve quotes first, then horizons nothing will
+// ever mark, and exit watches past their day.
+setInterval(() => {
+  gradeTick().catch((err) => log("[grade] tick failed:", err?.message ?? err));
+}, 5_000);
 
 // Leaderboard push: cheap, and only when something could have changed.
 let lastJournaled = -1;

@@ -164,6 +164,7 @@ function normSignal(s: unknown): RadarSignal {
     ret_1h: numOrNull(o.ret_1h),
     peak_ret_1h: numOrNull(o.peak_ret_1h),
     graded_stale: o.graded_stale === true,
+    graded_lookup: o.graded_lookup === true,
     whale_exit_ret: numOrNull(o.whale_exit_ret),
     whale_exit_after_ms: numOrNull(o.whale_exit_after_ms),
     whale_exit_fraction: numOrNull(o.whale_exit_fraction),
@@ -275,6 +276,7 @@ function openSocket(url: string) {
     if (!field || !str(o.signal_key)) return;
     const patch: Partial<RadarSignalRow> = { [field]: numOrNull(o.ret), peak_ret_1h: numOrNull(o.peak_ret) };
     if (o.stale === true) patch.graded_stale = true;
+    if (o.source === "lookup") patch.graded_lookup = true;
     patchSignal(str(o.signal_key), patch);
   });
   s.on("exit", (raw: unknown) => {

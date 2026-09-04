@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useApi, useEventStream, fmtUsd, fmtPct, fmtAge, whaleFlowCell } from "@/lib/client";
+import { hunterServerSnapshot, hunterSnapshot, subscribeHunter } from "@/lib/radar/hunter";
 import { Score, Skel, SkeletonRows, Stat, TokenMark } from "@/components/ui/bits";
 import { FirstRun } from "@/components/FirstRun";
 import { ActivityFeed } from "@/components/feed/ActivityFeed";
@@ -38,6 +39,7 @@ export default function Dashboard() {
   const { data: rowData } = useApi<{ rows: TokenRow[] }>("/api/tokens?sort=h24&limit=10", 20_000);
   const { data: net } = useApi<NetworkPayload>("/api/network", 15_000);
   const { data: flowData } = useApi<{ flow: FlowPoint[]; demo?: boolean }>("/api/flow?hours=72", 60_000);
+  const radar = useSyncExternalStore(subscribeHunter, hunterSnapshot, hunterServerSnapshot);
   const [selected, setSelected] = useState<string | null>(null);
   const [mobile, setMobile] = useState(false);
   const burstsRef = useRef<{ from: string; to: string; sell: boolean; usd: number }[]>([]);
@@ -72,7 +74,7 @@ export default function Dashboard() {
       <FirstRun />
 
       {/* KPI strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {ref ? (
           <Stat label="SOL · live ref" sub={ref.change24hPct !== null ? fmtPct(ref.change24hPct) + " 24h" : "cross-checked"}>
             <span className="text-[var(--accent)]">{fmtUsd(ref.priceUsd)}</span>
@@ -101,6 +103,22 @@ export default function Dashboard() {
           sub={sigData ? (sigData.demo === false ? "score ≥ 64 · live trending list" : "score ≥ 64 · SIMULATED") : "score ≥ 64, not NO TRADE"}
         >
           <span className="text-[var(--accent)]">{sigData ? highConviction : "—"}</span>
+        </Stat>
+        {/* The radar, from the front door: what it is doing right now, and
+            the one click to the page that does it. */}
+        <Stat
+          label="Whale Radar"
+          sub={
+            radar.phase === "hunting"
+              ? `${radar.counts.signals} signals · ${radar.counts.exits} exits this session`
+              : radar.phase === "starting"
+                ? "starting…"
+                : "arm it and it hunts on every page"
+          }
+        >
+          <Link href="/radar" className="text-[13px] tracking-wide uppercase link">
+            {radar.phase === "hunting" ? `${radar.counts.tracked} tracked · hunting` : "disarmed"}
+          </Link>
         </Stat>
       </div>
 

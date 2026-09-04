@@ -68,7 +68,11 @@ import {
   type Follow,
 } from "@/lib/radar/follows";
 import { signalKeyOf, type RadarSignalRow } from "@/lib/radar/journal";
+import { notifyState, notifyStateServer, requestNotifyPermission, subscribeNotify } from "@/lib/alerts/notify";
 import type { RadarState } from "@/lib/radar/client";
+
+/** A median hold under this is a record nobody can copy: the wallet is out before a person is in. */
+const UNCOPYABLE_HOLD_MS = 60_000;
 
 const shortAddr = (a: string) => (a.length <= 10 ? a : `${a.slice(0, 4)}…${a.slice(-4)}`);
 const fmtRet = (r: number) => `${r >= 0 ? "+" : ""}${(r * 100).toFixed(r > -0.1 && r < 0.1 ? 1 : 0)}%`;
@@ -148,6 +152,7 @@ export default function RadarPage() {
   const worker = useSyncExternalStore(subscribeRadar, radarSnapshot, radarServerSnapshot);
   const follows = useSyncExternalStore(subscribeFollows, followsSnapshot, followsServerSnapshot);
   const plan = useSyncExternalStore(subscribeFollows, copyPlanSnapshot, copyPlanServerSnapshot);
+  const notif = useSyncExternalStore(subscribeNotify, notifyState, notifyStateServer);
   const [source, setSource] = useState<"device" | "worker">("device");
   const [bankrollDraft, setBankrollDraft] = useState<string | null>(null);
   /** An "I followed" form open on one signal: the entry price and size the reader confirms. */
@@ -329,6 +334,21 @@ export default function RadarPage() {
         <span className="num text-[11.5px]">
           = <b className="text-[var(--accent)]">{sizeSol} SOL</b> a signal
         </span>
+        {notif === "default" && (
+          <button type="button" className="btn text-[10px]" onClick={() => void requestNotifyPermission()} title="signals and exits will also reach your OS notification center, so a tab you are not looking at still gets through">
+            Enable OS notifications
+          </button>
+        )}
+        {notif === "granted" && (
+          <span className="chip chip-pos text-[9.5px]" title="signals and exits also reach your OS notification center">
+            OS notifications on
+          </span>
+        )}
+        {notif === "denied" && (
+          <span className="text-[10px] faint" title="allow notifications for this site in your browser settings to get signals and exits outside the tab">
+            OS notifications blocked by the browser
+          </span>
+        )}
         <span className="text-[10.5px] dim">
           You trade in your own wallet; Nova opens the token where you trade and never holds a key. Exits alert you
           when the signal wallet sells.
@@ -400,8 +420,13 @@ export default function RadarPage() {
                       {typeof s.peak_ret_1h === "number" && (
                         <Grade label="peak" ret={s.peak_ret_1h} title="the best price seen inside the hour — what a perfect exit got, which nobody gets" />
                       )}
+                      {s.graded_lookup && (
+                        <span className="chip text-[9px]" title="at least one grade came from a DexScreener quote — the token had left the bonding curve, where the stream is blind">
+                          dex
+                        </span>
+                      )}
                       {s.graded_stale && (
-                        <span className="chip text-[9px]" title="at least one grade was marked to the last trade seen because no trade landed at that horizon — a quiet or dead token, or one that left the curve">
+                        <span className="chip text-[9px]" title="at least one grade was marked to the last price seen because neither a trade nor a quote landed at that horizon — a quiet or dead token">
                           stale
                         </span>
                       )}
@@ -424,6 +449,11 @@ export default function RadarPage() {
                   </div>
                   {/* the copy row: size, where to trade it, and the follow */}
                   <div className="flex items-center gap-2 flex-wrap text-[10.5px]">
+                    {hold !== null && hold < UNCOPYABLE_HOLD_MS && !exited && (
+                      <span className="chip chip-warn text-[9px]" title="this wallet's median hold is under a minute — by the time a person has bought, it has usually sold; a signal from it is information, not an entry">
+                        usually out in {fmtHold(hold)} — likely gone before you can buy
+                      </span>
+                    )}
                     <span className="num dim">
                       plan {sizeSol} SOL
                       {hold !== null && ` · time stop ≈ ${fmtHold(hold)}`}
@@ -572,7 +602,12 @@ export default function RadarPage() {
                         <span className="faint" title="no signal from this wallet has been graded yet">—</span>
                       )}
                     </td>
-                    <td className="text-right px-2 dim">{w.median_hold_ms === null ? "—" : fmtHold(w.median_hold_ms)}</td>
+                    <td
+                      className={`text-right px-2 ${w.median_hold_ms !== null && w.median_hold_ms < UNCOPYABLE_HOLD_MS ? "warn" : "dim"}`}
+                      title={w.median_hold_ms !== null && w.median_hold_ms < UNCOPYABLE_HOLD_MS ? "under a minute: a record nobody can copy" : undefined}
+                    >
+                      {w.median_hold_ms === null ? "—" : fmtHold(w.median_hold_ms)}
+                    </td>
                     <td className="text-right px-2">{(w.win_rate * 100).toFixed(0)}%</td>
                     <td className={`text-right px-2 ${w.realized_pnl >= 0 ? "pos" : "neg"}`}>{w.realized_pnl.toFixed(2)}</td>
                     <td className="text-right px-3 dim">

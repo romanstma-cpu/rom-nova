@@ -84,7 +84,9 @@ export class Db {
   /** Are the copy-desk columns there? Cheap: one column, one row. */
   async probeSchema() {
     if (!this.client) return;
-    const { error } = await this.client.from("signals").select("signal_key").limit(1);
+    // The newest column the migration adds is the marker, so a half-applied
+    // earlier draft of it reads as "pending" and the re-run adds the rest.
+    const { error } = await this.client.from("signals").select("graded_lookup").limit(1);
     const was = this.migrated;
     this.migrated = !error;
     if (this.migrated && was !== true) log("[db] schema current — grades and exits will be written");

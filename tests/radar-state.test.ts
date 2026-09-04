@@ -327,3 +327,64 @@ describe("pinned mints", () => {
     expect(state.lastPrice("M9")).toBeNull();
   });
 });
+
+describe("marks from outside the stream", () => {
+  it("asks for a lookup when a horizon passed with no trade since, and for quiet pinned mints", () => {
+    fireSignal();
+    expect(state.marksWanted(SIG_AT + 30_000)).toEqual([]);
+    // One minute on, nothing traded since the signal: the mint wants a mark.
+    expect(state.marksWanted(SIG_AT + 61_000)).toEqual(["MINT2"]);
+    // A trade at the horizon satisfies it.
+    state.onTrade(mark(0.011, SIG_AT + 62_000, 1));
+    expect(state.marksWanted(SIG_AT + 63_000)).toEqual([]);
+    // A pinned mint quiet for half a minute wants one too.
+    state.pinMint("M9");
+    state.onTrade(fill({ user: "ANY", mint: "M9", sol: 0.1, tokens: 10, priceSol: 0.01, chainTs: SIG_AT + 63_000, signature: "p1" }));
+    expect(state.marksWanted(SIG_AT + 70_000)).toEqual([]);
+    expect(state.marksWanted(SIG_AT + 63_000 + 31_000)).toEqual(["M9"]);
+  });
+
+  it("resolves due horizons from an external quote, tagged as a lookup, never as stale", () => {
+    fireSignal();
+    effects = [];
+    state.markExternal("MINT2", 0.02, SIG_AT + 301_000);
+    const outs = effects.filter((e) => e.kind === "signal_outcome");
+    expect(outs.map((o) => o.horizon)).toEqual(["m1", "m5"]);
+    expect(outs[1]).toMatchObject({ ret: 1, stale: false, source: "lookup" });
+    expect(state.lastPrice("MINT2")).toEqual({ priceSol: 0.02, at: SIG_AT + 301_000 });
+    // A stream trade at the horizon is tagged as such.
+    effects = [];
+    state.onTrade(mark(0.03, SIG_AT + 901_000, 1));
+    expect(effects.find((e) => e.kind === "signal_outcome")).toMatchObject({ horizon: "m15", source: "stream", stale: false });
+    // And the tick's fallback says last-mark.
+    effects = [];
+    state.tick(SIG_AT + 3_600_000 + 46_000);
+    expect(effects.find((e) => e.kind === "signal_outcome")).toMatchObject({ horizon: "h1", source: "last-mark", stale: true, ret: 2 });
+  });
+
+  it("ignores a lookup older than the last trade seen", () => {
+    fireSignal();
+    state.onTrade(mark(0.03, SIG_AT + 10_000, 1));
+    state.markExternal("MINT2", 0.001, SIG_AT + 5_000);
+    expect(state.lastPrice("MINT2")).toEqual({ priceSol: 0.03, at: SIG_AT + 10_000 });
+  });
+});
+
+describe("marksFromBody", () => {
+  it("takes the deepest SOL-quoted pair per mint and skips the rest", async () => {
+    const { marksFromBody } = await import("../src/lib/radar/engine/pricelookup.js");
+    const WSOL = "So11111111111111111111111111111111111111112";
+    const body = {
+      pairs: [
+        { chainId: "solana", baseToken: { address: "A" }, quoteToken: { address: WSOL }, priceNative: "0.002", liquidity: { usd: 1000 } },
+        { chainId: "solana", baseToken: { address: "A" }, quoteToken: { address: WSOL }, priceNative: "0.003", liquidity: { usd: 50_000 } },
+        { chainId: "solana", baseToken: { address: "A" }, quoteToken: { address: "USDC" }, priceNative: "0.5", liquidity: { usd: 90_000 } },
+        { chainId: "ethereum", baseToken: { address: "B" }, quoteToken: { address: WSOL }, priceNative: "1" },
+        { chainId: "solana", baseToken: { address: "C" }, quoteToken: { address: WSOL }, priceNative: "0" },
+      ],
+    };
+    const marks = marksFromBody(body, ["A", "B", "C", "D"]);
+    expect([...marks.entries()]).toEqual([["A", 0.003]]);
+    expect(marksFromBody(null, ["A"]).size).toBe(0);
+  });
+});

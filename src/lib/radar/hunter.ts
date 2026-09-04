@@ -30,6 +30,7 @@ import { startPumpPortal } from "./engine/pumpportal.js";
 import { startRpcStream } from "./engine/rpcstream.js";
 import { applyFill, applyFollowGrade, newWallet, scoreOf } from "./engine/score.js";
 import { RadarState } from "./engine/state.js";
+import { lookupSolPrices } from "./engine/pricelookup.js";
 import { clearRadarJournal, HORIZON_FIELD, journalSignalPatch, signalKeyOf, type RadarHorizon } from "./journal";
 import { deliverRadarNotification } from "@/lib/alerts/notify";
 import {
@@ -311,10 +312,50 @@ function scheduleFlush(): void {
   flushTimer = setTimeout(flush, FLUSH_MS);
 }
 
-/** The clock: grades that no trade will ever mark, and the periodic flush. */
+/** How often the hunter asks DexScreener for marks the stream cannot give. */
+const LOOKUP_EVERY_MS = 10_000;
+let lookupBusy = false;
+let lastLookupAt = 0;
+
+/**
+ * The clock. Every few seconds: if any grading horizon has passed with no
+ * trade since, or a followed mint has gone quiet, fetch those prices off
+ * the curve first, then let the tick mark whatever is still unanswered.
+ */
 function tickClock(): void {
-  state?.tick(Date.now());
+  const now = Date.now();
+  if (state && !lookupBusy && now - lastLookupAt >= LOOKUP_EVERY_MS) {
+    const wanted = state.marksWanted(now);
+    if (wanted.length > 0) {
+      lookupBusy = true;
+      lastLookupAt = now;
+      void lookupSolPrices(wanted)
+        .then((marks) => {
+          for (const [mint, m] of marks) state?.markExternal(mint, m.priceSol, m.at);
+        })
+        .finally(() => {
+          lookupBusy = false;
+          state?.tick(Date.now());
+          scheduleFlush();
+        });
+      return;
+    }
+  }
+  state?.tick(now);
   scheduleFlush();
+}
+
+/** A signal whose launch this tab never saw has no name; DexScreener usually does. */
+function enrichSignalName(key: string, mint: string): void {
+  void lookupSolPrices([mint]).then((marks) => {
+    const name = marks.get(mint)?.name;
+    if (!name) return;
+    const patch: Partial<RadarSignalRow> = { token_name: name };
+    journalSignalPatch(key, patch);
+    const i = rings.signals.findIndex((r) => (r.signal_key ?? signalKeyOf(r)) === key);
+    if (i >= 0) rings.signals[i] = { ...rings.signals[i], ...patch };
+    scheduleFlush();
+  });
 }
 
 // ------------------------------------------------------------ the desk
@@ -460,6 +501,7 @@ function onEffect(e: {
   peak_ret?: number;
   price_sol?: number;
   stale?: boolean;
+  source?: "stream" | "lookup" | "last-mark";
   done?: boolean;
   fraction?: number | null;
   first?: boolean;
@@ -546,6 +588,7 @@ function onEffect(e: {
         source: "radar-hunter",
       });
       deliverRadarNotification(headline, detail, s.signal_key ?? signalKeyOf(s));
+      if (!s.token_name) enrichSignalName(s.signal_key ?? signalKeyOf(s), s.token_address);
       break;
     }
     case "signal_outcome": {
@@ -553,6 +596,7 @@ function onEffect(e: {
       const field = HORIZON_FIELD[e.horizon!];
       const patch: Partial<RadarSignalRow> = { [field]: e.ret ?? null, peak_ret_1h: e.peak_ret ?? null };
       if (e.stale) patch.graded_stale = true;
+      if (e.source === "lookup") patch.graded_lookup = true;
       journalSignalPatch(key, patch);
       const i = rings.signals.findIndex((r) => (r.signal_key ?? signalKeyOf(r)) === key);
       if (i >= 0) rings.signals[i] = { ...rings.signals[i], ...patch };

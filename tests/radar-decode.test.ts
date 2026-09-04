@@ -2,8 +2,8 @@
 // laid out exactly as the live probe measured them (2026-09-03, publicnode).
 
 import { describe, expect, it } from "vitest";
-import { decodeLogsValue, decodeTradeLine, TRADE_DISCRIMINATOR } from "../worker/src/decode.js";
-import { base58 } from "../worker/src/util.js";
+import { decodeLogsValue, decodeTradeLine, TRADE_DISCRIMINATOR } from "../src/lib/radar/engine/decode.js";
+import { base58 } from "../src/lib/radar/engine/util.js";
 
 const MINT_BYTES = new Uint8Array(32).fill(3);
 const USER_BYTES = new Uint8Array(32).fill(7);

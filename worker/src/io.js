@@ -21,7 +21,7 @@
 
 import { createServer } from "node:http";
 import { Server } from "socket.io";
-import { log } from "./util.js";
+import { log } from "../../src/lib/radar/engine/util.js";
 
 const RING = { launches: 60, whales: 60, trades: 120, signals: 100 };
 

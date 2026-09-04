@@ -6,7 +6,7 @@
 // payload the frontend shows. Keyless, rate-limited to stay far inside
 // their 300 req/min, cached because signal bursts cluster on hot mints.
 
-import { LruMap, log } from "./util.js";
+import { LruMap, log } from "../../src/lib/radar/engine/util.js";
 
 const BASE = "https://api.dexscreener.com/latest/dex/tokens/";
 const TTL_MS = 60_000;

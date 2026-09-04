@@ -8,9 +8,10 @@ import { DataModeChip } from "./DataModeChip";
 type NavItem = { href: string; label: string; glyph: string; sim?: boolean };
 
 // Two tiers, not four sections. Nineteen links under four headings was a
-// directory, and a trader opening the app during a session needs six of them:
-// what is launching, what is moving, what the engine rates, who to follow,
-// what to be woken for, and home. Everything else is one click further and
+// directory, and a trader opening the app during a session needs seven of
+// them: what is launching, what is moving, what the engine rates, who to
+// follow, who the radar found on its own, what to be woken for, and home.
+// Everything else is one click further and
 // labelled for what it is — the simulated desk sits under SIMULATED, so the
 // rail itself says which pages are the deterministic universe.
 const PRIMARY: NavItem[] = [
@@ -22,6 +23,10 @@ const PRIMARY: NavItem[] = [
   { href: "/scanner", label: "Scanner", glyph: "≋" },
   { href: "/signals", label: "Signals", glyph: "▲" },
   { href: "/whales", label: "Wallets", glyph: "◍" },
+  // The seventh link, earned: "who to follow" answered by the app itself.
+  // Armed, it discovers and scores whale wallets autonomously — the one
+  // page here that acts instead of ranking.
+  { href: "/radar", label: "Whale Radar", glyph: "◎" },
   { href: "/alerts", label: "Alerts", glyph: "◬" },
 ];
 
@@ -29,9 +34,6 @@ const MORE: { title: string; items: NavItem[] }[] = [
   {
     title: "More live",
     items: [
-      // Live only when the visitor connects their own Radar worker — the
-      // page says so itself; an unconnected radar shows setup, not data.
-      { href: "/radar", label: "Whale Radar", glyph: "◎" },
       { href: "/tokens", label: "Token Radar", glyph: "◉" },
       { href: "/screener", label: "Screener", glyph: "☰" },
       { href: "/watchlists", label: "Watchlists", glyph: "☆" },

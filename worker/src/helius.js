@@ -14,9 +14,9 @@
 // (fixture transactions through parseHeliusTx) but has never spoken to
 // Helius from this codebase; its first live run belongs to the operator.
 
-import { PUMP_PROGRAM } from "./decode.js";
-import { ReconnectingWs } from "./sockets.js";
-import { LruSet, log } from "./util.js";
+import { PUMP_PROGRAM } from "../../src/lib/radar/engine/decode.js";
+import { ReconnectingWs } from "../../src/lib/radar/engine/sockets.js";
+import { LruSet, log } from "../../src/lib/radar/engine/util.js";
 
 const RESUB_MS = 5 * 60_000;
 

@@ -19,6 +19,10 @@
 //
 // Later program versions append fields (real reserves, fee accounts); prefix
 // decoding survives appends, which is why only the prefix is read.
+//
+// This file runs in TWO runtimes — the Radar worker under Node and the app's
+// in-browser hunter — so it reads bytes through Uint8Array + DataView only.
+// Buffer would be free in Node and a polyfill gamble in the browser bundle.
 
 import { base58 } from "./util.js";
 
@@ -32,6 +36,32 @@ const WITH_RESERVES = MIN_LEN + 16;
 /** Raw-unit → human conversions, in one place. */
 export const LAMPORTS = 1e9;
 export const PUMP_TOKEN_RAW = 1e6;
+
+/**
+ * @param {string} s
+ * @returns {Uint8Array | null}
+ */
+function fromBase64(s) {
+  try {
+    if (typeof Buffer !== "undefined") return Buffer.from(s, "base64");
+    const bin = atob(s);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/** @param {Uint8Array} bytes @param {number} from @param {number} to */
+function hexOf(bytes, from, to) {
+  let out = "";
+  for (let i = from; i < to; i++) out += bytes[i].toString(16).padStart(2, "0");
+  return out;
+}
+
+/** A DataView that respects the Uint8Array's own offset into its buffer. */
+const viewOf = (/** @type {Uint8Array} */ b) => new DataView(b.buffer, b.byteOffset, b.byteLength);
 
 /**
  * @typedef {object} PumpTrade
@@ -54,22 +84,16 @@ export const PUMP_TOKEN_RAW = 1e6;
  */
 export function decodeTradeLine(line) {
   if (!line.startsWith(PREFIX)) return null;
-  let buf;
-  try {
-    buf = Buffer.from(line.slice(PREFIX.length), "base64");
-  } catch {
-    return null;
-  }
-  if (buf.length < MIN_LEN) return null;
-  if (buf.subarray(0, 8).toString("hex") !== TRADE_DISCRIMINATOR) return null;
+  const buf = fromBase64(line.slice(PREFIX.length));
+  if (!buf || buf.length < MIN_LEN) return null;
+  if (hexOf(buf, 0, 8) !== TRADE_DISCRIMINATOR) return null;
 
   const isBuyByte = buf[56];
   if (isBuyByte !== 0 && isBuyByte !== 1) return null;
 
-  const solRaw = buf.readBigUInt64LE(40);
-  const tokRaw = buf.readBigUInt64LE(48);
-  const sol = Number(solRaw) / LAMPORTS;
-  const tokens = Number(tokRaw) / PUMP_TOKEN_RAW;
+  const view = viewOf(buf);
+  const sol = Number(view.getBigUint64(40, true)) / LAMPORTS;
+  const tokens = Number(view.getBigUint64(48, true)) / PUMP_TOKEN_RAW;
   return {
     mint: base58(buf.subarray(8, 40)),
     user: base58(buf.subarray(57, 89)),
@@ -77,8 +101,8 @@ export function decodeTradeLine(line) {
     sol,
     tokens,
     priceSol: tokens > 0 ? sol / tokens : 0,
-    chainTs: Number(buf.readBigInt64LE(89)) * 1000,
-    vSol: buf.length >= WITH_RESERVES ? Number(buf.readBigUInt64LE(97)) / LAMPORTS : null,
+    chainTs: Number(view.getBigInt64(89, true)) * 1000,
+    vSol: buf.length >= WITH_RESERVES ? Number(view.getBigUint64(97, true)) / LAMPORTS : null,
   };
 }
 

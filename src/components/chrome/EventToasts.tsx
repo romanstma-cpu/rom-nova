@@ -16,6 +16,10 @@ const LOUD_KINDS = new Set([
   // changes are NOT here — thirty to sixty a minute belong in the feed, not
   // floating over every page.
   "wallet_activity",
+  // The radar's proven-wallet buys — the one event arming the hunter exists
+  // to surface. Its discoveries (radar_whale) stay feed-only for the same
+  // reason launches do.
+  "radar_signal",
 ]);
 const MIN_USD = 40_000;
 
@@ -50,7 +54,11 @@ export function EventToasts() {
   useEventStream((e) => {
     const loud =
       LOUD_KINDS.has(e.kind) &&
-      ((e.amountUsd ?? 0) >= MIN_USD || e.kind === "signal_created" || e.kind === "cluster_detected" || e.kind === "wallet_activity");
+      ((e.amountUsd ?? 0) >= MIN_USD ||
+        e.kind === "signal_created" ||
+        e.kind === "cluster_detected" ||
+        e.kind === "wallet_activity" ||
+        e.kind === "radar_signal");
     if (!loud) return;
     setToasts((ts) => [...ts.slice(-2), e]);
     setTimeout(() => setToasts((ts) => ts.filter((t) => t.id !== e.id)), 7000);

@@ -7,6 +7,7 @@ import { TopBar } from "./TopBar";
 import { CommandPalette } from "./CommandPalette";
 import { EventToasts } from "./EventToasts";
 import { AlertMonitor } from "./AlertMonitor";
+import { RadarArm } from "./RadarArm";
 import { dataMode } from "@/lib/providers/registry";
 
 /**
@@ -117,6 +118,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
       {/* The live alert monitor rides the shell so rules keep evaluating on
           whichever page is open — its own coverage story lives on /alerts. */}
       <AlertMonitor />
+      {/* Resumes the whale hunter when it was left armed, so it keeps
+          hunting on whichever page is open. */}
+      <RadarArm />
 
       <footer className="shrink-0 border-t border-[var(--border)] bg-[rgba(6,9,14,0.9)] px-4 py-1.5 flex items-center gap-3 text-[10px] faint">
         <span className="truncate">

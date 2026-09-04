@@ -1,7 +1,7 @@
 // The Radar's two gates, cornered.
 
 import { describe, expect, it } from "vitest";
-import { isSignalBuy, isWhaleBuy } from "../worker/src/classify.js";
+import { isSignalBuy, isWhaleBuy } from "../src/lib/radar/engine/classify.js";
 
 const GATES = {
   whaleThresholdSol: 10,

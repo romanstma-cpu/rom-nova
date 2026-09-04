@@ -4,7 +4,7 @@
 // against a live key (the module says so on /health).
 
 import { describe, expect, it } from "vitest";
-import { PUMP_PROGRAM } from "../worker/src/decode.js";
+import { PUMP_PROGRAM } from "../src/lib/radar/engine/decode.js";
 import { parseHeliusTx } from "../worker/src/helius.js";
 
 const WALLET = "TrackedWallet1111111111111111111111111111111";

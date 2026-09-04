@@ -10,7 +10,9 @@
 // the same surface, which is how the whole pipeline is smoke-tested live
 // without a database or a key.
 
-import { log } from "./util.js";
+// The engine — the pure pipeline shared with the app's in-browser hunter —
+// lives in the app tree; this service is one of its two drivers.
+import { log } from "../../src/lib/radar/engine/util.js";
 
 const FLUSH_MS = 2_000;
 const QUEUE_CAP = 5_000;
@@ -152,7 +154,7 @@ export class Db {
    */
   async hydrate(state) {
     if (!this.client) return { wallets: 0, fills: 0 };
-    const { applyFill, newWallet } = await import("./score.js");
+    const { applyFill, newWallet } = await import("../../src/lib/radar/engine/score.js");
 
     const { data: walletRows, error: wErr } = await this.client
       .from("tracked_wallets")

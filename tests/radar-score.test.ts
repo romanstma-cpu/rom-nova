@@ -11,7 +11,7 @@ import {
   scoreOf,
   walletRow,
   winRateOf,
-} from "../worker/src/score.js";
+} from "../src/lib/radar/engine/score.js";
 
 const T0 = 1_788_000_000_000;
 const buy = (mint: string, sol: number, tokens: number, ts = T0) => ({ mint, isBuy: true, sol, tokens, ts });

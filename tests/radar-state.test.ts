@@ -3,8 +3,8 @@
 // so this file is the closest thing to running the worker in a bottle.
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { applyFill } from "../worker/src/score.js";
-import { RadarState } from "../worker/src/state.js";
+import { applyFill } from "../src/lib/radar/engine/score.js";
+import { RadarState } from "../src/lib/radar/engine/state.js";
 
 const GATES = {
   whaleThresholdSol: 10,

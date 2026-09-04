@@ -25,6 +25,7 @@ export class ReconnectingWs {
     this.lastFrameAt = 0;
     this.connects = 0;
     this.frames = 0;
+    this.bytes = 0;
     this.lastError = "";
     /** @type {ReturnType<typeof setInterval> | null} */
     this.watchdog = null;
@@ -57,9 +58,11 @@ export class ReconnectingWs {
     ws.onmessage = (ev) => {
       this.lastFrameAt = Date.now();
       this.frames++;
+      const text = typeof ev.data === "string" ? ev.data : ev.data.toString();
+      this.bytes += text.length;
       let msg;
       try {
-        msg = JSON.parse(typeof ev.data === "string" ? ev.data : ev.data.toString());
+        msg = JSON.parse(text);
       } catch {
         return;
       }
@@ -133,6 +136,7 @@ export class ReconnectingWs {
       connected: Boolean(this.ws && this.ws.readyState === WebSocket.OPEN),
       connects: this.connects,
       frames: this.frames,
+      bytes: this.bytes,
       lastFrameAgoMs: this.lastFrameAt ? Date.now() - this.lastFrameAt : null,
       lastError: this.lastError || null,
     };

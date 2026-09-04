@@ -29,6 +29,9 @@ const MORE: { title: string; items: NavItem[] }[] = [
   {
     title: "More live",
     items: [
+      // Live only when the visitor connects their own Radar worker — the
+      // page says so itself; an unconnected radar shows setup, not data.
+      { href: "/radar", label: "Whale Radar", glyph: "◎" },
       { href: "/tokens", label: "Token Radar", glyph: "◉" },
       { href: "/screener", label: "Screener", glyph: "☰" },
       { href: "/watchlists", label: "Watchlists", glyph: "☆" },

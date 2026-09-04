@@ -1,0 +1,44 @@
+# Render blueprint for the ROM Nova Radar worker.
+#
+# Deploy: Render dashboard → New → Blueprint → point it at this repository.
+# Render reads this file, creates the service, and prompts for every
+# `sync: false` variable — paste your keys THERE, never anywhere else.
+#
+# Why `type: web` and not `type: worker`: Socket.io needs a public port
+# anyway, and Render's free plan covers web services while background
+# workers require a paid plan. THE FREE-PLAN CATCH, stated plainly: a free
+# web service spins down after ~15 minutes with no inbound HTTP traffic and
+# misses everything until the next request wakes it. For a scanner that is
+# genuinely 24/7, either use the starter plan or point an uptime monitor
+# (e.g. UptimeRobot, free) at /health every 5 minutes. On every restart the
+# worker rehydrates its wallets and scores from Supabase, so sleep costs
+# coverage, not memory.
+
+services:
+  - type: web
+    name: rom-nova-radar
+    runtime: node
+    rootDir: worker
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: HELIUS_API_KEY
+        sync: false
+      - key: WHALE_THRESHOLD_SOL
+        value: "10"
+      - key: WHALE_WINDOW_MIN
+        value: "10"
+      - key: SIGNAL_MIN_SCORE
+        value: "70"
+      - key: SIGNAL_MIN_SETTLED
+        value: "3"
+      - key: SIGNAL_MIN_BUY_SOL
+        value: "1"
+      - key: MAX_TRACKED_WALLETS
+        value: "200"

@@ -1,0 +1,18 @@
+{
+  "name": "rom-nova-radar",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Autonomous whale scanner for ROM Nova: watches every pump.fun launch and trade keylessly, discovers profitable wallets, scores them from observed fills, and pushes signals over Socket.io.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.9"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dry": "node --env-file-if-exists=.env src/index.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.0",
+    "socket.io": "^4.8.0"
+  }
+}

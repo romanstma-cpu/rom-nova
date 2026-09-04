@@ -299,7 +299,8 @@ describe("exits", () => {
     effects = [];
     state.onTrade(fill({ mint: "MINT2", isBuy: false, sol: 1, tokens: 100, priceSol: 0.015, chainTs: SIG_AT + 140_000, signature: "x3" }));
     expect(effects.some((e) => e.kind === "exit")).toBe(false);
-    expect(state.counts.exits).toBe(2);
+    // One exit, however many slices it took.
+    expect(state.counts.exits).toBe(1);
   });
 
   it("a sell with no signal behind it is not an exit", () => {
@@ -419,6 +420,50 @@ describe("lookup backoff", () => {
       t += pl.BACKOFF_MAX_MS + 1;
     }
     expect(pl.lookupStatus().backoffMs).toBe(pl.BACKOFF_MAX_MS);
+    pl.resetLookup();
+  });
+});
+
+describe("jupiter fallback", () => {
+  const WSOL = "So11111111111111111111111111111111111111112";
+  const reply = (code: number, body: unknown) =>
+    ({ ok: code === 200, status: code, headers: { get: () => null }, json: async () => body }) as unknown as Response;
+
+  it("prices what DexScreener could not, in SOL, from the same call's SOL quote", async () => {
+    const pl = await import("../src/lib/radar/engine/pricelookup.js");
+    pl.resetLookup();
+    const T = 1_788_000_000_000;
+    const urls: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      urls.push(url);
+      if (url.startsWith("https://api.dexscreener.com/")) return reply(429, {});
+      return reply(200, { A: { usdPrice: 0.5 }, [WSOL]: { usdPrice: 100 } });
+    }) as unknown as typeof fetch;
+    const marks = await pl.lookupSolPrices(["A", "B"], fetchImpl, T);
+    expect(urls[1]).toContain(`ids=A,B,${WSOL}`);
+    expect(marks.get("A")?.priceSol).toBeCloseTo(0.005, 9);
+    expect(marks.has("B")).toBe(false);
+    expect(pl.lookupStatus()).toMatchObject({ calls: 1, failures: 1, jupiter: { calls: 1, failures: 0, backoffMs: 0 } });
+    // Inside DexScreener's wait, Jupiter still answers.
+    const again = await pl.lookupSolPrices(["A"], fetchImpl, T + 5_000);
+    expect(again.get("A")?.priceSol).toBeCloseTo(0.005, 9);
+    expect(pl.lookupStatus()).toMatchObject({ calls: 1, skipped: 1, jupiter: { calls: 2 } });
+    pl.resetLookup();
+  });
+
+  it("backs off Jupiter on its own failures and refuses a reply without a SOL quote", async () => {
+    const pl = await import("../src/lib/radar/engine/pricelookup.js");
+    pl.resetLookup();
+    const T = 1_788_000_000_000;
+    const fetchImpl = (async (url: string) => {
+      if (url.startsWith("https://api.dexscreener.com/")) return reply(200, { pairs: [] });
+      return reply(200, { A: { usdPrice: 0.5 } });
+    }) as unknown as typeof fetch;
+    const marks = await pl.lookupSolPrices(["A"], fetchImpl, T);
+    expect(marks.size).toBe(0);
+    expect(pl.lookupStatus().jupiter).toMatchObject({ calls: 1, failures: 1, backoffMs: pl.BACKOFF_MIN_MS, lastError: "no SOL quote in the reply" });
+    await pl.lookupSolPrices(["A"], fetchImpl, T + 1_000);
+    expect(pl.lookupStatus().jupiter.calls).toBe(1);
     pl.resetLookup();
   });
 });

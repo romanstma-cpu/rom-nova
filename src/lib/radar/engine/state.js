@@ -390,7 +390,8 @@ export class RadarState {
     open.exited = true;
     // Flat, or a sell the ledger cannot size: stop listening either way.
     if (fraction === null || fraction >= 0.999) this.openSignals.delete(k);
-    this.counts.exits++;
+    // The counter is exits, not sells: a wallet leaving in twenty slices is one exit.
+    if (first) this.counts.exits++;
     this.emit({
       kind: "exit",
       signal_key: open.key,

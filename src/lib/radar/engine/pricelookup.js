@@ -18,6 +18,19 @@ const WSOL = "So11111111111111111111111111111111111111112";
 /** Mints per call — DexScreener's own limit. */
 export const LOOKUP_BATCH = 30;
 
+// Second source. DexScreener throttles by address, and a Render box shares
+// its address with strangers: in production the first hour read nine 429s
+// in fourteen calls. Jupiter's keyless price endpoint (the one the wallet
+// page already uses) quotes in USD; dividing by SOL's own USD quote from the
+// same call gives SOL per token. No names or liquidity from this path, but
+// a grade is a price, and a price is what the worker was missing.
+const JUP_PRICE = "https://lite-api.jup.ag/price/v3";
+let jupCalls = 0;
+let jupFailures = 0;
+let jupBackoffMs = 0;
+let jupBlockedUntil = 0;
+let jupLastError = "";
+
 let calls = 0;
 let failures = 0;
 let skipped = 0;
@@ -42,6 +55,47 @@ export function resetLookup() {
   lastError = "";
   backoffMs = 0;
   blockedUntil = 0;
+  jupCalls = 0;
+  jupFailures = 0;
+  jupBackoffMs = 0;
+  jupBlockedUntil = 0;
+  jupLastError = "";
+}
+
+/**
+ * SOL prices from Jupiter for mints DexScreener could not answer. Own
+ * backoff, same shape. Exported so a driver can probe it on its own.
+ *
+ * @param {string[]} mints
+ * @param {typeof fetch} [fetchImpl]
+ * @param {number} [now]
+ * @returns {Promise<Map<string, PriceMark>>}
+ */
+export async function jupiterSolPrices(mints, fetchImpl = fetch, now = Date.now()) {
+  const out = new Map();
+  const batch = [...new Set(mints)].filter((m) => m !== WSOL).slice(0, LOOKUP_BATCH);
+  if (batch.length === 0 || now < jupBlockedUntil) return out;
+  jupCalls++;
+  try {
+    const res = await fetchImpl(`${JUP_PRICE}?ids=${[...batch, WSOL].join(",")}`, { signal: AbortSignal.timeout(6_000) });
+    if (!res.ok) throw new Error(`http ${res.status}`);
+    const body = await res.json();
+    const solUsd = Number(body?.[WSOL]?.usdPrice);
+    if (!(solUsd > 0)) throw new Error("no SOL quote in the reply");
+    jupBackoffMs = 0;
+    const at = Date.now();
+    for (const mint of batch) {
+      const usd = Number(body?.[mint]?.usdPrice);
+      if (!(usd > 0)) continue;
+      out.set(mint, { priceSol: usd / solUsd, at, name: null, symbol: null, liquidityUsd: null });
+    }
+  } catch (e) {
+    jupFailures++;
+    jupLastError = e instanceof Error ? e.message : String(e);
+    jupBackoffMs = jupBackoffMs === 0 ? BACKOFF_MIN_MS : Math.min(BACKOFF_MAX_MS, jupBackoffMs * 2);
+    jupBlockedUntil = now + jupBackoffMs;
+  }
+  return out;
 }
 
 /**
@@ -69,6 +123,8 @@ export async function lookupSolPrices(mints, fetchImpl = fetch, now = Date.now()
   if (batch.length === 0) return out;
   if (now < blockedUntil) {
     skipped++;
+    // DexScreener is resting; Jupiter may still answer.
+    for (const [m, v] of await jupiterSolPrices(batch, fetchImpl, now)) out.set(m, v);
     return out;
   }
   calls++;
@@ -110,6 +166,12 @@ export async function lookupSolPrices(mints, fetchImpl = fetch, now = Date.now()
       blockedUntil = now + backoffMs;
     }
   }
+  // Whatever DexScreener left unpriced — a failed call, or a token it has
+  // no SOL pair for — Jupiter gets a chance at.
+  const missing = batch.filter((m) => !out.has(m));
+  if (missing.length > 0) {
+    for (const [m, v] of await jupiterSolPrices(missing, fetchImpl, now)) out.set(m, v);
+  }
   return out;
 }
 
@@ -128,5 +190,13 @@ export function marksFromBody(body, mints) {
 }
 
 export function lookupStatus() {
-  return { calls, failures, skipped, lastError: lastError || null, backoffMs, blockedUntil: blockedUntil || null };
+  return {
+    calls,
+    failures,
+    skipped,
+    lastError: lastError || null,
+    backoffMs,
+    blockedUntil: blockedUntil || null,
+    jupiter: { calls: jupCalls, failures: jupFailures, backoffMs: jupBackoffMs, lastError: jupLastError || null },
+  };
 }

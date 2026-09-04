@@ -926,6 +926,20 @@ redeployed, uptime reset to 14s, `price_lookup` reporting
 `backoffMs`/`skipped`. Migration 002 still pending on LO's side; the
 worker keeps saying so.
 
+### 1.18.2 — Jupiter answers what DexScreener will not
+
+The backoff behaved (one call, one 429, a quiet 30s) and in doing so
+showed the real shape of the problem: DexScreener throttles Render's
+shared address outright, so a worker there would grade every off-curve
+token stale, honestly and uselessly. `jupiterSolPrices` in
+`engine/pricelookup.js` — Jupiter's keyless `price/v3`, USD per token
+divided by the same call's USD per SOL — now answers whatever
+DexScreener could not, with its own backoff and counters. Live probe:
+BONK 3.169e-8 SOL from Jupiter against 3.172e-8 from DexScreener.
+Also fixed: `counts.exits` counted every slice of a wallet's exit (one
+signal, forty-six "exits" on the tile in four minutes); only the first
+sell counts now. 771 tests.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

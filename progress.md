@@ -769,6 +769,18 @@ the grow-in runs on the compositor. Verified in a scanner frame: 79
 fills most of the bar, 28 a sliver, colours intact. Rides out with the
 next tag; the site's `/nova` copy stays at 1.16.0 until then.
 
+## The worker is deployed (2026-09-04, evening)
+
+LO ran the Supabase schema ("Success. No rows returned"), made the Helius
+keys, pasted the browser key into Settings, and deployed the Blueprint on
+Render himself. `https://rom-nova-radar.onrender.com/health` at 113s of
+uptime: `dry_run:false`, db mode supabase with 33 launches / 1 wallet /
+1 trade written and 0 dropped, PumpPortal + program-log streams connected
+(28,460 frames, 36 MB in under two minutes), Helius enabled and connected,
+first whale tracked. No key passed through this chat. Remaining on LO's
+side: a free uptime monitor on /health (free Render services sleep after
+15 idle minutes) and pasting the URL into the app's Remote worker card.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

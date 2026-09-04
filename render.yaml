@@ -23,6 +23,15 @@ services:
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /health
+    # The engine the worker runs lives OUTSIDE rootDir (src/lib/radar/engine,
+    # shared with the app). Without this filter Render deploys only when a
+    # commit touches worker/, so an engine-only fix never reaches the service
+    # — which is exactly how 1.18.1 sat undeployed for fifteen minutes.
+    buildFilter:
+      paths:
+        - worker/**
+        - src/lib/radar/engine/**
+        - render.yaml
     envVars:
       - key: SUPABASE_URL
         sync: false

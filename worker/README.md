@@ -66,6 +66,13 @@ the columns exist. Paste that file (or re-run `schema.sql`, which carries the
 same block) into the Supabase SQL editor once; the worker re-probes every
 five minutes and starts writing grades and exits without a restart.
 
+## What triggers a deploy
+
+The Blueprint's `buildFilter` deploys on changes under `worker/`, under
+`src/lib/radar/engine/` (the shared engine the worker imports), and to
+`render.yaml` itself. A commit that touches only the app does not redeploy
+the worker, and should not.
+
 ## Run locally
 
 ```bash

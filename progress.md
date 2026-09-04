@@ -523,6 +523,66 @@ HELIUS_API_KEY) into Render's dashboard; paste the service URL into
 plan or a free /health pinger makes it truly 24/7, and the README
 says so instead of pretending otherwise.
 
+## 1.13.0 — the radar moves IN (2026-09-03, later that night)
+
+LO, on reading the 1.12.0 setup steps: "no, this needs to be
+implemented into ROM Nova, i want ROM Nova to have these features."
+Right — the worker was the architecturally pure answer and the wrong
+product answer. No accounts, no blueprints: ARM THE RADAR on /radar
+and the app itself hunts.
+
+The engine moved, not copied: worker/src's pure pipeline now lives at
+src/lib/radar/engine/ (decode, score, classify, state, the socket, the
+two stream adapters) and the worker imports it from there — one
+implementation, two drivers, the worker demoted to an optional 24/7
+extension at the bottom of the page. decode.js dropped Buffer for
+Uint8Array+DataView so the same bytes parse in a browser tab and under
+Node; the 50 existing engine tests passed unchanged against the
+rewrite.
+
+In-app organs: journal.ts (IndexedDB `rom-nova-radar`, ledger-style —
+memory truth, disk copy, signature dedupe, caps, longest-idle
+eviction), hunter.ts (arm/disarm with persisted intent, gates with a
+5/10/20 SOL threshold knob, effects fanned to journal + rings + the
+live bus, UI flushed at most 2×/s so 220 notifications/s never becomes
+220 renders/s), RadarArm riding the shell so an armed radar hunts on
+every page and every app open. Scores are never stored: the journal
+replays through the engine at start. radar_signal joined the loud
+toast kinds; discoveries stay feed-only. Whale Radar took the seventh
+primary rail slot — the one page that acts instead of ranking.
+
+The program-firehose rule in rpc-ws.ts stands untouched and the hunter
+documents why it is the exception: that module pays bandwidth to
+extract per-account events; the hunter decodes every frame it pays
+for. Cost printed beside the chip (367–450 KB/s measured during the
+smoke), hunting an explicit switch.
+
+**Smoked in the shipping export:** armed → both streams up with the
+rate in the chip; threshold knob restarted the pipeline live; three
+whales discovered in-app (8.4/5.9/6.0 SOL sniping one launch 3s in),
+13 fills journaled, one flip caught mid-exit; then a page reload —
+"resumed with 3 tracked wallets and 13 journaled fills from this
+browser's own record (indexeddb)", hunting auto-resumed with NO click,
+and the leaderboard rebuilt from replayed evidence alone (top sniper
+67, 100% win, +9.02 SOL, 4 settled — the shrink still holding it under
+the 70 gate). The 8788 tab's mystery bounce to /nova/ turned out to be
+the browser pane restoring a discarded tab to its opening URL —
+environmental; it accidentally proved shell-level resume on a
+non-radar page. 757 tests; ten new pin the journal (dedupe, caps,
+eviction, and the replay contract: journaled evidence recomputes the
+exact score direct application produced).
+
+### 🚢 1.13.0 SHIPPED and proven (2026-09-03 ~9:25 PM)
+
+`402a87b` (the move + hunter) → `febe1d7` (1.13.0) → tag → CI green.
+Installer SHA256 `6cb1d8cf…87c4` = GitHub digest = SHA256SUMS;
+latest.yml 1.13.0; chunks 39/0 missing; site `fe6fe8c` live with
+2×1.13.0, 0 stale, /nova/radar/ 200 carrying ARM THE RADAR, and the
+Nova card now leads with the radar. Desktop: 1.13.0.0, titled window,
+4 procs → clean close to 0, leveldb LOG rotated at launch at the real
+profile path, and the app://rom-nova IndexedDB origin present — where
+the desktop journal lives.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

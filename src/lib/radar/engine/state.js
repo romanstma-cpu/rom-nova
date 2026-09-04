@@ -23,8 +23,11 @@ import { LruMap, LruSet } from "./util.js";
 
 /** Grading horizons after the signal fill, ms. Keys are the column suffixes. */
 export const HORIZONS = /** @type {const} */ ({ m1: 60_000, m5: 300_000, m15: 900_000, h1: 3_600_000 });
-/** How long past a horizon the grader waits for a trade before marking to the last one seen. */
-export const STALE_GRACE_MS = 45_000;
+/**
+ * How long past a horizon the grader waits for a trade or a quote before
+ * marking to the last price seen. Wide enough for one lookup backoff.
+ */
+export const STALE_GRACE_MS = 90_000;
 /** An open signal older than this stops listening for the wallet's exit. */
 export const EXIT_WATCH_MS = 24 * 3_600_000;
 /** A pinned mint quiet for this long is worth a price lookup off the stream. */

@@ -249,9 +249,9 @@ describe("signal grading", () => {
     fireSignal();
     state.onTrade(mark(0.02, SIG_AT + 30_000, 1));
     effects = [];
-    state.tick(SIG_AT + 60_000 + 44_000); // inside the grace: nothing yet
+    state.tick(SIG_AT + 60_000 + 89_000); // inside the grace: nothing yet
     expect(effects.some((e) => e.kind === "signal_outcome")).toBe(false);
-    state.tick(SIG_AT + 60_000 + 46_000);
+    state.tick(SIG_AT + 60_000 + 91_000);
     const out = effects.find((e) => e.kind === "signal_outcome");
     expect(out).toMatchObject({ horizon: "m1", ret: 1, stale: true });
   });
@@ -259,7 +259,7 @@ describe("signal grading", () => {
   it("grades flat and stale when no trade ever followed the signal", () => {
     fireSignal();
     effects = [];
-    state.tick(SIG_AT + 3_600_000 + 60_000);
+    state.tick(SIG_AT + 3_600_000 + 91_000);
     const outs = effects.filter((e) => e.kind === "signal_outcome");
     expect(outs.map((o) => o.horizon)).toEqual(["m1", "m5", "m15", "h1"]);
     expect(outs.every((o) => o.ret === 0 && o.stale)).toBe(true);
@@ -358,7 +358,7 @@ describe("marks from outside the stream", () => {
     expect(effects.find((e) => e.kind === "signal_outcome")).toMatchObject({ horizon: "m15", source: "stream", stale: false });
     // And the tick's fallback says last-mark.
     effects = [];
-    state.tick(SIG_AT + 3_600_000 + 46_000);
+    state.tick(SIG_AT + 3_600_000 + 91_000);
     expect(effects.find((e) => e.kind === "signal_outcome")).toMatchObject({ horizon: "h1", source: "last-mark", stale: true, ret: 2 });
   });
 
@@ -386,5 +386,39 @@ describe("marksFromBody", () => {
     const marks = marksFromBody(body, ["A", "B", "C", "D"]);
     expect([...marks.entries()]).toEqual([["A", 0.003]]);
     expect(marksFromBody(null, ["A"]).size).toBe(0);
+  });
+});
+
+describe("lookup backoff", () => {
+  it("backs off after a 429, doubles, skips during the wait, and resets on success", async () => {
+    const pl = await import("../src/lib/radar/engine/pricelookup.js");
+    pl.resetLookup();
+    const T = 1_788_000_000_000;
+    const status = (code: number, body: unknown = { pairs: [] }) =>
+      ({ ok: code === 200, status: code, headers: { get: () => null }, json: async () => body }) as unknown as Response;
+    let code = 429;
+    const fetchImpl = (async () => status(code)) as unknown as typeof fetch;
+
+    await pl.lookupSolPrices(["A"], fetchImpl, T);
+    expect(pl.lookupStatus()).toMatchObject({ calls: 1, failures: 1, skipped: 0, backoffMs: pl.BACKOFF_MIN_MS, lastError: "http 429" });
+    // Inside the wait: no call is made.
+    await pl.lookupSolPrices(["A"], fetchImpl, T + 10_000);
+    expect(pl.lookupStatus()).toMatchObject({ calls: 1, skipped: 1 });
+    // Past the wait, still failing: the wait doubles.
+    await pl.lookupSolPrices(["A"], fetchImpl, T + pl.BACKOFF_MIN_MS + 1);
+    expect(pl.lookupStatus()).toMatchObject({ calls: 2, failures: 2, backoffMs: pl.BACKOFF_MIN_MS * 2 });
+    // A success resets it.
+    code = 200;
+    await pl.lookupSolPrices(["A"], fetchImpl, T + 4 * pl.BACKOFF_MIN_MS);
+    expect(pl.lookupStatus()).toMatchObject({ calls: 3, backoffMs: 0 });
+    // And the ceiling holds.
+    code = 429;
+    let t = T + 10 * pl.BACKOFF_MIN_MS;
+    for (let i = 0; i < 8; i++) {
+      await pl.lookupSolPrices(["A"], fetchImpl, t);
+      t += pl.BACKOFF_MAX_MS + 1;
+    }
+    expect(pl.lookupStatus().backoffMs).toBe(pl.BACKOFF_MAX_MS);
+    pl.resetLookup();
   });
 });

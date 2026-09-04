@@ -20,7 +20,29 @@ export const LOOKUP_BATCH = 30;
 
 let calls = 0;
 let failures = 0;
+let skipped = 0;
 let lastError = "";
+
+// Backoff. DexScreener's published limit is generous, but a Render box
+// shares its egress address with strangers and gets 429s the moment a
+// neighbour is busy; hammering through them just extends the ban. After a
+// failure the next call waits — 30s, then double, up to five minutes — and
+// a success resets the wait. Callers see an empty map during the wait and
+// count it as a skip, never as a quote.
+export const BACKOFF_MIN_MS = 30_000;
+export const BACKOFF_MAX_MS = 5 * 60_000;
+let backoffMs = 0;
+let blockedUntil = 0;
+
+/** Test seam. */
+export function resetLookup() {
+  calls = 0;
+  failures = 0;
+  skipped = 0;
+  lastError = "";
+  backoffMs = 0;
+  blockedUntil = 0;
+}
 
 /**
  * @typedef {object} PriceMark
@@ -38,16 +60,28 @@ let lastError = "";
  *
  * @param {string[]} mints
  * @param {typeof fetch} [fetchImpl]
+ * @param {number} [now]
  * @returns {Promise<Map<string, PriceMark>>}
  */
-export async function lookupSolPrices(mints, fetchImpl = fetch) {
+export async function lookupSolPrices(mints, fetchImpl = fetch, now = Date.now()) {
   const out = new Map();
   const batch = [...new Set(mints)].slice(0, LOOKUP_BATCH);
   if (batch.length === 0) return out;
+  if (now < blockedUntil) {
+    skipped++;
+    return out;
+  }
   calls++;
   try {
     const res = await fetchImpl(BASE + batch.join(","), { signal: AbortSignal.timeout(6_000) });
-    if (!res.ok) throw new Error(`http ${res.status}`);
+    if (!res.ok) {
+      // Honour a Retry-After when the server names one; otherwise back off.
+      const retry = Number(res.headers?.get?.("retry-after"));
+      backoffMs = backoffMs === 0 ? BACKOFF_MIN_MS : Math.min(BACKOFF_MAX_MS, backoffMs * 2);
+      blockedUntil = now + (retry > 0 ? Math.max(retry * 1000, backoffMs) : backoffMs);
+      throw new Error(`http ${res.status}`);
+    }
+    backoffMs = 0;
     const body = await res.json();
     const pairs = Array.isArray(body?.pairs) ? body.pairs : [];
     const at = Date.now();
@@ -70,6 +104,11 @@ export async function lookupSolPrices(mints, fetchImpl = fetch) {
   } catch (e) {
     failures++;
     lastError = e instanceof Error ? e.message : String(e);
+    // A network failure with no status backs off the same way.
+    if (blockedUntil <= now) {
+      backoffMs = backoffMs === 0 ? BACKOFF_MIN_MS : Math.min(BACKOFF_MAX_MS, backoffMs * 2);
+      blockedUntil = now + backoffMs;
+    }
   }
   return out;
 }
@@ -89,5 +128,5 @@ export function marksFromBody(body, mints) {
 }
 
 export function lookupStatus() {
-  return { calls, failures, lastError: lastError || null };
+  return { calls, failures, skipped, lastError: lastError || null, backoffMs, blockedUntil: blockedUntil || null };
 }

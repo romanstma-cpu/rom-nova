@@ -30,6 +30,7 @@ import { startPumpPortal } from "./engine/pumpportal.js";
 import { startRpcStream } from "./engine/rpcstream.js";
 import { applyFill, newWallet, scoreOf } from "./engine/score.js";
 import { RadarState } from "./engine/state.js";
+import { clearRadarJournal } from "./journal";
 import {
   journalCounts,
   journalFill,
@@ -551,6 +552,26 @@ export async function setHunterThreshold(thresholdSol: number): Promise<void> {
   } else {
     scheduleFlush();
   }
+}
+
+/**
+ * Forget every wallet, fill and signal the radar has journaled. A running
+ * hunt restarts from zero with the same threshold; the switch position is
+ * kept. Returns whether the disk copy was cleared too (see the journal).
+ */
+export async function forgetRadarJournal(): Promise<boolean> {
+  const was = state !== null || snapshot.phase === "starting";
+  const threshold = hunterConfig().thresholdSol;
+  if (was) stopHunting();
+  const ok = await clearRadarJournal();
+  rings.signals = [];
+  rings.whales = [];
+  rings.launches = [];
+  rings.trades = [];
+  hydrated = { wallets: 0, fills: 0 };
+  if (was) await startHunting(threshold);
+  else scheduleFlush();
+  return ok;
 }
 
 /** Called once by the shell: resume hunting when the stored intent says so. */

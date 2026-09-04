@@ -8,10 +8,14 @@
 // also the reason the app reads as a wall of text — a trader who has read
 // the launch-feed explainer once does not need it above the feed every day.
 //
-// So the paragraph stays and the DEFAULT changes: one line, and a "why ▾"
-// that opens the rest. What a reader opens stays open on that page for
-// them, in this browser, because re-folding it on every visit would be its
-// own kind of nagging.
+// So the paragraph stays and the DEFAULT changes: one line, and a "how to
+// read this" that opens the rest. What a reader opens stays open on that
+// page for them, in this browser, because re-folding it on every visit would
+// be its own kind of nagging.
+//
+// The folded line is a hand-written `summary` when the page gives one. The
+// earlier fold clipped the paragraph's first line mid-sentence ("…gets
+// tracked; every…"), which read as a rendering bug rather than a fold.
 
 import { useSyncExternalStore } from "react";
 
@@ -53,7 +57,32 @@ function openSet(raw: string): Set<string> {
   return new Set(raw.split("|").filter(Boolean));
 }
 
-export function Hint({ id, className = "", children }: { id: string; className?: string; children: React.ReactNode }) {
+/** Fold every explainer back to its one line — the settings page's reset. */
+export function foldAllHints(): void {
+  write("");
+}
+
+/** How many explainers are open, from a snapshot (the settings row). */
+export function openHintCount(raw: string): number {
+  return openSet(raw).size;
+}
+
+// The store's seam, for a page that shows the state without owning a hint.
+export const subscribeHints = subscribe;
+export const hintsSnapshot = read;
+export const hintsServerSnapshot = serverSnapshot;
+
+export function Hint({
+  id,
+  summary,
+  className = "",
+  children,
+}: {
+  id: string;
+  summary?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
   // The snapshot is the raw stored string — reading localStorage inside the
   // render would desync the prerendered HTML from the browser's first paint
   // (the hydration gotcha this codebase already met once).
@@ -67,7 +96,7 @@ export function Hint({ id, className = "", children }: { id: string; className?:
   };
   return (
     <div className={`hint ${className}`}>
-      <div className={open ? "" : "line-clamp-1"}>{children}</div>
+      {open ? <div>{children}</div> : summary ? <div>{summary}</div> : <div className="line-clamp-1">{children}</div>}
       <button
         type="button"
         onClick={toggle}

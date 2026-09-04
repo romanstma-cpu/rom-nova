@@ -10,15 +10,20 @@
 // again. Arm it once; it keeps hunting on every page until disarmed, and
 // its evidence survives reloads.
 //
-// The second plane is optional: a deployed Radar worker (worker/ in the
-// repo) doing the same thing on a server around the clock, for people who
-// want coverage while the machine is off. Same engine, same honesty.
+// The page is ordered by how often a reader touches each part: the switch,
+// then what it found, then the pipeline filling, and only then — folded —
+// the two optional extensions (a Helius key for off-curve coverage, a
+// remote worker for the hours the app is closed). Both extensions used to
+// sit as full cards between the switch and the data, so the first screen
+// was mostly setup for things most readers never set up.
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { fmtAge } from "@/lib/client";
 import { Hint } from "@/components/ui/Hint";
+import { PageTitle } from "@/components/ui/PageTitle";
 import { Score } from "@/components/ui/bits";
+import { HeliusKeyCard } from "@/components/radar/HeliusKeyCard";
 import {
   holdRadar,
   radarConnect,
@@ -28,12 +33,8 @@ import {
   subscribeRadar,
 } from "@/lib/radar/client";
 import {
-  heliusKeyValue,
   hunterServerSnapshot,
   hunterSnapshot,
-  looksLikeHeliusKey,
-  maskHeliusKey,
-  setHeliusKey,
   setHunterThreshold,
   startHunting,
   stopHunting,
@@ -76,6 +77,11 @@ const workerView = (w: RadarState): RadarView => ({
   asOf: w.asOf,
 });
 
+/** The empty line for a pipeline panel: what fills it, in the state we are in. */
+function Waiting({ hunting, idle, live }: { hunting: boolean; idle: string; live: string }) {
+  return <div className="px-3 py-6 text-center faint text-[11px] leading-relaxed">{hunting ? live : idle}</div>;
+}
+
 export default function RadarPage() {
   const hunter = useSyncExternalStore(subscribeHunter, hunterSnapshot, hunterServerSnapshot);
   const worker = useSyncExternalStore(subscribeRadar, radarSnapshot, radarServerSnapshot);
@@ -86,39 +92,46 @@ export default function RadarPage() {
   const workerUp = worker.phase === "connected";
   const view = source === "worker" && workerUp ? workerView(worker) : deviceView(hunter);
   const hunting = hunter.phase === "hunting";
+  const starting = hunter.phase === "starting";
+  const armed = hunting || starting;
+  const feeding = hunting || view.label === "REMOTE WORKER";
   const rpc = hunter.streams.rpc;
   const pump = hunter.streams.pump;
   const helius = hunter.helius;
-  const [heliusDraft, setHeliusDraft] = useState("");
   // The biggest discovery in view sets the scale for the size bars.
   const maxWhaleSol = view.whales.reduce((m, w) => Math.max(m, w.sol), 1);
+  // The extensions fold opens itself when either one is in use.
+  const extensionsInUse = helius.keySet || worker.enabled || workerUp;
 
   return (
     <div className="p-3 flex flex-col gap-3">
       <div className="flex items-center gap-2 flex-wrap">
         <span className={`radar-sweep${hunting ? " on" : ""}`} aria-hidden="true" />
-        <h1 className="text-[15px] font-semibold tracking-wide">WHALE RADAR</h1>
+        <PageTitle title="WHALE RADAR" lede="Finds and scores whale wallets on its own, then flags when a proven one buys" />
         <span className={`chip ${hunting ? "chip-pos" : ""}`}>
           {hunting ? (
             <>
               <span className="live-dot" />
               HUNTING · this device
             </>
-          ) : hunter.phase === "starting" ? (
+          ) : starting ? (
             "STARTING…"
           ) : (
             "DISARMED"
           )}
         </span>
         {hunting && pump && rpc && (
-          <span className="chip text-[9.5px]">
+          <span className="chip text-[9.5px]" title="the two keyless streams the radar drinks: launches from PumpPortal, trades from the pump.fun program log">
             launches {pump.connected ? "✓" : "×"} · trades {rpc.connected ? "✓" : "×"}
             {rpc.connected ? ` · ${rpc.kbps.toFixed(0)} KB/s` : ""}
           </span>
         )}
       </div>
 
-      <Hint id="radar">
+      <Hint
+        id="radar"
+        summary="Armed, it watches every pump.fun launch and trade in this tab, tracks wallets that enter launches big, scores them on observed round trips only, and signals when a proven one buys again."
+      >
         Armed, this app watches every pump.fun launch and every bonding-curve trade — two keyless public streams, read
         in this tab. A wallet that buys the threshold or more within ten minutes of a launch gets tracked; every
         pump.fun fill it makes afterwards is journaled into this browser and scored from observed round trips only.
@@ -133,8 +146,7 @@ export default function RadarPage() {
       {/* the switch */}
       <div className="panel p-3.5 flex flex-col gap-2">
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="panel-title">THIS DEVICE</span>
-          {hunting || hunter.phase === "starting" ? (
+          {armed ? (
             <button type="button" className="btn text-[11px]" onClick={() => stopHunting()}>
               DISARM
             </button>
@@ -143,12 +155,12 @@ export default function RadarPage() {
               ARM THE RADAR
             </button>
           )}
-          <label className="num text-[10.5px] faint flex items-center gap-1.5">
-            whale threshold
+          <label className="num text-[10.5px] faint flex items-center gap-1.5" title="a wallet is worth tracking when it enters a launch with at least this much, within ten minutes">
+            track wallets entering with ≥
             <select
               className="input text-[11px]"
               value={hunter.gates.whaleThresholdSol}
-              disabled={hunter.phase === "starting"}
+              disabled={starting}
               onChange={(e) => void setHunterThreshold(Number(e.target.value))}
             >
               {THRESHOLD_CHOICES.map((t) => (
@@ -158,6 +170,11 @@ export default function RadarPage() {
               ))}
             </select>
           </label>
+          {!armed && (
+            <span className="text-[11px] dim">
+              Hunts on every page while the app is open. Uses a few hundred KB/s while armed.
+            </span>
+          )}
         </div>
         {hunting && (
           <div className="num text-[10.5px] faint">
@@ -168,84 +185,14 @@ export default function RadarPage() {
         )}
         {(hunter.hydrated.wallets > 0 || hunter.hydrated.fills > 0) && (
           <div className="text-[10.5px] dim">
-            resumed with {hunter.hydrated.wallets} tracked wallets and {hunter.hydrated.fills} journaled fills from this
-            browser&apos;s own record ({hunter.backend})
+            Resumed with {hunter.hydrated.wallets} tracked wallets and {hunter.hydrated.fills} journaled fills from this
+            browser&apos;s own record.
           </div>
         )}
-        <div className="text-[10.5px] dim">
-          coverage: pump.fun bonding-curve trades, program-wide, while this app is open
-          {helius.active ? `, plus off-curve trades for the top ${helius.following || "-"} tracked wallets via your Helius key` : " — trades on other venues need a Helius key (card below)"}
-          . Hours when the app is closed are not observed; the optional worker at the bottom exists for that gap.
-        </div>
-      </div>
-
-      {/* optional Helius extension of the device plane */}
-      <div className="panel p-3.5 flex flex-col gap-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="panel-title">HELIUS OFF-CURVE COVERAGE · optional</span>
-          <span className={`chip text-[9.5px] ${helius.active && helius.connected ? "chip-pos" : ""}`}>
-            {helius.active
-              ? helius.connected
-                ? `EXTENDING · following ${helius.following}`
-                : "key set · not connected — a key Helius rejects stays here; re-check the paste"
-              : helius.keySet
-                ? "key saved · arms with the radar"
-                : "not set"}
-          </span>
-          {helius.active && helius.txErrors > 0 && (
-            <span className="chip chip-danger text-[9.5px]">{helius.txErrors} read errors</span>
-          )}
-        </div>
-        <div className="text-[11px] dim leading-relaxed">
-          The firehose goes blind when a token graduates off the bonding curve. A free{" "}
-          <a className="link" href="https://dashboard.helius.dev" target="_blank" rel="noopener noreferrer">
-            Helius key
-          </a>{" "}
-          lets the radar also follow its top-scored wallets&apos; trades on every venue, so a proven wallet&apos;s
-          record keeps growing after graduation. The key is stored in this browser alone and is sent to
-          helius-rpc.com and nowhere else; in Helius&apos;s dashboard you can restrict which sites may use it. This
-          path is new — watch the read-error count here during its first hours.
-        </div>
-        {helius.keySet ? (
-          <div className="flex items-center gap-2 flex-wrap text-[11.5px]">
-            <span className="num chip">{maskHeliusKey(heliusKeyValue())}</span>
-            {helius.active && (
-              <span className="num text-[10.5px] faint">
-                {helius.txFetches} tx reads · {helius.offCurveFills} off-curve fills journaled
-              </span>
-            )}
-            <button type="button" className="btn text-[11px]" onClick={() => setHeliusKey("")}>
-              Remove key
-            </button>
-          </div>
-        ) : (
-          <div className="flex gap-2 flex-wrap">
-            <input
-              type="password"
-              value={heliusDraft}
-              onChange={(e) => setHeliusDraft(e.target.value)}
-              placeholder="00000000-0000-0000-0000-000000000000"
-              spellCheck={false}
-              autoComplete="off"
-              className="input num text-[12px] flex-1 min-w-[260px]"
-              aria-label="Helius API key"
-            />
-            <button
-              type="button"
-              className="btn btn-primary text-[11px]"
-              disabled={!looksLikeHeliusKey(heliusDraft)}
-              onClick={() => {
-                setHeliusKey(heliusDraft);
-                setHeliusDraft("");
-              }}
-            >
-              SAVE KEY
-            </button>
-          </div>
-        )}
-        {heliusDraft !== "" && !looksLikeHeliusKey(heliusDraft) && (
-          <div className="text-[11px] neg">
-            Helius keys look like a UUID (8-4-4-4-12 hex) — copy it from your Helius dashboard, without quotes.
+        {armed && (
+          <div className="text-[10.5px] dim">
+            Coverage: pump.fun bonding-curve trades, program-wide, while this app is open
+            {helius.active ? `, plus off-curve trades for the top ${helius.following || "-"} tracked wallets via your Helius key.` : ". Trades on other venues need a Helius key — see Extend coverage below."}
           </div>
         )}
       </div>
@@ -275,7 +222,7 @@ export default function RadarPage() {
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
         <div className="panel flex flex-col min-h-[300px]">
           <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
-            <span className="panel-title">SIGNALS · proven wallets buying</span>
+            <span className="panel-title">Signals · proven wallets buying</span>
             <span className="chip text-[9.5px]">{view.signals.length}</span>
           </div>
           <div className="overflow-y-auto max-h-[420px]">
@@ -300,11 +247,19 @@ export default function RadarPage() {
               </div>
             ))}
             {view.signals.length === 0 && (
-              <div className="px-3 py-8 text-center faint text-[11px]">
-                {(hunting || view.label === "REMOTE WORKER") && <div className="radar-rings" aria-hidden="true" />}
-                {hunting || view.label === "REMOTE WORKER"
-                  ? "No signals yet. A signal needs a wallet that ALREADY proved a 70+ score on settled sells — snipers flip in minutes, so an armed evening is usually enough for the first proofs. The panels below show the pipeline filling."
-                  : "Arm the radar to start hunting."}
+              <div className="px-3 py-8 text-center faint text-[11px] leading-relaxed">
+                {feeding && <div className="radar-rings" aria-hidden="true" />}
+                {feeding ? (
+                  <>
+                    No signals yet. A signal needs a wallet that has already proved a 70+ score on settled sells.
+                    Snipers flip in minutes, so an armed evening is usually enough for the first proofs — watch the
+                    pipeline below fill.
+                  </>
+                ) : (
+                  <>
+                    Arm the radar above to start hunting.
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -312,7 +267,7 @@ export default function RadarPage() {
 
         <div className="panel flex flex-col min-h-[300px]">
           <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
-            <span className="panel-title">TOP TRACKED WALLETS</span>
+            <span className="panel-title">Top tracked wallets</span>
             <span className="num text-[10px] faint">score = measured fills only</span>
           </div>
           <div className="overflow-x-auto">
@@ -351,7 +306,9 @@ export default function RadarPage() {
                 {view.wallets.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-3 py-8 text-center faint text-[11px]">
-                      {hunting ? "No wallets tracked yet — discoveries land here as whales enter fresh launches." : "—"}
+                      {feeding
+                        ? "No wallets tracked yet — discoveries land here as whales enter fresh launches."
+                        : "Tracked wallets and their measured scores appear here once the radar is armed."}
                     </td>
                   </tr>
                 )}
@@ -364,7 +321,7 @@ export default function RadarPage() {
       {/* the pipeline filling */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="panel flex flex-col">
-          <div className="px-3 pt-2.5 pb-1.5 panel-title">DISCOVERIES · whales entering launches</div>
+          <div className="px-3 pt-2.5 pb-1.5 panel-title">Discoveries · whales entering launches</div>
           <div className="overflow-y-auto max-h-[300px]">
             {view.whales.map((w, i) => (
               <div key={`${w.wallet}-${w.at}-${i}`} className="px-3 py-1.5 border-b border-[rgba(27,35,51,0.5)] num text-[11px] flex items-center gap-2">
@@ -383,12 +340,14 @@ export default function RadarPage() {
                 </span>
               </div>
             ))}
-            {view.whales.length === 0 && <div className="px-3 py-6 text-center faint text-[11px]">—</div>}
+            {view.whales.length === 0 && (
+              <Waiting hunting={feeding} idle="Wallets caught entering a launch big." live="Listening — the first whale usually shows within minutes." />
+            )}
           </div>
         </div>
 
         <div className="panel flex flex-col">
-          <div className="px-3 pt-2.5 pb-1.5 panel-title">JOURNAL · tracked-wallet fills</div>
+          <div className="px-3 pt-2.5 pb-1.5 panel-title">Journal · tracked-wallet fills</div>
           <div className="overflow-y-auto max-h-[300px]">
             {view.trades.slice(0, 60).map((t, i) => (
               <div key={`${t.wallet_address}-${t.at}-${i}`} className="px-3 py-1.5 border-b border-[rgba(27,35,51,0.5)] num text-[11px] flex items-center gap-2">
@@ -400,12 +359,14 @@ export default function RadarPage() {
                 <span className="faint ml-auto">{shortAddr(t.wallet_address)}</span>
               </div>
             ))}
-            {view.trades.length === 0 && <div className="px-3 py-6 text-center faint text-[11px]">—</div>}
+            {view.trades.length === 0 && (
+              <Waiting hunting={feeding} idle="Every later fill by a tracked wallet, the evidence its score rests on." live="Nothing journaled yet — fills follow the first discovery." />
+            )}
           </div>
         </div>
 
         <div className="panel flex flex-col">
-          <div className="px-3 pt-2.5 pb-1.5 panel-title">LAUNCHES · seen by the radar</div>
+          <div className="px-3 pt-2.5 pb-1.5 panel-title">Launches · seen by the radar</div>
           <div className="overflow-y-auto max-h-[300px]">
             {view.launches.map((l, i) => (
               <div key={`${l.mint}-${i}`} className="px-3 py-1.5 border-b border-[rgba(27,35,51,0.5)] num text-[11px] flex items-center gap-2">
@@ -416,54 +377,70 @@ export default function RadarPage() {
                 <span className="faint ml-auto">{fmtAge(Math.max(0, view.asOf - l.at))} ago</span>
               </div>
             ))}
-            {view.launches.length === 0 && <div className="px-3 py-6 text-center faint text-[11px]">—</div>}
+            {view.launches.length === 0 && (
+              <Waiting hunting={feeding} idle="Every pump.fun launch the stream delivers." live="Waiting for the next launch — they arrive every few seconds." />
+            )}
           </div>
         </div>
       </div>
 
-      {/* the optional 24/7 plane */}
-      <div className="panel p-3.5 flex flex-col gap-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="panel-title">REMOTE WORKER · optional, for 24/7</span>
-          <span className={`chip text-[9.5px] ${workerUp ? "chip-pos" : ""}`}>
-            {workerUp ? "CONNECTED" : worker.phase === "connecting" ? "CONNECTING…" : worker.phase === "error" ? "FAILED" : "not connected"}
+      {/* the optional extensions, folded */}
+      <details className="panel p-3.5 fold" open={extensionsInUse}>
+        <summary>
+          <span className="panel-title">Extend coverage · optional</span>
+          <span className="text-[11px] dim">
+            {helius.keySet ? "Helius key set" : "Helius key for off-curve trades"}
+            {" · "}
+            {workerUp ? "remote worker connected" : "a remote worker for the hours the app is closed"}
           </span>
+        </summary>
+        <div className="fold-body">
+          <HeliusKeyCard />
+
+          <div className="panel p-3.5 flex flex-col gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="panel-title">Remote worker · optional, for 24/7</span>
+              <span className={`chip text-[9.5px] ${workerUp ? "chip-pos" : ""}`}>
+                {workerUp ? "CONNECTED" : worker.phase === "connecting" ? "CONNECTING…" : worker.phase === "error" ? "FAILED" : "not connected"}
+              </span>
+            </div>
+            <div className="text-[11.5px] dim leading-relaxed">
+              This device stops hunting when the app closes. The repo ships the same engine as a deployable service (
+              <a className="link" href="https://github.com/romanstma-cpu/rom-nova/tree/main/worker#readme" target="_blank" rel="noreferrer">
+                worker/README
+              </a>
+              ) that never sleeps; connect yours here and a source toggle appears above to read its feed.
+            </div>
+            <form
+              className="flex gap-2 flex-wrap items-center"
+              onSubmit={(e) => {
+                e.preventDefault();
+                radarConnect(String(new FormData(e.currentTarget).get("url") ?? ""));
+              }}
+            >
+              <input
+                key={worker.url}
+                name="url"
+                type="url"
+                defaultValue={worker.url}
+                placeholder="https://rom-nova-radar.onrender.com"
+                className="input num text-[12px] flex-1 min-w-[240px]"
+                aria-label="Radar worker URL"
+              />
+              {workerUp || worker.phase === "connecting" || (worker.enabled && worker.phase === "error") ? (
+                <button type="button" className="btn text-[11px]" onClick={() => radarDisconnect()}>
+                  {workerUp ? "DISCONNECT" : "STOP RETRYING"}
+                </button>
+              ) : (
+                <button type="submit" className="btn text-[11px]">
+                  CONNECT
+                </button>
+              )}
+            </form>
+            {worker.error && <div className="text-[11px] text-[var(--danger)]">{worker.error}</div>}
+          </div>
         </div>
-        <div className="text-[11px] dim leading-relaxed">
-          This device stops hunting when the app closes. The repo ships the same engine as a deployable service (
-          <a className="link" href="https://github.com/romanstma-cpu/rom-nova/tree/main/worker#readme" target="_blank" rel="noreferrer">
-            worker/README
-          </a>
-          ) that never sleeps; connect yours here and flip the source toggle above to read its feed.
-        </div>
-        <form
-          className="flex gap-2 flex-wrap items-center"
-          onSubmit={(e) => {
-            e.preventDefault();
-            radarConnect(String(new FormData(e.currentTarget).get("url") ?? ""));
-          }}
-        >
-          <input
-            key={worker.url}
-            name="url"
-            type="url"
-            defaultValue={worker.url}
-            placeholder="https://rom-nova-radar.onrender.com"
-            className="input num text-[12px] flex-1 min-w-[260px]"
-            aria-label="Radar worker URL"
-          />
-          {workerUp || worker.phase === "connecting" || (worker.enabled && worker.phase === "error") ? (
-            <button type="button" className="btn text-[11px]" onClick={() => radarDisconnect()}>
-              {workerUp ? "DISCONNECT" : "STOP RETRYING"}
-            </button>
-          ) : (
-            <button type="submit" className="btn text-[11px]">
-              CONNECT
-            </button>
-          )}
-        </form>
-        {worker.error && <div className="text-[11px] text-[var(--danger)]">{worker.error}</div>}
-      </div>
+      </details>
 
       <p className="text-[10px] faint px-1 pb-2 leading-relaxed">
         Radar data is measured by YOUR app (or your worker) from its own observed stream: pump.fun bonding-curve

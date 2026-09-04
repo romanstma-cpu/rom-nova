@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { PageTitle } from "@/components/ui/PageTitle";
 import Link from "next/link";
 import { useApi, fmtUsd, fmtPct, fmtNum, fmtAge, whaleFlowCell, absent } from "@/lib/client";
 import { Score, RiskBadge, SkeletonRows, TokenMark, Empty, Freshness } from "@/components/ui/bits";
@@ -127,7 +128,7 @@ export default function ScreenerPage() {
   return (
     <div className="p-3 flex flex-col gap-3 h-full min-h-0">
       <div className="flex items-center gap-2 flex-wrap">
-        <h1 className="text-[15px] font-semibold tracking-wide mr-2">ADVANCED SCREENER</h1>
+        <PageTitle title="SCREENER" lede="Filter the token universe and export what is left" />
         {PRESETS.map((p) => (
           <button key={p.name} className="chip cursor-pointer hover:border-[var(--accent)]" onClick={() => setF({ ...DEFAULT_FILTERS, ...p.f })}>
             {p.name}

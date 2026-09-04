@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { PageTitle } from "@/components/ui/PageTitle";
 import Link from "next/link";
 import { useApi, fmtUsd, fmtPct, labelClass } from "@/lib/client";
 import { Score, TokenMark, Empty } from "@/components/ui/bits";
@@ -86,7 +87,7 @@ export default function SignalTerminal() {
   return (
     <div className="p-3 flex flex-col gap-3">
       <div className="flex items-center gap-2 flex-wrap">
-        <h1 className="text-[15px] font-semibold tracking-wide mr-2">SIGNAL TERMINAL</h1>
+        <PageTitle title="SIGNALS" lede="Ranked setups, with the case for and against each" />
         <select value={profile} onChange={(e) => setProfile(e.target.value as StrategyProfileId)} className="input">
           {PROFILES.map((p) => (
             <option key={p.id} value={p.id}>{p.label}</option>

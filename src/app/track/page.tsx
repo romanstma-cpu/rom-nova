@@ -9,6 +9,7 @@
 // the headline cannot be encouraging while the table underneath is empty.
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { PageTitle } from "@/components/ui/PageTitle";
 import { Hint } from "@/components/ui/Hint";
 import { HORIZONS, MIN_PASSES, trackReport, type TrackReport } from "@/lib/engine/track-record";
 import {
@@ -177,7 +178,7 @@ export default function TrackPage() {
   return (
     <div className="p-3 flex flex-col gap-3 h-full min-h-0 overflow-auto">
       <div className="flex items-center gap-2 flex-wrap">
-        <h1 className="text-[15px] font-semibold tracking-wide">TRACK RECORD</h1>
+        <PageTitle title="TRACK RECORD" lede="How past calls held up, graded against what happened next" />
         <span className="text-[10.5px] dim num ml-2">
           {report.observations.toLocaleString()} observations · {report.passes.toLocaleString()} passes ·{" "}
           {report.mints.toLocaleString()} tokens

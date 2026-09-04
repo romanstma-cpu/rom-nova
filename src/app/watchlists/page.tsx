@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { PageTitle } from "@/components/ui/PageTitle";
 import Link from "next/link";
 import { useApi, apiPost, fmtUsd, shortAddr } from "@/lib/client";
 import { Empty } from "@/components/ui/bits";
@@ -37,7 +38,7 @@ export default function WatchlistsPage() {
   return (
     <div className="p-3 flex flex-col gap-3">
       <div className="flex items-center gap-3">
-        <h1 className="text-[15px] font-semibold tracking-wide">WATCHLISTS</h1>
+        <PageTitle title="WATCHLISTS" lede="Your lists, kept in this browser" />
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="new list name" className="input w-[200px] ml-auto" />
         <button
           className="btn btn-primary"

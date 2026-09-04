@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { PageTitle } from "@/components/ui/PageTitle";
 import { useApi, fmtAgo, fmtNum } from "@/lib/client";
 import { Empty, Stat } from "@/components/ui/bits";
 import { describeSocket, socketsSnapshot, socketsSnapshotServer, subscribeSockets, ACK_TIMEOUT_MS } from "@/lib/live/socket";
@@ -230,7 +231,7 @@ export default function StatusPage() {
 
   return (
     <div className="p-3 flex flex-col gap-3">
-      <h1 className="text-[15px] font-semibold tracking-wide">SYSTEM STATUS</h1>
+      <PageTitle title="STATUS" lede="Every source, socket and store this tab is using, and how live each one is" />
 
       {/* Leads with the answer. The provider table below is the evidence, but a
           reader arriving from the data-source chip wants the one-line version

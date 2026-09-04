@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { PageTitle } from "@/components/ui/PageTitle";
 import Link from "next/link";
 import { apiPost, fmtUsd, fmtPct, fmtAgo } from "@/lib/client";
 import { Empty, Stat } from "@/components/ui/bits";
@@ -54,7 +55,7 @@ export default function BacktestPage() {
   return (
     <div className="p-3 flex flex-col gap-3">
       <div className="flex items-center gap-3 flex-wrap">
-        <h1 className="text-[15px] font-semibold tracking-wide">BACKTESTING LAB</h1>
+        <PageTitle title="BACKTEST LAB" lede="Replay the engine over history, one step at a time" />
         <span className="faint text-[10.5px] max-w-[92ch]">
           signals are recomputed at each historical step from data available at that moment — the
           integrity check fails the run if any entry saw the future. the market itself is generated

@@ -6,17 +6,6 @@ import { AlertBadge } from "./AlertBadge";
 import { DataModeChip } from "./DataModeChip";
 import type { MarketState } from "@/lib/types";
 
-const REGIME_LABEL: Record<string, { text: string; cls: string }> = {
-  risk_on: { text: "RISK ON", cls: "chip-pos" },
-  neutral: { text: "NEUTRAL", cls: "chip" },
-  risk_off: { text: "RISK OFF", cls: "chip-neg" },
-  meme_mania: { text: "MEME MANIA", cls: "chip-accent" },
-  low_liquidity: { text: "LOW LIQ", cls: "chip-warn" },
-  high_volatility: { text: "HIGH VOL", cls: "chip-warn" },
-  rotation: { text: "ROTATION", cls: "chip" },
-  distribution: { text: "DISTRIBUTION", cls: "chip-neg" },
-};
-
 interface SolReference {
   priceUsd: number;
   change24hPct: number | null;
@@ -24,11 +13,15 @@ interface SolReference {
   maxDeviation: number;
 }
 
+// The header carries only what is real on every screen: the slot and the
+// cross-checked SOL price. It used to also print the meme index, the
+// smart-money flow and the regime chip — three simulator numbers, unlabelled,
+// beside a price marked LIVE. The dashboard shows them in a tile that says
+// SIMULATED; a header cannot fit the label, so it does not show the numbers.
 export function TopBar({ onOpenPalette, onOpenNav }: { onOpenPalette: () => void; onOpenNav: () => void }) {
   const { data } = useApi<{ market: MarketState; reference: SolReference | null }>("/api/market", 8000);
   const m = data?.market;
   const ref = data?.reference;
-  const regime = m ? REGIME_LABEL[m.regime] : undefined;
 
   return (
     <header className="topbar h-[46px] shrink-0 border-b border-[var(--border)] bg-[rgba(6,9,14,0.9)] flex items-center gap-4 px-4">
@@ -43,7 +36,7 @@ export function TopBar({ onOpenPalette, onOpenNav }: { onOpenPalette: () => void
       </Link>
 
       <div className="hidden md:flex items-center gap-4 num text-[11.5px]">
-        <span className="flex items-center gap-1.5">
+        <span className="flex items-center gap-1.5" title="latest Solana slot this tab has seen">
           <span className="live-dot" />
           <span className="dim">slot</span> {m ? fmtNum(m.slot) : "—"}
         </span>
@@ -64,14 +57,6 @@ export function TopBar({ onOpenPalette, onOpenNav }: { onOpenPalette: () => void
             <span className="dim">SOL</span> —
           </span>
         )}
-        <span>
-          <span className="dim">meme idx</span> {m ? m.memeMomentumIndex : "—"}
-        </span>
-        <span>
-          <span className="dim">SM flow 24h</span>{" "}
-          <span className={m && m.netSmartMoneyFlowUsd >= 0 ? "pos" : "neg"}>{m ? fmtUsd(m.netSmartMoneyFlowUsd) : "—"}</span>
-        </span>
-        {regime && <span className={regime.cls}>{regime.text}</span>}
       </div>
 
       <div className="ml-auto flex items-center gap-3">
@@ -84,11 +69,11 @@ export function TopBar({ onOpenPalette, onOpenNav }: { onOpenPalette: () => void
         <button
           onClick={onOpenPalette}
           className="btn text-[11px]"
-          title="Command palette — press / or ⌘K anywhere"
+          title="Search and commands — press / or ⌘K anywhere"
           aria-label="Search and commands"
         >
           <span aria-hidden="true" className="sm:hidden">⌕</span>
-          <span className="dim hidden sm:inline">search / commands</span>
+          <span className="dim hidden sm:inline">search / go to</span>
           <kbd className="hidden sm:inline-block text-[10px] border border-[var(--border-hi)] rounded px-1 py-px bg-[rgba(20,28,44,0.8)]">⌘K</kbd>
         </button>
       </div>

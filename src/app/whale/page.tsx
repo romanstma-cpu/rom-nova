@@ -176,7 +176,7 @@ function WalletRouter() {
       <Empty>
         {res.reason}{" "}
         <Link href="/whales" className="link">
-          Back to whale intelligence.
+          Back to Wallets.
         </Link>
       </Empty>,
     );

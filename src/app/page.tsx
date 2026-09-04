@@ -200,7 +200,7 @@ export default function Dashboard() {
         <div className="panel">
           <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
             <span className="panel-title">Momentum Leaders 24h</span>
-            <Link href="/tokens" className="link text-[10.5px]">token radar →</Link>
+            <Link href="/tokens" className="link text-[10.5px]">all tokens →</Link>
           </div>
           <table className="w-full text-[12px]">
             <thead className="thead">

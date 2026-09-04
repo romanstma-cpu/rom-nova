@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { PageTitle } from "@/components/ui/PageTitle";
 import { Hint } from "@/components/ui/Hint";
 import Link from "next/link";
 import { apiGet, useEventStream, fmtUsd, fmtPct, fmtAge, whaleFlowCell, absent, type StreamEvent } from "@/lib/client";
@@ -223,7 +224,7 @@ export default function ScannerPage() {
   return (
     <div className="p-3 flex flex-col gap-2 h-full min-h-0">
       <div className="flex items-center gap-2 flex-wrap">
-        <h1 className="text-[15px] font-semibold tracking-wide">LIVE DISCOVERY SCANNER</h1>
+        <PageTitle title="SCANNER" lede="What is moving now, ranked by the evidence the terminal can see" />
         <span className="flex items-center gap-1.5 text-[10.5px] dim num ml-2">
           <span className="live-dot" /> {eventsPerMin} events/min
         </span>

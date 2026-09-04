@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
+import { PageTitle } from "@/components/ui/PageTitle";
 import Link from "next/link";
 import { useApi, apiPost, fmtPct, fmtAgo } from "@/lib/client";
 import { Empty } from "@/components/ui/bits";
@@ -95,7 +96,7 @@ export default function ResearchPage() {
   return (
     <div className="p-3 grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-3">
       <div className="flex flex-col gap-3">
-        <h1 className="text-[15px] font-semibold tracking-wide">RESEARCH DESK</h1>
+        <PageTitle title="RESEARCH" lede="Ask the terminal a question and get the evidence behind the answer" />
         <div className="panel p-3">
           <div className="flex gap-2">
             <input

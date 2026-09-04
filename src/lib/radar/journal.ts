@@ -234,6 +234,34 @@ export function journalDropWallet(address: string): void {
   if (records.delete(address)) persistWallet(address);
 }
 
+/**
+ * Forget everything the radar has recorded — memory now, disk right behind
+ * it. Returns whether the disk copy went too: if IndexedDB refused, the
+ * old records come back on the next load, and the caller should say so
+ * rather than report a clean slate.
+ */
+export async function clearRadarJournal(): Promise<boolean> {
+  for (const t of pendingWrites.values()) clearTimeout(t);
+  pendingWrites.clear();
+  records.clear();
+  signals = [];
+  if (!hasIdb()) return true;
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([WALLET_STORE, LOG_STORE], "readwrite");
+      tx.objectStore(WALLET_STORE).clear();
+      tx.objectStore(LOG_STORE).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error ?? new Error("radar journal clear failed"));
+    });
+    db.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Test seam. */
 export function resetRadarJournal(): void {
   records.clear();

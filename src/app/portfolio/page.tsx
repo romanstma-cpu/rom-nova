@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { PageTitle } from "@/components/ui/PageTitle";
 import Link from "next/link";
 import { useApi, apiPost, fmtUsd, fmtPct, fmtAgo } from "@/lib/client";
 import { Empty, Stat } from "@/components/ui/bits";
@@ -24,7 +25,7 @@ export default function PortfolioPage() {
   return (
     <div className="p-3 flex flex-col gap-3">
       <div className="flex items-center gap-3 flex-wrap">
-        <h1 className="text-[15px] font-semibold tracking-wide">PAPER DESK · {pf.name}</h1>
+        <PageTitle title={`PAPER DESK · ${pf.name}`} lede="Practice trades on simulated fills" />
         <span className="chip chip-warn">SIMULATED — no real funds exist anywhere in this app</span>
         {msg && <span className="text-[11px] dim num">{msg}</span>}
       </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useSyncExternalStore } from "react";
+import { PageTitle } from "@/components/ui/PageTitle";
 import Link from "next/link";
 import { ledgerSnapshot, ledgerSnapshotServer, setRecording, subscribeLedger, WALLET_CAP } from "@/lib/ledger/store";
 import { MIN_OBSERVED_DAYS, MIN_ROUND_TRIPS } from "@/lib/ledger/reputation";
@@ -216,7 +217,7 @@ export default function WhalesPage() {
         take days. The real, measured alternative is above.
       </div>
       <div className="flex items-center gap-2 flex-wrap">
-        <h1 className="text-[15px] font-semibold tracking-wide mr-2">WHALE INTELLIGENCE</h1>
+        <PageTitle title="WALLETS" lede="Who is moving size right now, and the real record of any wallet you paste" />
         {filters.map((f) => (
           <button key={f.id} onClick={() => setFilter(f.id)} className={`chip cursor-pointer ${filter === f.id ? "chip-accent" : ""}`}>
             {f.label}

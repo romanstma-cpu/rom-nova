@@ -689,3 +689,38 @@ body::after {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+/* ---------- page furniture (1.16.0 usability pass) ---------- */
+
+/* The one-line purpose beside a page title. Dim, not faint: it is the
+   sentence that saves opening the explainer. */
+.page-lede {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  letter-spacing: 0.01em;
+}
+
+/* A native <details> dressed as a panel section. Setup that most readers
+   never touch (a vendor key, a remote worker, server-mode providers) folds
+   behind one line; the browser remembers nothing, so it opens only when the
+   page decides it should (a key is set, a worker is connected). */
+.fold > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  user-select: none;
+}
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before {
+  content: "▸";
+  font-size: 11px;
+  color: var(--text-faint);
+  width: 10px;
+  transition: transform 140ms ease;
+}
+.fold[open] > summary::before { transform: rotate(90deg); }
+.fold > summary:hover .panel-title { color: var(--text); }
+.fold > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.fold-body { margin-top: 10px; display: flex; flex-direction: column; gap: 10px; }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { PageTitle } from "@/components/ui/PageTitle";
 import Link from "next/link";
 import { useApi, fmtUsd, fmtPct, fmtNum, fmtAge, whaleFlowCell, absent } from "@/lib/client";
 import { Score, RiskBadge, SkeletonRows, TokenMark, Freshness, Empty } from "@/components/ui/bits";
@@ -53,7 +54,7 @@ export default function TokenRadar() {
   return (
     <div className="p-3 flex flex-col gap-3 h-full min-h-0">
       <div className="flex items-center gap-2 flex-wrap">
-        <h1 className="text-[15px] font-semibold tracking-wide mr-2">MEME COIN RADAR</h1>
+        <PageTitle title="TOKENS" lede="The trending list with scores, risk and whale flow" />
         {QUICKS.map((f) => (
           <button key={f.id} onClick={() => setQuick(f.id)} className={`chip cursor-pointer ${quick === f.id ? "chip-accent" : ""}`}>
             {f.label}

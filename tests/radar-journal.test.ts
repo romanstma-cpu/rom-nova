@@ -127,3 +127,29 @@ describe("environment", () => {
     expect(cfg.thresholdSol).toBe(HUNTER_DEFAULTS.whaleThresholdSol);
   });
 });
+
+describe("clearRadarJournal", () => {
+  it("forgets every wallet, fill and signal and reports the disk clear", async () => {
+    const { clearRadarJournal } = await import("../src/lib/radar/journal");
+    journalFill("W1", fill(), T0);
+    journalFill("W2", fill({ sig: "sig-b" }), T0);
+    journalSignal({
+      wallet_address: "W1",
+      wallet_score: 80,
+      token_address: "MINT1",
+      token_name: null,
+      buy_amount_sol: 2,
+      timestamp: new Date(T0).toISOString(),
+    });
+    expect(journalCounts().wallets).toBe(2);
+    expect(journalSignals().length).toBe(1);
+    // No IndexedDB under node: the memory copy is the whole journal, so the
+    // clear is complete by definition and says so.
+    await expect(clearRadarJournal()).resolves.toBe(true);
+    expect(journalCounts()).toMatchObject({ wallets: 0, fills: 0, signals: 0 });
+    expect(journalWallets().size).toBe(0);
+    expect(journalSignals()).toEqual([]);
+    // And the journal keeps working afterwards.
+    expect(journalFill("W3", fill({ sig: "sig-c" }), T0)).toBe(true);
+  });
+});

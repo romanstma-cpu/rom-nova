@@ -15,6 +15,7 @@
 // looking like the product.
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { PageTitle } from "@/components/ui/PageTitle";
 import { Hint } from "@/components/ui/Hint";
 import Link from "next/link";
 import { useApi, apiPost, fmtAgo } from "@/lib/client";
@@ -432,7 +433,7 @@ export default function AlertsPage() {
   return (
     <div className="p-3 flex flex-col gap-3">
       <div className="flex items-center gap-3 flex-wrap">
-        <h1 className="text-[15px] font-semibold tracking-wide">ALERT CENTER</h1>
+        <PageTitle title="ALERTS" lede="Rules this browser evaluates while a Nova tab is open" />
         {unread > 0 && (
           <span
             className="chip chip-accent"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { NavRail } from "./NavRail";
 import { TopBar } from "./TopBar";
@@ -31,13 +31,43 @@ export function offlineMessage(mode: { live: string[]; bounded: string[] }): str
   );
 }
 
+const DEFAULT_OFFLINE_TEXT = "You appear to be offline.";
+
+function subscribeOnline(cb: () => void): () => void {
+  window.addEventListener("online", cb);
+  window.addEventListener("offline", cb);
+  return () => {
+    window.removeEventListener("online", cb);
+    window.removeEventListener("offline", cb);
+  };
+}
+const readOffline = () => !navigator.onLine;
+const readOfflineServer = () => false;
+
+// The provider set is configuration and does not change for the life of the
+// tab, so the sentence is computed once and never re-subscribed.
+let offlineTextCached: string | null = null;
+function readOfflineText(): string {
+  if (offlineTextCached === null) {
+    try {
+      offlineTextCached = offlineMessage(dataMode());
+    } catch {
+      offlineTextCached = DEFAULT_OFFLINE_TEXT;
+    }
+  }
+  return offlineTextCached;
+}
+const readOfflineTextServer = () => DEFAULT_OFFLINE_TEXT;
+const subscribeNever = () => () => {};
+
 export function Shell({ children }: { children: React.ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
-  const [offline, setOffline] = useState(false);
-  // Read once on mount, on the client: the provider set is configuration and
-  // does not change for the life of the tab.
-  const [offlineText, setOfflineText] = useState<string>("You appear to be offline.");
+  // Both browser facts through the external-store seam: the prerendered
+  // shell says "online" with the default sentence, and the first client
+  // paint reads the real answer without a setState-in-effect round trip.
+  const offline = useSyncExternalStore(subscribeOnline, readOffline, readOfflineServer);
+  const offlineText = useSyncExternalStore(subscribeNever, readOfflineText, readOfflineTextServer);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -60,22 +90,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  useEffect(() => {
-    try {
-      setOfflineText(offlineMessage(dataMode()));
-    } catch {
-      /* the default sentence stands */
-    }
-    const sync = () => setOffline(!navigator.onLine);
-    sync();
-    window.addEventListener("online", sync);
-    window.addEventListener("offline", sync);
-    return () => {
-      window.removeEventListener("online", sync);
-      window.removeEventListener("offline", sync);
-    };
   }, []);
 
   return (
@@ -124,8 +138,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
       <footer className="shrink-0 border-t border-[var(--border)] bg-[rgba(6,9,14,0.9)] px-4 py-1.5 flex items-center gap-3 text-[10px] faint">
         <span className="truncate">
-          Analytics &amp; decision support on a mix of live Solana data and clearly-labeled simulation — see the data-source
-        chip for which is which — not investment advice, not a prediction engine.
+          Analytics and decision support, not investment advice. Live and simulated data are labelled on every screen.
         </span>
         <Link href="/legal" className="link shrink-0 ml-auto">
           Disclaimer &amp; privacy

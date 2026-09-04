@@ -2,16 +2,16 @@
 
 // The first thing a new visitor sees, and only the first time.
 //
-// Nova is now the front door of romapps.xyz — someone arrives here having
-// clicked "Launch it live" with no context at all, and lands on a dashboard of
-// unexplained numbers. There was no onboarding of any kind, so the honest
-// outcome was: look at it for thirty seconds, understand nothing in
-// particular, leave.
+// Nova is the front door of romapps.xyz — someone arrives here having
+// clicked "Launch it live" with no context at all, and lands on a dashboard
+// of unexplained numbers. Without this the honest outcome was: look at it
+// for thirty seconds, understand nothing in particular, leave.
 //
-// This is deliberately not a tour. Three links, one line each, then it is gone
-// for good. They are the actual loop the app already supports and never
-// pointed at: see the market, read why a call was made, then find out whether
-// those calls were right — which is the only reason to come back.
+// This is deliberately not a tour. Three links, one line each, then it is
+// gone for good — unless the reader asks for it back from Settings. The
+// three are the loop the app is actually for now that most of it is live:
+// watch launches land, let the radar hunt for the wallets worth following,
+// then find out whether any of the calls were right.
 
 import { useSyncExternalStore } from "react";
 import Link from "next/link";
@@ -50,6 +50,26 @@ function hasSeen(): boolean {
 /** Nothing is prerendered, so the static HTML is identical for everyone. */
 const seenOnServer = () => true;
 
+function notify(): void {
+  for (const l of listeners) l();
+}
+
+/** Bring the introduction back on the dashboard — the settings page's reset. */
+export function showIntroAgain(): void {
+  try {
+    localStorage.removeItem(KEY);
+  } catch {
+    /* nothing stored, nothing to remove */
+  }
+  notify();
+}
+
+// The store's seam, for the settings page: same subscribe, same snapshots,
+// so it never reads storage during render.
+export const subscribeIntro = subscribe;
+export const introSeenSnapshot = hasSeen;
+export const introSeenServer = seenOnServer;
+
 export function FirstRun() {
   const seen = useSyncExternalStore(subscribe, hasSeen, seenOnServer);
 
@@ -61,24 +81,24 @@ export function FirstRun() {
     } catch {
       // Nothing to persist to; the component still hides for this render pass.
     }
-    for (const l of listeners) l();
+    notify();
   };
 
   const steps: { href: string; title: string; body: string }[] = [
     {
-      href: "/network",
-      title: "See the market move",
-      body: "Every token as a sphere, lit by how strong its signal is, with whale money arcing between them.",
+      href: "/launches",
+      title: "Watch launches land",
+      body: "Every new mint and pool on Solana, triaged in seconds: which checks ran, what they found, and what nobody could know yet.",
     },
     {
-      href: "/signals",
-      title: "Read why, not just what",
-      body: "Each call shows the evidence that produced it and the risks weighed against it — including the ones it refuses to trade.",
+      href: "/radar",
+      title: "Arm the whale radar",
+      body: "It hunts on its own: wallets that enter launches big get tracked and scored on real round trips, and a proven one buying again is the signal.",
     },
     {
-      href: "/signals",
+      href: "/track",
       title: "Check whether it was right",
-      body: "Past calls are scored against what actually happened next. The engine grades itself, and shows you the marks.",
+      body: "Past calls are graded against what actually happened next. The engine keeps its own marks and shows you them.",
     },
   ];
 
@@ -87,22 +107,13 @@ export function FirstRun() {
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <h2 id="firstrun-h" className="text-[13px] font-semibold tracking-wide">
-            New here? This is a scoring engine you can argue with.
+            New here? Three places to start.
           </h2>
-          {/* This said "everything below runs on a deterministic simulated
-              market … nothing here is a live feed" while the footer ten inches
-              down said "most of what you see is live Solana", with real token
-              rows between them. The footer was corrected and this was missed —
-              which is the failure DataModeChip's own header warns about: two
-              copies of a claim about honesty is how one of them ends up stale.
-              There is now one copy of the specifics, in the chip, computed from
-              the provider resolution rather than written by hand. */}
           <p className="text-[12px] dim mt-1 max-w-[68ch]">
-            Most of what you see is live Solana, read keylessly in your own browser. Some of it —
-            wallet reputation, parts of the desk — is still a labelled simulation, and the
-            data-source chip in the sidebar names which is which on every screen. Nothing here is a
-            recommendation or a prediction. What the app is really offering is the reasoning: how
-            each signal is built, what it refuses to score, and how often it turns out to be right.
+            Most of this terminal is live Solana, read keylessly in your own browser; the rest is a labelled
+            simulation, and the data chip in the header says which is which on every screen. Nothing here is a
+            recommendation. What the app offers is the reasoning — how each call is built, what it refuses to score,
+            and how often it turns out right.
           </p>
         </div>
         <button
@@ -130,6 +141,9 @@ export function FirstRun() {
           </li>
         ))}
       </ol>
+      <p className="text-[10.5px] faint mt-3">
+        You can bring this back any time from Settings.
+      </p>
     </section>
   );
 }

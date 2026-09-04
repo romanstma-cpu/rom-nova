@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { PageTitle } from "@/components/ui/PageTitle";
 import { useApi, fmtUsd } from "@/lib/client";
 import { FlowChart } from "@/components/charts/FlowChart";
 import { Empty, Stat } from "@/components/ui/bits";
@@ -24,7 +25,7 @@ export default function FlowPage() {
   return (
     <div className="p-3 flex flex-col gap-3">
       <div className="flex items-center gap-2">
-        <h1 className="text-[15px] font-semibold tracking-wide mr-2">MONEY FLOW · ALL TRACKED WALLETS</h1>
+        <PageTitle title="MONEY FLOW" lede="Where the simulated wallet universe moved its money" />
         {/* This page is entirely the simulated wallet universe — there is no
             keyless source for cross-wallet flow history — and the review found
             it was the one flow surface that never said so (H5). */}

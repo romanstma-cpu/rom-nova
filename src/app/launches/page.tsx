@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { PageTitle } from "@/components/ui/PageTitle";
 import { Hint } from "@/components/ui/Hint";
 import Link from "next/link";
 import { apiGet, fmtUsd, fmtNum } from "@/lib/client";
@@ -529,7 +530,7 @@ export default function LaunchesPage() {
   return (
     <div className="p-3 flex flex-col gap-2 h-full min-h-0">
       <div className="flex items-center gap-2 flex-wrap">
-        <h1 className="text-[15px] font-semibold tracking-wide">LAUNCH FEED</h1>
+        <PageTitle title="LAUNCH FEED" lede="New mints and pools, triaged the second they appear" />
         {/* The push, in the same two states the socket has. Never "live"
             without a last-frame age, never silent about falling back. */}
         {!paused && (

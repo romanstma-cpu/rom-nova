@@ -60,12 +60,25 @@ export async function requestNotifyPermission(): Promise<NotifyState> {
  * record, this is the tap on the shoulder.
  */
 export function deliverNotification(e: LiveAlertEvent): boolean {
+  // One OS card per alert id even if a pass re-delivers.
+  return show(e.headline, `${e.measurement}\n${e.detail}`, e.id);
+}
+
+/**
+ * The radar's two loud moments — a proven wallet buying, and that wallet
+ * selling — go to the OS the same way a fired rule does, so a copier who
+ * tabbed away still hears them inside the seconds that matter.
+ */
+export function deliverRadarNotification(headline: string, body: string, tag: string): boolean {
+  return show(headline, body, tag);
+}
+
+function show(title: string, body: string, tag: string): boolean {
   if (notifyState() !== "granted") return false;
   try {
-    const n = new Notification(e.headline, {
-      body: `${e.measurement}\n${e.detail}`,
-      // One OS card per alert id even if a pass re-delivers.
-      tag: e.id,
+    const n = new Notification(title, {
+      body,
+      tag,
       silent: false,
     });
     n.onclick = () => {

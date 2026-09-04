@@ -28,9 +28,10 @@ import { isSignalBuy } from "./engine/classify.js";
 import { HeliusStream } from "./engine/helius.js";
 import { startPumpPortal } from "./engine/pumpportal.js";
 import { startRpcStream } from "./engine/rpcstream.js";
-import { applyFill, newWallet, scoreOf } from "./engine/score.js";
+import { applyFill, applyFollowGrade, newWallet, scoreOf } from "./engine/score.js";
 import { RadarState } from "./engine/state.js";
-import { clearRadarJournal } from "./journal";
+import { clearRadarJournal, HORIZON_FIELD, journalSignalPatch, signalKeyOf, type RadarHorizon } from "./journal";
+import { deliverRadarNotification } from "@/lib/alerts/notify";
 import {
   journalCounts,
   journalFill,
@@ -95,6 +96,12 @@ export interface HunterWalletRow {
   avg_roi: number;
   settled_sells: number;
   unmeasured_sells: number;
+  /** median settled hold, ms — how long a copier has before this wallet is out */
+  median_hold_ms: number | null;
+  /** median of what its signals were worth five minutes later, as a fraction */
+  follow_ret_5m: number | null;
+  follow_hit_rate: number | null;
+  signals_graded: number;
   last_active: string;
 }
 
@@ -139,7 +146,16 @@ export interface HunterSnapshot {
   phase: "off" | "starting" | "hunting";
   backend: "indexeddb" | "memory";
   gates: HunterGates;
-  counts: { launches: number; tradesSeen: number; whales: number; journaled: number; signals: number; tracked: number };
+  counts: {
+    launches: number;
+    tradesSeen: number;
+    whales: number;
+    journaled: number;
+    signals: number;
+    graded: number;
+    exits: number;
+    tracked: number;
+  };
   streams: { pump: HunterStream | null; rpc: HunterStream | null };
   helius: HunterHeliusStatus;
   /** What the journal handed back at start — the proof persistence works. */
@@ -149,6 +165,8 @@ export interface HunterSnapshot {
   whales: HunterWhale[];
   launches: HunterLaunch[];
   trades: (HunterTrade & { at: number })[];
+  /** Last trade seen on each pinned mint — the copy desk's live marks. */
+  prices: Record<string, { priceSol: number; at: number }>;
   asOf: number;
 }
 
@@ -167,7 +185,7 @@ const SERVER_SNAPSHOT: HunterSnapshot = {
   phase: "off",
   backend: "memory",
   gates: HUNTER_DEFAULTS,
-  counts: { launches: 0, tradesSeen: 0, whales: 0, journaled: 0, signals: 0, tracked: 0 },
+  counts: { launches: 0, tradesSeen: 0, whales: 0, journaled: 0, signals: 0, graded: 0, exits: 0, tracked: 0 },
   streams: { pump: null, rpc: null },
   helius: HELIUS_OFF,
   hydrated: { wallets: 0, fills: 0 },
@@ -176,6 +194,7 @@ const SERVER_SNAPSHOT: HunterSnapshot = {
   whales: [],
   launches: [],
   trades: [],
+  prices: {},
   asOf: 0,
 };
 
@@ -292,6 +311,47 @@ function scheduleFlush(): void {
   flushTimer = setTimeout(flush, FLUSH_MS);
 }
 
+/** The clock: grades that no trade will ever mark, and the periodic flush. */
+function tickClock(): void {
+  state?.tick(Date.now());
+  scheduleFlush();
+}
+
+// ------------------------------------------------------------ the desk
+
+/**
+ * Mints whose last price the reader wants kept — their own follows. Held
+ * here as well as in the engine so a pin survives a disarm and re-arm, and
+ * so pinning before the first arm is not lost.
+ */
+const pinned = new Set<string>();
+
+export function pinMint(mint: string, on: boolean): void {
+  if (!mint) return;
+  if (on) pinned.add(mint);
+  else pinned.delete(mint);
+  state?.pinMint(mint, on);
+  scheduleFlush();
+}
+
+export function lastPriceOf(mint: string): { priceSol: number; at: number } | null {
+  return state?.lastPrice(mint) ?? null;
+}
+
+function pricesOf(): Record<string, { priceSol: number; at: number }> {
+  const out: Record<string, { priceSol: number; at: number }> = {};
+  if (!state) return out;
+  for (const m of pinned) {
+    const p = state.lastPrice(m);
+    if (p) out[m] = p;
+  }
+  return out;
+}
+
+const shortA = (a: string): string => (a.length <= 10 ? a : `${a.slice(0, 4)}…${a.slice(-4)}`);
+const fmtRet = (r: number): string => `${r >= 0 ? "+" : ""}${(r * 100).toFixed(0)}%`;
+const fmtAfter = (ms: number): string => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : ms < 3_600_000 ? `${Math.round(ms / 60_000)}m` : `${(ms / 3_600_000).toFixed(1)}h`);
+
 /** byte counters at the previous flush, keyed by stream, for the rate. */
 const rateSamples = new Map<string, { at: number; bytes: number }>();
 
@@ -359,7 +419,7 @@ function flush(): void {
     gates: state ? (state.gates as HunterGates) : { ...HUNTER_DEFAULTS, whaleThresholdSol: hunterConfig().thresholdSol },
     counts: state
       ? { ...state.counts, tracked: state.tracked.size }
-      : { launches: 0, tradesSeen: 0, whales: 0, journaled: 0, signals: 0, tracked: journalCounts().wallets },
+      : { launches: 0, tradesSeen: 0, whales: 0, journaled: 0, signals: 0, graded: 0, exits: 0, tracked: journalCounts().wallets },
     streams: { pump: streamOf("pump", pumpSock), rpc: streamOf("rpc", rpcSock) },
     helius: heliusStatusOf(),
     hydrated,
@@ -368,6 +428,7 @@ function flush(): void {
     whales: [...rings.whales],
     launches: [...rings.launches],
     trades: [...rings.trades],
+    prices: pricesOf(),
     asOf: Date.now(),
   };
   for (const l of listeners) {
@@ -392,6 +453,17 @@ function onEffect(e: {
   trade?: HunterTrade & { price_at_trade: number; signature: string | null };
   signal?: RadarSignalRow;
   settledSells?: number;
+  // signal_outcome and exit
+  signal_key?: string;
+  horizon?: RadarHorizon;
+  ret?: number;
+  peak_ret?: number;
+  price_sol?: number;
+  stale?: boolean;
+  done?: boolean;
+  fraction?: number | null;
+  first?: boolean;
+  after_ms?: number;
 }): void {
   switch (e.kind) {
     case "launch": {
@@ -459,18 +531,61 @@ function onEffect(e: {
       journalSignal(s);
       rings.signals.unshift({ ...s, at: Date.parse(s.timestamp) || Date.now() });
       rings.signals.splice(100);
+      const headline = `RADAR SIGNAL · score ${s.wallet_score} wallet bought ${s.buy_amount_sol.toFixed(2)} SOL`;
+      const detail =
+        `${s.token_name ?? s.token_address}: bought by a wallet this radar scored ${s.wallet_score}` +
+        ` on ${e.settledSells ?? "?"} settled sells — measured in this browser from its observed pump.fun fills.`;
       emitLiveEvent({
         kind: "radar_signal",
         ts: Date.parse(s.timestamp) || Date.now(),
         wallet: s.wallet_address,
         mint: s.token_address,
-        headline: `RADAR SIGNAL · score ${s.wallet_score} wallet bought ${s.buy_amount_sol.toFixed(2)} SOL`,
-        detail:
-          `${s.token_name ?? s.token_address}: bought by a wallet this radar scored ${s.wallet_score}` +
-          ` on ${e.settledSells ?? "?"} settled sells — measured in this browser from its observed pump.fun fills.`,
+        headline,
+        detail,
         real: true,
         source: "radar-hunter",
       });
+      deliverRadarNotification(headline, detail, s.signal_key ?? signalKeyOf(s));
+      break;
+    }
+    case "signal_outcome": {
+      const key = e.signal_key!;
+      const field = HORIZON_FIELD[e.horizon!];
+      const patch: Partial<RadarSignalRow> = { [field]: e.ret ?? null, peak_ret_1h: e.peak_ret ?? null };
+      if (e.stale) patch.graded_stale = true;
+      journalSignalPatch(key, patch);
+      const i = rings.signals.findIndex((r) => (r.signal_key ?? signalKeyOf(r)) === key);
+      if (i >= 0) rings.signals[i] = { ...rings.signals[i], ...patch };
+      break;
+    }
+    case "exit": {
+      const key = e.signal_key!;
+      if (e.first) {
+        const patch: Partial<RadarSignalRow> = {
+          whale_exit_ret: e.ret ?? null,
+          whale_exit_after_ms: e.after_ms ?? null,
+          whale_exit_fraction: e.fraction ?? null,
+        };
+        journalSignalPatch(key, patch);
+        const i = rings.signals.findIndex((r) => (r.signal_key ?? signalKeyOf(r)) === key);
+        if (i >= 0) rings.signals[i] = { ...rings.signals[i], ...patch };
+        const sold = e.fraction === null || e.fraction === undefined ? "some" : `${Math.round(e.fraction * 100)}%`;
+        const headline = `RADAR EXIT · signal wallet sold ${sold} at ${fmtRet(e.ret ?? 0)}`;
+        const detail =
+          `${shortA(str(e.wallet))} sold ${(e.sol ?? 0).toFixed(2)} SOL of ${shortA(str(e.mint))} ${fmtAfter(e.after_ms ?? 0)} after its signal, ` +
+          `${fmtRet(e.ret ?? 0)} from the signal price. If you followed, this is the exit the wallet took.`;
+        emitLiveEvent({
+          kind: "radar_exit",
+          ts: e.at ?? Date.now(),
+          wallet: e.wallet,
+          mint: e.mint,
+          headline,
+          detail,
+          real: true,
+          source: "radar-hunter",
+        });
+        deliverRadarNotification(headline, detail, `${key}:exit`);
+      }
       break;
     }
     // "wallet" effects only move the leaderboard, which the flush recomputes.
@@ -511,6 +626,38 @@ export async function startHunting(thresholdSol?: number): Promise<void> {
   hydrated = { wallets: journalWallets().size, fills };
   rings.signals = journalSignals().map((row) => ({ ...row, at: Date.parse(row.timestamp) || 0 }));
 
+  // The journaled grades walk back in too, so a wallet's follower return
+  // survives a reload the way its score does — and any signal young enough
+  // to still be grading, or still waiting for its wallet to sell, resumes.
+  const now = Date.now();
+  for (const row of journalSignals()) {
+    const w = s.tracked.get(row.wallet_address);
+    if (w && typeof row.ret_5m === "number") applyFollowGrade(w, row.ret_5m);
+    const at = Date.parse(row.timestamp);
+    if (!at || !(typeof row.price_at_signal === "number" && row.price_at_signal > 0)) continue;
+    const resolved = {
+      m1: typeof row.ret_1m === "number",
+      m5: typeof row.ret_5m === "number",
+      m15: typeof row.ret_15m === "number",
+      h1: typeof row.ret_1h === "number",
+    };
+    const stillGrading = Object.values(resolved).some((v) => !v) && now - at < 2 * 3_600_000;
+    const exited = typeof row.whale_exit_ret === "number";
+    const watchExit = !exited && now - at < 24 * 3_600_000;
+    if (!stillGrading && !watchExit) continue;
+    s.registerSignal(
+      { signal_key: row.signal_key ?? signalKeyOf(row), wallet_address: row.wallet_address, token_address: row.token_address },
+      at,
+      row.price_at_signal,
+      {
+        resolved: stillGrading ? resolved : { m1: true, m5: true, m15: true, h1: true },
+        exited: !watchExit,
+        peak: row.price_at_signal * (1 + (typeof row.peak_ret_1h === "number" ? row.peak_ret_1h : 0)),
+      },
+    );
+  }
+  for (const m of pinned) s.pinMint(m, true);
+
   state = s;
   const cfgLike = { pumpPortalUrl: PUMPPORTAL_URL, rpcWsUrl: RPC_WS_URL };
   pumpSock = startPumpPortal(cfgLike, (launch, at) => {
@@ -520,7 +667,7 @@ export async function startHunting(thresholdSol?: number): Promise<void> {
     state?.onTrade(t);
   }) as EngineSocket;
   restartHelius();
-  clock = setInterval(scheduleFlush, CLOCK_MS);
+  clock = setInterval(tickClock, CLOCK_MS);
   scheduleFlush();
 }
 

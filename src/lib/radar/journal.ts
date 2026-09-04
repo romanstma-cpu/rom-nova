@@ -26,6 +26,8 @@ export interface RadarWalletRecord {
   fills: RadarFill[];
 }
 
+export type RadarHorizon = "m1" | "m5" | "m15" | "h1";
+
 export interface RadarSignalRow {
   wallet_address: string;
   wallet_score: number;
@@ -34,7 +36,36 @@ export interface RadarSignalRow {
   buy_amount_sol: number;
   timestamp: string;
   settled_sells?: number;
+  // The copy-desk fields, absent on rows journaled before 1.17.0. A grade is
+  // the token's price at the first trade at or after the horizon, against
+  // the signal's own fill price; null until it resolves.
+  signal_key?: string;
+  price_at_signal?: number;
+  ret_1m?: number | null;
+  ret_5m?: number | null;
+  ret_15m?: number | null;
+  ret_1h?: number | null;
+  /** best price seen inside the hour, against the fill — what a perfect exit got */
+  peak_ret_1h?: number | null;
+  /** at least one grade was marked to the last trade seen, not to a trade at the horizon */
+  graded_stale?: boolean;
+  // The signal wallet's own first sell after the signal: the exit.
+  whale_exit_ret?: number | null;
+  whale_exit_after_ms?: number | null;
+  whale_exit_fraction?: number | null;
 }
+
+/** The column each horizon grades into. */
+export const HORIZON_FIELD: Record<RadarHorizon, "ret_1m" | "ret_5m" | "ret_15m" | "ret_1h"> = {
+  m1: "ret_1m",
+  m5: "ret_5m",
+  m15: "ret_15m",
+  h1: "ret_1h",
+};
+
+/** Same key the engine stamps; computed here for rows journaled before it existed. */
+export const signalKeyOf = (s: Pick<RadarSignalRow, "wallet_address" | "token_address" | "timestamp">): string =>
+  `${s.wallet_address}:${s.token_address}:${s.timestamp}`;
 
 /** Fills kept per wallet — a sniper's whole week fits; a bot's spam does not. */
 export const RADAR_FILL_CAP = 400;
@@ -212,6 +243,20 @@ function evictIdlest(): void {
 export function journalSignal(row: RadarSignalRow): void {
   signals = [row, ...signals].slice(0, RADAR_SIGNAL_CAP);
   persistSignals();
+}
+
+/**
+ * Fold a grade or an exit into a journaled signal. Returns the patched row,
+ * or null when the signal is not in the journal any more (the cap dropped
+ * it, or it belonged to a session whose journal was forgotten).
+ */
+export function journalSignalPatch(key: string, patch: Partial<RadarSignalRow>): RadarSignalRow | null {
+  const i = signals.findIndex((s) => (s.signal_key ?? signalKeyOf(s)) === key);
+  if (i < 0) return null;
+  const next = { ...signals[i], ...patch };
+  signals = signals.map((s, j) => (j === i ? next : s));
+  persistSignals();
+  return next;
 }
 
 /** Everything persisted, for the hunter's replay-on-start. */

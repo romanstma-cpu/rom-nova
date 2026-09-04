@@ -11,6 +11,12 @@
 // Cost model: average cost. FIFO would need per-lot bookkeeping for wallets
 // the worker follows by the hundred; average cost gives the same realized
 // total over a closed position and keeps state to four numbers per position.
+//
+// Two ledgers beyond PNL, both for the reader who wants to COPY a wallet
+// rather than admire it: how long it holds (a sniper flipping in forty
+// seconds has a record nobody can follow), and what its signals were worth
+// five minutes later to someone who bought on the alert — the follower
+// return, graded by state.js from the same stream and folded in here.
 
 import { clamp } from "./util.js";
 
@@ -19,6 +25,7 @@ import { clamp } from "./util.js";
  * @property {number} boughtSol   observed SOL spent on this mint
  * @property {number} boughtTok   observed tokens acquired
  * @property {number} heldTok     tokens still held OF THE OBSERVED buys
+ * @property {number} firstBuyTs  chain time of the buy that opened this round trip
  *
  * @typedef {object} WalletStats
  * @property {number} firstSeen        ms epoch
@@ -31,8 +38,15 @@ import { clamp } from "./util.js";
  * @property {number} grossProfitSol
  * @property {number} grossLossSol    positive number
  * @property {number} roiSum          Σ (realized / basis) over settled sells
+ * @property {number[]} holds         last HOLD_RING settled hold durations, ms
+ * @property {number[]} followRets    last FOLLOW_RING graded 5-minute follower returns
+ * @property {number} signalsGraded   every 5-minute grade ever folded in
  * @property {Map<string, Position>} positions by mint
  */
+
+/** Samples kept per wallet for the medians. Small on purpose: a wallet changes. */
+export const HOLD_RING = 30;
+export const FOLLOW_RING = 30;
 
 /** @returns {WalletStats} */
 export function newWallet(now) {
@@ -47,12 +61,21 @@ export function newWallet(now) {
     grossProfitSol: 0,
     grossLossSol: 0,
     roiSum: 0,
+    holds: [],
+    followRets: [],
+    signalsGraded: 0,
     positions: new Map(),
   };
 }
 
 /** Positions a wallet may hold at once before the flattest is dropped. */
 export const MAX_POSITIONS = 300;
+
+/** @param {number[]} ring @param {number} v @param {number} cap */
+function pushRing(ring, v, cap) {
+  ring.push(v);
+  if (ring.length > cap) ring.shift();
+}
 
 /**
  * Fold one observed fill into a wallet's stats.
@@ -69,9 +92,13 @@ export function applyFill(w, fill) {
 
   if (fill.isBuy) {
     if (!pos) {
-      pos = { boughtSol: 0, boughtTok: 0, heldTok: 0 };
+      pos = { boughtSol: 0, boughtTok: 0, heldTok: 0, firstBuyTs: fill.ts };
       w.positions.set(fill.mint, pos);
       if (w.positions.size > MAX_POSITIONS) evictFlattest(w);
+    } else if (pos.heldTok <= 0) {
+      // A flat position buying again is a new round trip; its hold clock
+      // starts now, not at a buy the wallet already exited.
+      pos.firstBuyTs = fill.ts;
     }
     pos.boughtSol += fill.sol;
     pos.boughtTok += fill.tokens;
@@ -104,7 +131,24 @@ export function applyFill(w, fill) {
   } else {
     w.grossLossSol += -realized;
   }
+  // Hold time is measured on settled sells only — the same fills the score
+  // trusts — from the buy that opened the round trip.
+  if (Number.isFinite(pos.firstBuyTs)) pushRing(w.holds, Math.max(0, fill.ts - pos.firstBuyTs), HOLD_RING);
   return { realized, settled: true };
+}
+
+/**
+ * Fold one graded follower return in: what a buyer at the signal's fill
+ * price was sitting on five minutes later. Called by state.js when the
+ * horizon resolves, and by the drivers when they replay journaled grades.
+ *
+ * @param {WalletStats} w
+ * @param {number} ret  fraction, e.g. 0.34 for +34%
+ */
+export function applyFollowGrade(w, ret) {
+  if (!Number.isFinite(ret)) return;
+  pushRing(w.followRets, ret, FOLLOW_RING);
+  w.signalsGraded++;
 }
 
 /** @param {WalletStats} w */
@@ -144,6 +188,37 @@ export function avgRoiOf(w) {
   return w.settledSells > 0 ? w.roiSum / w.settledSells : 0;
 }
 
+/** @param {number[]} xs @returns {number | null} the median, null of nothing */
+export function medianOf(xs) {
+  if (xs.length === 0) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = s.length >> 1;
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+/** @param {WalletStats} w @returns {number | null} median settled hold, ms; null until one settles */
+export function medianHoldMs(w) {
+  return medianOf(w.holds);
+}
+
+/**
+ * What following this wallet's signals has paid, five minutes after each.
+ * The hit rate counts grades at or above +10% — a buyer who paid the
+ * bonding curve's round trip in fees needs about that much to be green.
+ *
+ * @param {WalletStats} w
+ * @returns {{ median: number | null, hitRate: number | null, graded: number }}
+ */
+export function followStats(w) {
+  const n = w.followRets.length;
+  if (n === 0) return { median: null, hitRate: null, graded: w.signalsGraded };
+  const hits = w.followRets.filter((r) => r >= FOLLOW_HIT_RET).length;
+  return { median: medianOf(w.followRets), hitRate: hits / n, graded: w.signalsGraded };
+}
+
+/** A follower grade at or above this counts as a hit. */
+export const FOLLOW_HIT_RET = 0.1;
+
 /**
  * The 0–100 score — the same family as the app's reputation formula, so a
  * number on the Radar means what a number on the wallet ledger means:
@@ -168,6 +243,8 @@ export function scoreOf(w) {
  * @param {WalletStats} w
  */
 export function walletRow(address, w) {
+  const follow = followStats(w);
+  const hold = medianHoldMs(w);
   return {
     wallet_address: address,
     score: scoreOf(w),
@@ -177,6 +254,11 @@ export function walletRow(address, w) {
     avg_roi: Number(avgRoiOf(w).toFixed(4)),
     settled_sells: w.settledSells,
     unmeasured_sells: w.unmeasuredSells,
+    // The copyability fields: null until measured, never a flattering zero.
+    median_hold_ms: hold === null ? null : Math.round(hold),
+    follow_ret_5m: follow.median === null ? null : Number(follow.median.toFixed(4)),
+    follow_hit_rate: follow.hitRate === null ? null : Number(follow.hitRate.toFixed(4)),
+    signals_graded: follow.graded,
     first_seen: new Date(w.firstSeen).toISOString(),
     last_active: new Date(w.lastActive).toISOString(),
   };

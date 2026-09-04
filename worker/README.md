@@ -56,6 +56,16 @@ keeps watching while your machine is off.
    (e.g. `https://rom-nova-radar.onrender.com`) → CONNECT. The URL is stored
    in your browser only.
 
+## Upgrading to 1.17.0 (grades, exits, copyability)
+
+A database created from the earlier `schema.sql` lacks the copy-desk
+columns. The worker notices: `/health` shows `db.schema` as
+`migration pending — run worker/supabase/migrations/002-copy-desk.sql` and it
+keeps writing the base columns only, dropping grades with a counter, until
+the columns exist. Paste that file (or re-run `schema.sql`, which carries the
+same block) into the Supabase SQL editor once; the worker re-probes every
+five minutes and starts writing grades and exits without a restart.
+
 ## Run locally
 
 ```bash

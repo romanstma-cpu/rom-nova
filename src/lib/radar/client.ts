@@ -17,6 +17,7 @@
 
 import { io, type Socket } from "socket.io-client";
 import { emitLiveEvent } from "@/lib/live/bus";
+import { HORIZON_FIELD, signalKeyOf, type RadarHorizon, type RadarSignalRow } from "./journal";
 
 const CONFIG_KEY = "whalenova_radar_v1";
 
@@ -29,19 +30,15 @@ export interface RadarWalletRow {
   avg_roi: number;
   settled_sells: number;
   unmeasured_sells: number;
+  median_hold_ms: number | null;
+  follow_ret_5m: number | null;
+  follow_hit_rate: number | null;
+  signals_graded: number;
   last_active: string;
 }
 
-export interface RadarSignal {
-  wallet_address: string;
-  wallet_score: number;
-  token_address: string;
-  token_name: string | null;
-  buy_amount_sol: number;
-  timestamp: string;
-  settled_sells?: number;
-  at: number;
-}
+/** One shape with the in-app hunter's rows, so the page renders either plane the same way. */
+export type RadarSignal = RadarSignalRow & { at: number };
 
 export interface RadarLaunch {
   mint: string;
@@ -138,23 +135,51 @@ function normWallet(w: unknown): RadarWalletRow {
     avg_roi: num(o.avg_roi),
     settled_sells: num(o.settled_sells),
     unmeasured_sells: num(o.unmeasured_sells),
+    median_hold_ms: numOrNull(o.median_hold_ms),
+    follow_ret_5m: numOrNull(o.follow_ret_5m),
+    follow_hit_rate: numOrNull(o.follow_hit_rate),
+    signals_graded: num(o.signals_graded),
     last_active: str(o.last_active),
   };
 }
 
 function normSignal(s: unknown): RadarSignal {
   const o = (s ?? {}) as Record<string, unknown>;
-  return {
+  const base = {
     wallet_address: str(o.wallet_address),
     wallet_score: num(o.wallet_score),
     token_address: str(o.token_address),
     token_name: typeof o.token_name === "string" ? o.token_name : null,
     buy_amount_sol: num(o.buy_amount_sol),
     timestamp: str(o.timestamp),
+  };
+  return {
+    ...base,
     settled_sells: num(o.settled_sells),
+    signal_key: str(o.signal_key) || signalKeyOf(base),
+    price_at_signal: numOrNull(o.price_at_signal) ?? undefined,
+    ret_1m: numOrNull(o.ret_1m),
+    ret_5m: numOrNull(o.ret_5m),
+    ret_15m: numOrNull(o.ret_15m),
+    ret_1h: numOrNull(o.ret_1h),
+    peak_ret_1h: numOrNull(o.peak_ret_1h),
+    graded_stale: o.graded_stale === true,
+    whale_exit_ret: numOrNull(o.whale_exit_ret),
+    whale_exit_after_ms: numOrNull(o.whale_exit_after_ms),
+    whale_exit_fraction: numOrNull(o.whale_exit_fraction),
     at: Date.parse(str(o.timestamp)) || Date.now(),
   };
 }
+
+/** Fold a grade or an exit into the signal it belongs to, by key. */
+function patchSignal(key: string, patch: Partial<RadarSignalRow>): void {
+  const i = state.signals.findIndex((s) => (s.signal_key ?? signalKeyOf(s)) === key);
+  if (i < 0) return;
+  notify({ signals: state.signals.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
+}
+
+const shortA = (a: string): string => (a.length <= 10 ? a : `${a.slice(0, 4)}…${a.slice(-4)}`);
+const fmtRet = (r: number): string => `${r >= 0 ? "+" : ""}${(r * 100).toFixed(0)}%`;
 
 function normLaunch(l: unknown): RadarLaunch {
   const o = (l ?? {}) as Record<string, unknown>;
@@ -239,6 +264,40 @@ function openSocket(url: string) {
       detail:
         `${sig.token_name ?? sig.token_address}: bought by a radar-tracked wallet scoring ${sig.wallet_score}` +
         ` on ${sig.settled_sells ?? "?"} settled sells — measured by your own Radar worker from observed fills.`,
+      real: true,
+      source: "radar-worker",
+    });
+  });
+  s.on("signal_outcome", (raw: unknown) => {
+    const o = (raw ?? {}) as Record<string, unknown>;
+    const h = str(o.horizon) as RadarHorizon;
+    const field = HORIZON_FIELD[h];
+    if (!field || !str(o.signal_key)) return;
+    const patch: Partial<RadarSignalRow> = { [field]: numOrNull(o.ret), peak_ret_1h: numOrNull(o.peak_ret) };
+    if (o.stale === true) patch.graded_stale = true;
+    patchSignal(str(o.signal_key), patch);
+  });
+  s.on("exit", (raw: unknown) => {
+    const o = (raw ?? {}) as Record<string, unknown>;
+    if (!str(o.signal_key) || o.first !== true) return;
+    const ret = num(o.ret);
+    const fraction = numOrNull(o.fraction);
+    patchSignal(str(o.signal_key), {
+      whale_exit_ret: ret,
+      whale_exit_after_ms: numOrNull(o.after_ms),
+      whale_exit_fraction: fraction,
+    });
+    const afterMs = num(o.after_ms);
+    const after = afterMs < 60_000 ? `${Math.round(afterMs / 1000)}s` : `${Math.round(afterMs / 60_000)}m`;
+    emitLiveEvent({
+      kind: "radar_exit",
+      ts: num(o.at) || Date.now(),
+      wallet: str(o.wallet),
+      mint: str(o.mint),
+      headline: `RADAR EXIT · signal wallet sold ${fraction === null ? "some" : `${Math.round(fraction * 100)}%`} at ${fmtRet(ret)}`,
+      detail:
+        `${shortA(str(o.wallet))} sold ${num(o.sol).toFixed(2)} SOL of ${shortA(str(o.mint))} ${after} after its signal, ` +
+        `${fmtRet(ret)} from the signal price — heard by your Radar worker. If you followed, this is the exit the wallet took.`,
       real: true,
       source: "radar-worker",
     });

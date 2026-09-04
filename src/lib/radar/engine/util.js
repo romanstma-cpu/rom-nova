@@ -91,6 +91,16 @@ export class LruMap {
   get size() {
     return this.map.size;
   }
+  /** Oldest first, like the map underneath. Deleting while iterating is safe. */
+  [Symbol.iterator]() {
+    return this.map[Symbol.iterator]();
+  }
+  entries() {
+    return this.map.entries();
+  }
+  keys() {
+    return this.map.keys();
+  }
 }
 
 /** Timestamped stdout line — Render's log view has no timestamps of its own. */

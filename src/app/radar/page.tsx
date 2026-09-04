@@ -1,6 +1,7 @@
 "use client";
 
-// Whale Radar — ROM Nova hunting smart money by itself.
+// Whale Radar — ROM Nova hunting smart money by itself, and the copy desk
+// that turns a signal into something a person can act on.
 //
 // The default plane is THIS DEVICE: the radar engine running in this very
 // tab, drinking the two keyless streams (PumpPortal creations, the pump.fun
@@ -10,12 +11,19 @@
 // again. Arm it once; it keeps hunting on every page until disarmed, and
 // its evidence survives reloads.
 //
-// The page is ordered by how often a reader touches each part: the switch,
-// then what it found, then the pipeline filling, and only then — folded —
-// the two optional extensions (a Helius key for off-curve coverage, a
-// remote worker for the hours the app is closed). Both extensions used to
-// sit as full cards between the switch and the data, so the first screen
-// was mostly setup for things most readers never set up.
+// Since 1.17.0 a signal is not the end of the story. The same stream grades
+// it — what the token was worth one, five, fifteen and sixty minutes later
+// to someone who bought on the alert — and hears the signal wallet sell,
+// which is the exit a copier most needs. The leaderboard ranks wallets by
+// what FOLLOWING them paid, not only by what they made themselves; a sniper
+// flipping in forty seconds has a fine record nobody can copy. The desk
+// below the signals keeps the reader's own follows, marked to the last
+// trade seen, sized by a plan they set. Nova still executes nothing: every
+// trade happens in the reader's own wallet, one click away.
+//
+// The second plane is optional: a deployed Radar worker (worker/ in the
+// repo) doing the same thing on a server around the clock. Same engine,
+// same grades, same honesty.
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
@@ -35,6 +43,7 @@ import {
 import {
   hunterServerSnapshot,
   hunterSnapshot,
+  lastPriceOf,
   setHunterThreshold,
   startHunting,
   stopHunting,
@@ -42,15 +51,57 @@ import {
   THRESHOLD_CHOICES,
   type HunterSnapshot,
 } from "@/lib/radar/hunter";
+import {
+  addFollow,
+  closeFollow,
+  copyPlanServerSnapshot,
+  copyPlanSnapshot,
+  copyRecord,
+  followReturn,
+  followsServerSnapshot,
+  followsSnapshot,
+  removeFollow,
+  RISK_CHOICES,
+  setCopyPlan,
+  subscribeFollows,
+  suggestedSizeSol,
+  type Follow,
+} from "@/lib/radar/follows";
+import { signalKeyOf, type RadarSignalRow } from "@/lib/radar/journal";
 import type { RadarState } from "@/lib/radar/client";
 
 const shortAddr = (a: string) => (a.length <= 10 ? a : `${a.slice(0, 4)}…${a.slice(-4)}`);
+const fmtRet = (r: number) => `${r >= 0 ? "+" : ""}${(r * 100).toFixed(r > -0.1 && r < 0.1 ? 1 : 0)}%`;
+const retCls = (r: number) => (r >= 0.1 ? "pos" : r <= -0.1 ? "neg" : "dim");
+const fmtHold = (ms: number) =>
+  ms < 60_000 ? `${Math.round(ms / 1000)}s` : ms < 3_600_000 ? `${Math.round(ms / 60_000)}m` : `${(ms / 3_600_000).toFixed(1)}h`;
+const fmtPriceSol = (p: number) => (p >= 0.01 ? p.toFixed(4) : p.toExponential(2));
+
+/** Where a reader trades it, in their own wallet. Nova opens a tab and steps back. */
+const TRADE_LINKS: { label: string; href: (mint: string) => string }[] = [
+  { label: "pump.fun", href: (m) => `https://pump.fun/coin/${m}` },
+  { label: "Jupiter", href: (m) => `https://jup.ag/swap/SOL-${m}` },
+  { label: "GMGN", href: (m) => `https://gmgn.ai/sol/token/${m}` },
+  { label: "DexScreener", href: (m) => `https://dexscreener.com/solana/${m}` },
+];
 
 /** The one shape both planes render as. */
 interface RadarView {
   label: string;
-  signals: { wallet_address: string; wallet_score: number; token_address: string; token_name: string | null; buy_amount_sol: number; settled_sells?: number; at: number }[];
-  wallets: { wallet_address: string; score: number; win_rate: number; total_trades: number; realized_pnl: number; settled_sells: number; unmeasured_sells: number }[];
+  signals: (RadarSignalRow & { at: number })[];
+  wallets: {
+    wallet_address: string;
+    score: number;
+    win_rate: number;
+    total_trades: number;
+    realized_pnl: number;
+    settled_sells: number;
+    unmeasured_sells: number;
+    median_hold_ms: number | null;
+    follow_ret_5m: number | null;
+    follow_hit_rate: number | null;
+    signals_graded: number;
+  }[];
   whales: { wallet: string; mint: string; sol: number; launchAgeMs: number | null; at: number }[];
   launches: { mint: string; name?: string; symbol?: string; vSol: number | null; at: number }[];
   trades: { wallet_address: string; token_address: string; buy_or_sell: "buy" | "sell"; amount_sol: number; at: number }[];
@@ -82,10 +133,27 @@ function Waiting({ hunting, idle, live }: { hunting: boolean; idle: string; live
   return <div className="px-3 py-6 text-center faint text-[11px] leading-relaxed">{hunting ? live : idle}</div>;
 }
 
+/** One horizon's grade: the return, or an ellipsis while it is still coming. */
+function Grade({ label, ret, title }: { label: string; ret: number | null | undefined; title: string }) {
+  return (
+    <span className="num text-[10.5px]" title={title}>
+      <span className="faint">{label} </span>
+      {typeof ret === "number" ? <span className={retCls(ret)}>{fmtRet(ret)}</span> : <span className="faint">…</span>}
+    </span>
+  );
+}
+
 export default function RadarPage() {
   const hunter = useSyncExternalStore(subscribeHunter, hunterSnapshot, hunterServerSnapshot);
   const worker = useSyncExternalStore(subscribeRadar, radarSnapshot, radarServerSnapshot);
+  const follows = useSyncExternalStore(subscribeFollows, followsSnapshot, followsServerSnapshot);
+  const plan = useSyncExternalStore(subscribeFollows, copyPlanSnapshot, copyPlanServerSnapshot);
   const [source, setSource] = useState<"device" | "worker">("device");
+  const [bankrollDraft, setBankrollDraft] = useState<string | null>(null);
+  /** An "I followed" form open on one signal: the entry price and size the reader confirms. */
+  const [followDraft, setFollowDraft] = useState<{ key: string; price: string; size: string } | null>(null);
+  /** A close form open on one follow. */
+  const [closeDraft, setCloseDraft] = useState<{ id: string; price: string } | null>(null);
 
   useEffect(() => holdRadar(), []);
 
@@ -102,12 +170,28 @@ export default function RadarPage() {
   const maxWhaleSol = view.whales.reduce((m, w) => Math.max(m, w.sol), 1);
   // The extensions fold opens itself when either one is in use.
   const extensionsInUse = helius.keySet || worker.enabled || workerUp;
+  const walletsByAddr = new Map(view.wallets.map((w) => [w.wallet_address, w]));
+  const signalsByKey = new Map(view.signals.map((s) => [s.signal_key ?? signalKeyOf(s), s]));
+  const sizeSol = suggestedSizeSol(plan);
+  const record = copyRecord(follows);
+  const openFollows = follows.filter((f) => f.closedAt === null).length;
+
+  /** The best mark the app has for a mint right now: the last trade the radar saw. */
+  const markOf = (mint: string): number | null => hunter.prices[mint]?.priceSol ?? lastPriceOf(mint)?.priceSol ?? null;
+
+  const commitBankroll = () => {
+    if (bankrollDraft !== null) {
+      const v = Number(bankrollDraft);
+      if (v > 0) setCopyPlan({ ...plan, bankrollSol: v });
+      setBankrollDraft(null);
+    }
+  };
 
   return (
     <div className="p-3 flex flex-col gap-3">
       <div className="flex items-center gap-2 flex-wrap">
         <span className={`radar-sweep${hunting ? " on" : ""}`} aria-hidden="true" />
-        <PageTitle title="WHALE RADAR" lede="Finds and scores whale wallets on its own, then flags when a proven one buys" />
+        <PageTitle title="WHALE RADAR" lede="Finds and scores whale wallets on its own, grades its own signals, and runs your copy desk" />
         <span className={`chip ${hunting ? "chip-pos" : ""}`}>
           {hunting ? (
             <>
@@ -130,17 +214,25 @@ export default function RadarPage() {
 
       <Hint
         id="radar"
-        summary="Armed, it watches every pump.fun launch and trade in this tab, tracks wallets that enter launches big, scores them on observed round trips only, and signals when a proven one buys again."
+        summary="Armed, it watches every pump.fun launch and trade in this tab, tracks wallets that enter launches big, scores them on observed round trips, signals when a proven one buys, grades every signal from the same stream, and tells you when that wallet sells."
       >
         Armed, this app watches every pump.fun launch and every bonding-curve trade — two keyless public streams, read
         in this tab. A wallet that buys the threshold or more within ten minutes of a launch gets tracked; every
         pump.fun fill it makes afterwards is journaled into this browser and scored from observed round trips only.
         Sells whose buys the radar never saw are counted as unmeasured, never guessed, and a score is shrunk toward
         zero until six settled sells. When a wallet already scoring 70+ buys at least 1 SOL again, that is the signal —
-        a toast anywhere in the app, and a row here. The trade stream costs real bandwidth (a few hundred KB/s,
-        printed above), which is why hunting is a switch and not a default. It hunts only while the app is open; the
-        journal survives reloads, so proven wallets stay proven. Nothing here executes trades, and a fresh radar
-        showing zero signals is the honesty working — scores need settled round trips before they mean anything.
+        a toast anywhere in the app, an OS notification if you enabled them on Alerts, and a row here. <b>Then the
+        signal is graded:</b> the token&apos;s price at the first trade one, five, fifteen and sixty minutes later,
+        against the signal&apos;s own fill price, is what a buyer on the alert was sitting on; if the token goes quiet
+        the grade is marked to the last trade seen and flagged stale, and off the bonding curve the stream is blind.
+        <b> Follow 5m</b> on the leaderboard is the median of those five-minute grades per wallet — the number that
+        says whether following this wallet has paid, as opposed to whether the wallet paid itself. <b>Exits:</b> the
+        signal wallet&apos;s first sell after its signal is heard and announced, with how much it sold and at what
+        return, because a copier who hears the buy and not the sell is holding the bag. <b>The copy desk</b> sizes
+        each signal from a bankroll and a risk you set, opens the token in your own trading site, and keeps the
+        follows you record — your entry, the live mark, the wallet&apos;s exit, your close. Nothing here executes
+        trades or touches a wallet; every number in your record is one you typed. A fresh radar showing zero signals
+        is the honesty working.
       </Hint>
 
       {/* the switch */}
@@ -180,7 +272,8 @@ export default function RadarPage() {
           <div className="num text-[10.5px] faint">
             {hunter.counts.launches} launches · {hunter.counts.tradesSeen.toLocaleString()} trades observed ·{" "}
             {hunter.counts.whales} whales discovered · {hunter.counts.tracked} tracked ·{" "}
-            {hunter.counts.journaled} fills journaled · {hunter.counts.signals} signals this session
+            {hunter.counts.journaled} fills journaled · {hunter.counts.signals} signals · {hunter.counts.graded} grades ·{" "}
+            {hunter.counts.exits} exits this session
           </div>
         )}
         {(hunter.hydrated.wallets > 0 || hunter.hydrated.fills > 0) && (
@@ -195,6 +288,51 @@ export default function RadarPage() {
             {helius.active ? `, plus off-curve trades for the top ${helius.following || "-"} tracked wallets via your Helius key.` : ". Trades on other venues need a Helius key — see Extend coverage below."}
           </div>
         )}
+      </div>
+
+      {/* the plan: how big a signal is, in the reader's own terms */}
+      <div className="panel p-3.5 flex items-center gap-3 flex-wrap">
+        <span className="panel-title">Copy plan</span>
+        <label className="num text-[10.5px] faint flex items-center gap-1.5">
+          bankroll
+          <input
+            type="number"
+            min="0.1"
+            step="0.1"
+            inputMode="decimal"
+            className="input text-[11px] w-[84px]"
+            value={bankrollDraft ?? String(plan.bankrollSol)}
+            onChange={(e) => setBankrollDraft(e.target.value)}
+            onBlur={commitBankroll}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+            }}
+            aria-label="Bankroll in SOL"
+          />
+          SOL
+        </label>
+        <label className="num text-[10.5px] faint flex items-center gap-1.5">
+          per signal
+          <select
+            className="input text-[11px]"
+            value={plan.riskPct}
+            onChange={(e) => setCopyPlan({ ...plan, riskPct: Number(e.target.value) })}
+            aria-label="Risk per signal, percent of bankroll"
+          >
+            {RISK_CHOICES.map((r) => (
+              <option key={r} value={r}>
+                {r}%
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="num text-[11.5px]">
+          = <b className="text-[var(--accent)]">{sizeSol} SOL</b> a signal
+        </span>
+        <span className="text-[10.5px] dim">
+          You trade in your own wallet; Nova opens the token where you trade and never holds a key. Exits alert you
+          when the signal wallet sells.
+        </span>
       </div>
 
       {/* source toggle appears only once there are two sources to choose from */}
@@ -225,27 +363,150 @@ export default function RadarPage() {
             <span className="panel-title">Signals · proven wallets buying</span>
             <span className="chip text-[9.5px]">{view.signals.length}</span>
           </div>
-          <div className="overflow-y-auto max-h-[420px]">
-            {view.signals.map((s, i) => (
-              <div key={`${s.wallet_address}-${s.at}-${i}`} className="px-3 py-2 border-b border-[rgba(27,35,51,0.5)]">
-                <div className="flex items-center gap-2">
-                  <Score value={s.wallet_score} width={44} />
-                  <Link href={`/token?m=${s.token_address}`} className="text-[12.5px] font-semibold link">
-                    {s.token_name ?? shortAddr(s.token_address)}
-                  </Link>
-                  <span className="num text-[11px] ml-auto">{s.buy_amount_sol.toFixed(2)} SOL</span>
+          <div className="overflow-y-auto max-h-[560px]">
+            {view.signals.map((s, i) => {
+              const key = s.signal_key ?? signalKeyOf(s);
+              const w = walletsByAddr.get(s.wallet_address);
+              const hold = w?.median_hold_ms ?? null;
+              const exited = typeof s.whale_exit_ret === "number";
+              const drafting = followDraft?.key === key;
+              const mark = markOf(s.token_address) ?? s.price_at_signal ?? null;
+              return (
+                <div key={`${key}-${i}`} className="px-3 py-2.5 border-b border-[rgba(27,35,51,0.5)] flex flex-col gap-1.5">
+                  <div className="flex items-center gap-2">
+                    <Score value={s.wallet_score} width={44} />
+                    <Link href={`/token?m=${s.token_address}`} className="text-[12.5px] font-semibold link">
+                      {s.token_name ?? shortAddr(s.token_address)}
+                    </Link>
+                    <span className="num text-[11px] ml-auto">{s.buy_amount_sol.toFixed(2)} SOL</span>
+                  </div>
+                  <div className="num text-[10.5px] faint">
+                    <Link href={`/whale?a=${s.wallet_address}`} className="link">
+                      {shortAddr(s.wallet_address)}
+                    </Link>
+                    {" · "}
+                    {s.settled_sells ? `${s.settled_sells} settled sells` : "settled n/a"}
+                    {" · "}
+                    {fmtAge(Math.max(0, view.asOf - s.at))} ago
+                    {typeof s.price_at_signal === "number" && ` · at ${fmtPriceSol(s.price_at_signal)} SOL`}
+                  </div>
+                  {/* the grades: what a buyer on the alert was sitting on */}
+                  {typeof s.price_at_signal === "number" && (
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <Grade label="1m" ret={s.ret_1m} title="price at the first trade one minute after the signal, against the signal's fill price" />
+                      <Grade label="5m" ret={s.ret_5m} title="five minutes after — the follower return the leaderboard is ranked by" />
+                      <Grade label="15m" ret={s.ret_15m} title="fifteen minutes after" />
+                      <Grade label="1h" ret={s.ret_1h} title="one hour after" />
+                      {typeof s.peak_ret_1h === "number" && (
+                        <Grade label="peak" ret={s.peak_ret_1h} title="the best price seen inside the hour — what a perfect exit got, which nobody gets" />
+                      )}
+                      {s.graded_stale && (
+                        <span className="chip text-[9px]" title="at least one grade was marked to the last trade seen because no trade landed at that horizon — a quiet or dead token, or one that left the curve">
+                          stale
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {/* the wallet's own exit */}
+                  <div className="text-[10.5px] num">
+                    {exited ? (
+                      <span className={retCls(s.whale_exit_ret ?? 0)}>
+                        wallet sold {typeof s.whale_exit_fraction === "number" ? `${Math.round(s.whale_exit_fraction * 100)}%` : "some"} at{" "}
+                        {fmtRet(s.whale_exit_ret ?? 0)}
+                        {typeof s.whale_exit_after_ms === "number" && ` after ${fmtHold(s.whale_exit_after_ms)}`}
+                      </span>
+                    ) : (
+                      <span className="faint">
+                        wallet still holding
+                        {hold !== null && ` · usually out in ${fmtHold(hold)}`}
+                      </span>
+                    )}
+                  </div>
+                  {/* the copy row: size, where to trade it, and the follow */}
+                  <div className="flex items-center gap-2 flex-wrap text-[10.5px]">
+                    <span className="num dim">
+                      plan {sizeSol} SOL
+                      {hold !== null && ` · time stop ≈ ${fmtHold(hold)}`}
+                    </span>
+                    {TRADE_LINKS.map((t) => (
+                      <a
+                        key={t.label}
+                        href={t.href(s.token_address)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="chip text-[9.5px] hover:border-[var(--accent)]"
+                        title={`open this token on ${t.label} in a new tab — you trade there, in your own wallet`}
+                      >
+                        {t.label} ↗
+                      </a>
+                    ))}
+                    {!drafting && !exited && (
+                      <button
+                        type="button"
+                        className="btn text-[10px] ml-auto"
+                        onClick={() =>
+                          setFollowDraft({
+                            key,
+                            price: mark !== null ? String(mark) : "",
+                            size: String(sizeSol),
+                          })
+                        }
+                      >
+                        I followed
+                      </button>
+                    )}
+                  </div>
+                  {drafting && followDraft && (
+                    <form
+                      className="flex items-center gap-2 flex-wrap text-[10.5px] num"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const f = addFollow({
+                          signalKey: key,
+                          mint: s.token_address,
+                          name: s.token_name,
+                          wallet: s.wallet_address,
+                          entryPriceSol: Number(followDraft.price),
+                          sizeSol: Number(followDraft.size) || 0,
+                        });
+                        if (f) setFollowDraft(null);
+                      }}
+                    >
+                      <label className="flex items-center gap-1 faint">
+                        entry
+                        <input
+                          className="input text-[10.5px] w-[110px]"
+                          value={followDraft.price}
+                          onChange={(e) => setFollowDraft({ ...followDraft, price: e.target.value })}
+                          inputMode="decimal"
+                          aria-label="Entry price, SOL per token"
+                          autoFocus
+                        />
+                        SOL/token
+                      </label>
+                      <label className="flex items-center gap-1 faint">
+                        size
+                        <input
+                          className="input text-[10.5px] w-[64px]"
+                          value={followDraft.size}
+                          onChange={(e) => setFollowDraft({ ...followDraft, size: e.target.value })}
+                          inputMode="decimal"
+                          aria-label="Size in SOL"
+                        />
+                        SOL
+                      </label>
+                      <button type="submit" className="btn btn-primary text-[10px]" disabled={!(Number(followDraft.price) > 0)}>
+                        Record
+                      </button>
+                      <button type="button" className="btn text-[10px]" onClick={() => setFollowDraft(null)}>
+                        Cancel
+                      </button>
+                      <span className="faint">prefilled with the last trade the radar saw — type what you actually paid</span>
+                    </form>
+                  )}
                 </div>
-                <div className="num text-[10.5px] faint mt-1">
-                  <Link href={`/whale?a=${s.wallet_address}`} className="link">
-                    {shortAddr(s.wallet_address)}
-                  </Link>
-                  {" · "}
-                  {s.settled_sells ? `${s.settled_sells} settled sells` : "settled n/a"}
-                  {" · "}
-                  {fmtAge(Math.max(0, view.asOf - s.at))} ago
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {view.signals.length === 0 && (
               <div className="px-3 py-8 text-center faint text-[11px] leading-relaxed">
                 {feeding && <div className="radar-rings" aria-hidden="true" />}
@@ -256,9 +517,7 @@ export default function RadarPage() {
                     pipeline below fill.
                   </>
                 ) : (
-                  <>
-                    Arm the radar above to start hunting.
-                  </>
+                  <>Arm the radar above to start hunting.</>
                 )}
               </div>
             )}
@@ -276,12 +535,20 @@ export default function RadarPage() {
                 <tr>
                   <th className="text-left px-3 py-1.5 font-medium">Wallet</th>
                   <th className="text-right px-2 font-medium">Score</th>
+                  <th
+                    className="text-right px-2 font-medium"
+                    title="median of what this wallet's signals were worth five minutes later to a buyer on the alert — whether FOLLOWING it has paid; the count is signals graded"
+                  >
+                    Follow 5m
+                  </th>
+                  <th className="text-right px-2 font-medium" title="median time from a buy to its settled sell — how long a copier has before this wallet is out">
+                    Hold
+                  </th>
                   <th className="text-right px-2 font-medium">Win</th>
                   <th className="text-right px-2 font-medium">PNL SOL</th>
-                  <th className="text-right px-2 font-medium" title="sells with a fully observed cost basis / sells the radar refused to score">
+                  <th className="text-right px-3 font-medium" title="sells with a fully observed cost basis / sells the radar refused to score">
                     settled/unm.
                   </th>
-                  <th className="text-right px-3 font-medium">Fills</th>
                 </tr>
               </thead>
               <tbody className="num">
@@ -295,17 +562,27 @@ export default function RadarPage() {
                     <td className="text-right px-2">
                       <Score value={w.score} width={40} />
                     </td>
+                    <td className="text-right px-2">
+                      {typeof w.follow_ret_5m === "number" ? (
+                        <span className={retCls(w.follow_ret_5m)} title={`${w.signals_graded} signal${w.signals_graded === 1 ? "" : "s"} graded${typeof w.follow_hit_rate === "number" ? ` · ${Math.round(w.follow_hit_rate * 100)}% at or above +10%` : ""}`}>
+                          {fmtRet(w.follow_ret_5m)}
+                          <span className="faint"> ·{w.signals_graded}</span>
+                        </span>
+                      ) : (
+                        <span className="faint" title="no signal from this wallet has been graded yet">—</span>
+                      )}
+                    </td>
+                    <td className="text-right px-2 dim">{w.median_hold_ms === null ? "—" : fmtHold(w.median_hold_ms)}</td>
                     <td className="text-right px-2">{(w.win_rate * 100).toFixed(0)}%</td>
                     <td className={`text-right px-2 ${w.realized_pnl >= 0 ? "pos" : "neg"}`}>{w.realized_pnl.toFixed(2)}</td>
-                    <td className="text-right px-2 dim">
+                    <td className="text-right px-3 dim">
                       {w.settled_sells}/{w.unmeasured_sells}
                     </td>
-                    <td className="text-right px-3 dim">{w.total_trades}</td>
                   </tr>
                 ))}
                 {view.wallets.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-3 py-8 text-center faint text-[11px]">
+                    <td colSpan={7} className="px-3 py-8 text-center faint text-[11px]">
                       {feeding
                         ? "No wallets tracked yet — discoveries land here as whales enter fresh launches."
                         : "Tracked wallets and their measured scores appear here once the radar is armed."}
@@ -316,6 +593,138 @@ export default function RadarPage() {
             </table>
           </div>
         </div>
+      </div>
+
+      {/* the reader's own desk */}
+      <div className="panel flex flex-col">
+        <div className="flex items-center gap-3 px-3 pt-2.5 pb-1.5 flex-wrap">
+          <span className="panel-title">Your copy desk</span>
+          <span className="num text-[10.5px] faint">
+            {openFollows} open
+            {record.closed > 0 && (
+              <>
+                {" · "}
+                {record.closed} closed · median{" "}
+                <span className={retCls(record.median ?? 0)}>{fmtRet(record.median ?? 0)}</span>
+                {" · "}
+                {Math.round((record.hitRate ?? 0) * 100)}% at or above +10% ·{" "}
+                <span className={record.pnlSol >= 0 ? "pos" : "neg"}>
+                  {record.pnlSol >= 0 ? "+" : ""}
+                  {record.pnlSol.toFixed(3)} SOL
+                </span>{" "}
+                at your sizes
+              </>
+            )}
+          </span>
+        </div>
+        {follows.length === 0 ? (
+          <div className="px-3 py-6 text-center faint text-[11px] leading-relaxed">
+            Nothing followed yet. Each signal has an <b>I followed</b> button: record what you paid and the desk marks
+            it to the last trade the radar sees, tells you when the signal wallet sells, and keeps your closed trades as
+            your own record — every number in it is one you typed.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11.5px]">
+              <thead className="thead">
+                <tr>
+                  <th className="text-left px-3 py-1.5 font-medium">Token</th>
+                  <th className="text-right px-2 font-medium">Entry</th>
+                  <th className="text-right px-2 font-medium" title="open: the last trade the radar saw on this mint; closed: your exit">
+                    Mark
+                  </th>
+                  <th className="text-right px-2 font-medium">Return</th>
+                  <th className="text-right px-2 font-medium">SOL</th>
+                  <th className="text-left px-2 font-medium">Signal wallet</th>
+                  <th className="text-right px-3 font-medium"></th>
+                </tr>
+              </thead>
+              <tbody className="num">
+                {follows.map((f: Follow) => {
+                  const open = f.closedAt === null;
+                  const mark = open ? markOf(f.mint) : f.exitPriceSol;
+                  const ret = followReturn(f, mark);
+                  const sig = f.signalKey ? signalsByKey.get(f.signalKey) : undefined;
+                  const closing = closeDraft?.id === f.id;
+                  return (
+                    <tr key={f.id} className={`trow ${open ? "" : "opacity-70"}`}>
+                      <td className="px-3 py-1.5">
+                        <Link href={`/token?m=${f.mint}`} className="link">
+                          {f.name ?? shortAddr(f.mint)}
+                        </Link>
+                        <span className="faint text-[10px]"> {fmtAge(Math.max(0, view.asOf - f.entryAt))} ago</span>
+                      </td>
+                      <td className="text-right px-2 dim">{fmtPriceSol(f.entryPriceSol)}</td>
+                      <td className="text-right px-2 dim" title={open ? (mark !== null ? "last trade the radar saw" : "no trade seen on this mint since you followed — arm the radar, or the token is off the curve") : "your exit"}>
+                        {mark !== null ? fmtPriceSol(mark) : "—"}
+                      </td>
+                      <td className={`text-right px-2 ${ret !== null ? retCls(ret) : "faint"}`}>{ret !== null ? fmtRet(ret) : "—"}</td>
+                      <td className={`text-right px-2 ${ret !== null ? retCls(ret) : "faint"}`}>
+                        {ret !== null && f.sizeSol > 0 ? `${ret * f.sizeSol >= 0 ? "+" : ""}${(ret * f.sizeSol).toFixed(3)}` : "—"}
+                      </td>
+                      <td className="px-2 text-[10.5px]">
+                        {sig ? (
+                          typeof sig.whale_exit_ret === "number" ? (
+                            <span className="warn">
+                              sold {typeof sig.whale_exit_fraction === "number" ? `${Math.round(sig.whale_exit_fraction * 100)}%` : ""} at {fmtRet(sig.whale_exit_ret)}
+                            </span>
+                          ) : (
+                            <span className="faint">holding</span>
+                          )
+                        ) : f.wallet ? (
+                          <span className="faint">{shortAddr(f.wallet)}</span>
+                        ) : (
+                          <span className="faint">—</span>
+                        )}
+                      </td>
+                      <td className="text-right px-3 whitespace-nowrap">
+                        {open ? (
+                          closing && closeDraft ? (
+                            <form
+                              className="inline-flex items-center gap-1.5"
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                closeFollow(f.id, Number(closeDraft.price));
+                                setCloseDraft(null);
+                              }}
+                            >
+                              <input
+                                className="input text-[10.5px] w-[100px]"
+                                value={closeDraft.price}
+                                onChange={(e) => setCloseDraft({ ...closeDraft, price: e.target.value })}
+                                inputMode="decimal"
+                                aria-label="Exit price, SOL per token"
+                                autoFocus
+                              />
+                              <button type="submit" className="btn btn-primary text-[10px]" disabled={!(Number(closeDraft.price) > 0)}>
+                                Close
+                              </button>
+                              <button type="button" className="btn text-[10px]" onClick={() => setCloseDraft(null)}>
+                                Cancel
+                              </button>
+                            </form>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn text-[10px]"
+                              onClick={() => setCloseDraft({ id: f.id, price: mark !== null ? String(mark) : "" })}
+                            >
+                              Close…
+                            </button>
+                          )
+                        ) : (
+                          <button type="button" className="btn text-[10px]" onClick={() => removeFollow(f.id)} title="drop this closed trade from your record">
+                            Remove
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* the pipeline filling */}
@@ -444,9 +853,10 @@ export default function RadarPage() {
 
       <p className="text-[10px] faint px-1 pb-2 leading-relaxed">
         Radar data is measured by YOUR app (or your worker) from its own observed stream: pump.fun bonding-curve
-        trades, program-wide, while armed. Scores stand on settled, fully-observed round trips — the settled/unmeasured
-        column shows how much of each wallet&apos;s record the score actually rests on. Signals are observations, not
-        advice, and nothing here executes trades.
+        trades, program-wide, while armed. Scores stand on settled, fully-observed round trips; grades and exits on
+        later trades in the same stream, marked to the last trade seen when a token goes quiet and blind once it leaves
+        the curve. The copy desk records what you type and marks it the same way. Signals are observations, not
+        advice, nothing here executes trades, and no arrangement of these numbers makes a memecoin a good idea.
       </p>
     </div>
   );

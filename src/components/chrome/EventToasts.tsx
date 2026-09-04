@@ -20,6 +20,9 @@ const LOUD_KINDS = new Set([
   // to surface. Its discoveries (radar_whale) stay feed-only for the same
   // reason launches do.
   "radar_signal",
+  // The signal wallet selling. A copier who hears the buy and not the sell
+  // is holding a bag by design; this is the other half of the same alert.
+  "radar_exit",
 ]);
 const MIN_USD = 40_000;
 
@@ -58,7 +61,8 @@ export function EventToasts() {
         e.kind === "signal_created" ||
         e.kind === "cluster_detected" ||
         e.kind === "wallet_activity" ||
-        e.kind === "radar_signal");
+        e.kind === "radar_signal" ||
+        e.kind === "radar_exit");
     if (!loud) return;
     setToasts((ts) => [...ts.slice(-2), e]);
     setTimeout(() => setToasts((ts) => ts.filter((t) => t.id !== e.id)), 7000);
@@ -82,7 +86,7 @@ export function EventToasts() {
             <div className="flex items-center justify-between gap-2">
               <span
                 className={`text-[10px] tracking-[0.14em] font-semibold truncate ${
-                  t.kind.includes("sell") ? "neg" : t.kind === "signal_created" ? "text-[var(--accent)]" : "pos"
+                  t.kind.includes("sell") || t.kind === "radar_exit" ? "warn" : t.kind === "signal_created" ? "text-[var(--accent)]" : "pos"
                 }`}
               >
                 {t.headline}

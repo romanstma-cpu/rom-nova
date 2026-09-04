@@ -144,3 +144,39 @@ describe("walletRow", () => {
     expect(avgRoiOf(w)).toBeCloseTo(0.5, 9);
   });
 });
+
+describe("copyability", () => {
+  it("measures hold time on settled sells only, from the buy that opened the round trip", async () => {
+    const { medianHoldMs } = await import("../src/lib/radar/engine/score.js");
+    const w = newWallet(T0);
+    applyFill(w, buy("A", 10, 1000));
+    applyFill(w, sell("A", 15, 1000, T0 + 5000));
+    expect(medianHoldMs(w)).toBe(5000);
+    // Flat, then a new round trip: the clock restarts at the re-entry.
+    applyFill(w, { mint: "A", isBuy: true, sol: 10, tokens: 1000, ts: T0 + 10_000 });
+    applyFill(w, sell("A", 12, 1000, T0 + 12_000));
+    expect(w.holds).toEqual([5000, 2000]);
+    expect(medianHoldMs(w)).toBe(3500);
+    // An unmeasured sell contributes no hold.
+    applyFill(w, sell("B", 3, 10, T0 + 20_000));
+    expect(w.holds).toHaveLength(2);
+  });
+
+  it("follower stats: median and the +10% hit rate, null before any grade", async () => {
+    const { applyFollowGrade, followStats } = await import("../src/lib/radar/engine/score.js");
+    const w = newWallet(T0);
+    expect(followStats(w)).toEqual({ median: null, hitRate: null, graded: 0 });
+    let row = walletRow("W", w);
+    expect(row.follow_ret_5m).toBeNull();
+    expect(row.follow_hit_rate).toBeNull();
+    expect(row.median_hold_ms).toBeNull();
+    applyFollowGrade(w, 0.5);
+    applyFollowGrade(w, -0.2);
+    applyFollowGrade(w, 0.1);
+    expect(followStats(w)).toEqual({ median: 0.1, hitRate: 2 / 3, graded: 3 });
+    row = walletRow("W", w);
+    expect(row.follow_ret_5m).toBeCloseTo(0.1, 4);
+    expect(row.follow_hit_rate).toBeCloseTo(0.6667, 4);
+    expect(row.signals_graded).toBe(3);
+  });
+});

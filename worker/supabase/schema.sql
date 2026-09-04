@@ -79,6 +79,29 @@ create table if not exists token_launches (
 );
 create index if not exists token_launches_time_idx on token_launches (launch_time desc);
 
+-- 1.17.0, the copy desk: grades and exits on signals, copyability on
+-- wallets. Kept as ALTERs so re-running this file upgrades a database made
+-- from the earlier version; migrations/002-copy-desk.sql is the same block.
+alter table tracked_wallets
+  add column if not exists median_hold_ms bigint,
+  add column if not exists follow_ret_5m decimal,
+  add column if not exists follow_hit_rate decimal,
+  add column if not exists signals_graded integer not null default 0;
+alter table signals
+  add column if not exists signal_key text,
+  add column if not exists price_at_signal decimal,
+  add column if not exists ret_1m decimal,
+  add column if not exists ret_5m decimal,
+  add column if not exists ret_15m decimal,
+  add column if not exists ret_1h decimal,
+  add column if not exists peak_ret_1h decimal,
+  add column if not exists graded_stale boolean not null default false,
+  add column if not exists whale_exit_ret decimal,
+  add column if not exists whale_exit_after_ms bigint,
+  add column if not exists whale_exit_fraction decimal;
+create unique index if not exists signals_key_idx on signals (signal_key);
+create index if not exists signals_wallet_ts_idx on signals (wallet_address, timestamp desc);
+
 -- RLS: anon reads, nobody but the service role writes.
 alter table tracked_wallets enable row level security;
 alter table wallet_trades enable row level security;

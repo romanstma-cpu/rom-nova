@@ -12,7 +12,10 @@
 //   whale_seen     a wallet crossing the discovery gate
 //   trade          every journaled tracked-wallet fill
 //   signal         a proven wallet buying — the reason this worker exists
-//   wallet_update  a tracked wallet's row after a fill
+//   signal_outcome a grade for a signal: horizon, return vs the fill, peak
+//   exit           the signal wallet selling — first: true is the alert
+//   wallet_update  a tracked wallet's row after a fill or a grade
+//   leaderboard    top wallets by score, when something changed
 //   status         every 30s
 //
 // The raw ~35 trades/s firehose is deliberately NOT broadcast — clients get
@@ -81,6 +84,16 @@ export class Feed {
   /** @param {any[]} rows */
   setTopWallets(rows) {
     this.topWallets = rows;
+  }
+
+  /**
+   * Fold a grade or an exit into the signal it belongs to, so a client that
+   * connects later sees the signal already graded in its snapshot.
+   * @param {string} key @param {Record<string, any>} patch
+   */
+  patchSignal(key, patch) {
+    const i = this.rings.signals.findIndex((s) => s.signal_key === key);
+    if (i >= 0) this.rings.signals[i] = { ...this.rings.signals[i], ...patch };
   }
 
   /** @param {any} row */

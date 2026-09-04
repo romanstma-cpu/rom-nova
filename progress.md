@@ -940,6 +940,30 @@ Also fixed: `counts.exits` counted every slice of a wallet's exit (one
 signal, forty-six "exits" on the tile in four minutes); only the first
 sell counts now. 771 tests.
 
+### 🚢 1.18.2 SHIPPED and proven (2026-09-04 ~4:30 PM) — the desk is complete
+
+`8dc373e` → `cc74556` (1.18.2) → tag → CI green. Installer SHA256
+`2c4b2ebe…11e4` = GitHub digest = SHA256SUMS; latest.yml 1.18.2;
+83,308,020 bytes. Site `afea5fe`, Pages built, live 3×1.18.2 / 0×1.18.1,
+1,502-test band, two live chunks carrying the Jupiter endpoint. Desktop
+1.18.2.0: packaged chunk carries the fallback, titled window, 4 procs →
+0, leveldb LOG 16:28 at the real profile path. Worker redeployed from the
+engine change alone (the buildFilter earning its keep): uptime reset,
+and at 276s `/health` read DexScreener 5 calls / 2 failures / 6 skipped
+with a 30s backoff, **Jupiter 8 calls / 0 failures** — the fallback is
+carrying the off-curve grades on Render. 40 signals, 40 grades, 18 exits
+(first sells only now), 68 tracked. 771 tests.
+
+**What "complete" means as of this line.** Signals are graded at four
+horizons from the stream, from DexScreener when the stream is blind, from
+Jupiter when DexScreener is throttled, and marked stale only when all
+three are silent; every grade says which. Exits are heard and counted
+once. Wallets rank by Follow 5m and Hold, and a sub-minute hold is
+flagged on the signal itself. The desk sizes, links, records and marks.
+The dashboard shows the radar. Notifications enable from the plan. The
+site says all of it. The one open item is not code: migration 002 in
+LO's Supabase, which the worker names in /health until it is run.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

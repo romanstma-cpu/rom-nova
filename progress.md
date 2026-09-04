@@ -761,6 +761,14 @@ CSS has `page-lede` + `fold-body`, packaged radar HTML has the fold,
 titled window, 4 procs → 0 on close, leveldb LOG rotated 14:33 at the
 real profile path. 748 tests.
 
+**After the ship, on main only.** The design hook flagged the score
+bar's `transition: width` (there since 1.0.0). Every fill — `Score`,
+the signal and wallet factor bars, the token page's `Bar` — now sets
+`transform: scaleX(fraction)` on a full-width div with a left origin, so
+the grow-in runs on the compositor. Verified in a scanner frame: 79
+fills most of the bar, 28 a sliver, colours intact. Rides out with the
+next tag; the site's `/nova` copy stays at 1.16.0 until then.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

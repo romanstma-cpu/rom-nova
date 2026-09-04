@@ -74,7 +74,7 @@ function SignalInner() {
                 <span>{f.name}</span>
                 <span className="num dim">w {f.weight.toFixed(1)} · +{f.contribution.toFixed(1)} pts</span>
               </div>
-              <div className="scorebar mt-1"><div style={{ width: `${f.normalized * 100}%`, background: "var(--accent)" }} /></div>
+              <div className="scorebar mt-1"><div style={{ transform: `scaleX(${f.normalized})`, background: "var(--accent)" }} /></div>
               <div className="text-[11px] faint mt-0.5">{f.explanation}</div>
             </div>
           ))}
@@ -85,7 +85,7 @@ function SignalInner() {
                 <span>{f.name}</span>
                 <span className="num neg">{f.contribution.toFixed(1)} pts</span>
               </div>
-              <div className="scorebar mt-1"><div style={{ width: `${f.raw * 100}%`, background: "var(--neg)" }} /></div>
+              <div className="scorebar mt-1"><div style={{ transform: `scaleX(${f.raw})`, background: "var(--neg)" }} /></div>
               <div className="text-[11px] faint mt-0.5">{f.explanation}</div>
             </div>
           ))}

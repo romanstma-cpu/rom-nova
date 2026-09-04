@@ -1501,10 +1501,10 @@ function points(value: number, isRisk: boolean): string {
 }
 
 function Bar({ value, bad = false }: { value: number; bad?: boolean }) {
-  const pct = Math.max(0, Math.min(1, value)) * 100;
+  const fraction = Math.max(0, Math.min(1, value));
   return (
     <span className="scorebar" style={{ width: 110, display: "inline-block" }}>
-      <div style={{ width: `${pct}%`, background: bad ? "var(--neg)" : "var(--accent)" }} />
+      <div style={{ transform: `scaleX(${fraction})`, background: bad ? "var(--neg)" : "var(--accent)" }} />
     </span>
   );
 }

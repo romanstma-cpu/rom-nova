@@ -334,7 +334,7 @@ function DemoWallet({ address, initial }: { address: string; initial: WalletDeta
           ).map(([label, v]) => (
             <div key={label} className="mb-2">
               <div className="flex justify-between text-[11.5px]"><span className="dim">{label}</span><span className="num">{(v * 100).toFixed(0)}%</span></div>
-              <div className="scorebar mt-1"><div style={{ width: `${v * 100}%`, background: "var(--accent-2)" }} /></div>
+              <div className="scorebar mt-1"><div style={{ transform: `scaleX(${v})`, background: "var(--accent-2)" }} /></div>
             </div>
           ))}
           <div className="text-[11.5px] dim space-y-1 mt-3 num">

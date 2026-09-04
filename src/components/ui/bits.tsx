@@ -39,8 +39,15 @@ export function Score({
         {value}
       </span>
       <span className="scorebar" style={{ width }}>
-        {/* backgroundColor, not the shorthand: the stylesheet lays a sheen over it */}
-        <div style={{ width: `${value}%`, backgroundColor: scoreColor(value), color: scoreColor(value) }} />
+        {/* backgroundColor, not the shorthand: the stylesheet lays a sheen over
+            it. scaleX, not width: the fill animates on the compositor. */}
+        <div
+          style={{
+            transform: `scaleX(${Math.max(0, Math.min(1, value / 100))})`,
+            backgroundColor: scoreColor(value),
+            color: scoreColor(value),
+          }}
+        />
       </span>
     </span>
   );

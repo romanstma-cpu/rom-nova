@@ -781,6 +781,83 @@ first whale tracked. No key passed through this chat. Remaining on LO's
 side: a free uptime monitor on /health (free Render services sleep after
 15 idle minutes) and pasting the URL into the app's Remote worker card.
 
+## 1.17.0 — the copy desk (2026-09-04, evening)
+
+LO: "find how this could make the user a profitable crypto trader/copy
+trader. add things that would make this app worth 100 million dollars
+just because of how easy it is to make money." Answered honestly first —
+no app makes money easy, and Nova's own research says so — then built
+the narrow thing that actually separates a copy trader who survives from
+one who does not: follow only wallets whose edge outlives the delay
+between their buy and yours, hear the signal within seconds, size it so
+no trade matters, and exit when they exit. Nova still executes nothing.
+
+**The insight the engine already held.** Every pump.fun trade passes
+through `RadarState.onTrade`, so the stream that produced a signal can
+grade it — the token's price at the first trade one, five, fifteen and
+sixty minutes later, against the signal's own fill price — and can hear
+the signal wallet sell. No new source, no key: the same fills the score
+trusts. `markPrice` runs on every trade of a watched mint before the whale
+gate; `tick` marks horizons no trade will ever reach to the last trade
+seen and flags them stale; `checkExit` sizes the sell by what the ledger
+had the wallet holding and announces the first one. Signals are stamped
+with `price_at_signal` and a `signal_key`, and both drivers can resume a
+young signal after a restart (`registerSignal` with the resolved set).
+
+**Copyability, the number nobody shows.** `score.js` now records the hold
+time of every settled round trip (from the buy that opened it — a flat
+position re-entering restarts the clock) and folds each five-minute grade
+into a `followRets` ring. `walletRow` gains `median_hold_ms`,
+`follow_ret_5m`, `follow_hit_rate` (at or above +10%, the curve's round
+trip in fees) and `signals_graded`, null until measured. The leaderboard
+ranks Follow 5m and Hold beside the score. The first armed frame showed
+why: the ten tracked wallets held for 3s and 4s — fine records nobody
+could copy.
+
+**The desk.** `follows.ts` (localStorage): a plan (bankroll × risk, 0.5–5%),
+follows with typed entries, closes with typed exits, a record — median,
+hit rate, SOL at the reader's sizes — that only ever holds what they
+typed. `pinMint` keeps a followed mint priced through disarm and re-arm.
+Every signal row on /radar: the four grades and the peak, the wallet's
+exit or "still holding · usually out in 4s", the plan size and a time
+stop from the wallet's median hold, four trade-it-yourself links
+(pump.fun, Jupiter, GMGN, DexScreener — a new tab, the reader's own
+wallet) and an "I followed" form prefilled with the last trade seen.
+Exits are loud: `radar_exit` toasts, and both radar events ride the
+alerts permission to the OS (`deliverRadarNotification`).
+
+**Worker.** Same effects fanned to Supabase (`patchSignal`, coalesced;
+signals upsert on `signal_key`) and the socket (`signal_outcome`, `exit`,
+ring patched so a late client sees graded signals in its snapshot);
+hydrate replays seven days of grades and resumes signals. `db.js` probes
+for the 1.17.0 columns at connect and every five minutes: until the
+migration runs it writes base columns only, counts dropped grades, and
+`/health` names the file. `migrations/002-copy-desk.sql`, folded into
+`schema.sql` as ALTERs. Pushing main auto-deploys the worker on Render —
+verified in a 50s dry run first (2,079 trades, streams up, schema
+current in dry-run).
+
+764 tests (radar-desk.test.ts new: follows store, plan, record, journal
+patches; state: grading at every horizon, stale marks, resume, exits
+sized and first-only, day-old watches dropped, pins; score: holds,
+follower stats).
+
+### 🚢 1.17.0 SHIPPED and proven (2026-09-04 ~3:50 PM)
+
+`a319421` (19 files, +1922/−111) → `7ea0bf7` (1.17.0) → tag → CI green;
+both stat lines read before tagging. Installer SHA256 `d97be57f…aa08` =
+GitHub digest = SHA256SUMS; latest.yml 1.17.0; 83,306,474 bytes; chunks
+39/0; middleware tracked. Site `68d0b45`, Pages built, live 3×1.17.0 /
+0×1.16.0; live /nova/radar carries the copy desk and the follow form.
+Desktop 1.17.0.0: packaged radar HTML has both, titled window, 4 procs → 0
+on close, leveldb LOG at 15:45 at the real profile path. **Worker
+auto-deployed from the push:** /health uptime reset to 28s with the new
+`graded`/`exits` counts, 40 wallets rehydrated, LO's app still connected,
+and `db.schema` reading "migration pending — run
+worker/supabase/migrations/002-copy-desk.sql" exactly as designed. That
+paste is the one step left on LO's side; grades and exits write the moment
+the columns exist, no restart.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

@@ -36,6 +36,49 @@ body {
   font-feature-settings: "tnum" 1, "ss01" 1;
 }
 
+/* ---------- atmosphere ----------
+   Two slow aurora blobs behind everything and a vignette in front of them.
+   Fixed, transform-only animation, and every panel's backdrop blur samples
+   them — so the glass reads as glass instead of a flat tint. Both sit at
+   z-index -1: above the body colour, below every piece of content, and no
+   page has to know they exist. */
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+body::before {
+  background:
+    radial-gradient(42% 38% at 18% 22%, rgba(56, 225, 255, 0.115), transparent 70%),
+    radial-gradient(40% 44% at 82% 78%, rgba(139, 124, 255, 0.13), transparent 70%),
+    radial-gradient(30% 30% at 70% 15%, rgba(255, 95, 168, 0.05), transparent 70%);
+  filter: blur(40px);
+  transform: translate3d(0, 0, 0) scale(1.15);
+  animation: aurora 52s ease-in-out infinite alternate;
+  will-change: transform;
+}
+body::after {
+  background: radial-gradient(120% 90% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.42) 100%);
+}
+@keyframes aurora {
+  0%   { transform: translate3d(-3%, -2%, 0) scale(1.15) rotate(0deg); }
+  50%  { transform: translate3d(2%, 3%, 0) scale(1.22) rotate(4deg); }
+  100% { transform: translate3d(3%, -3%, 0) scale(1.15) rotate(-3deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  body::before { animation: none; }
+}
+
+/* A visible ring for keyboard users, in the accent, on everything. */
+:focus-visible {
+  outline: 2px solid rgba(56, 225, 255, 0.75);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 /* faint blueprint grid behind everything */
 .grid-bg {
   background-image:
@@ -69,11 +112,12 @@ body {
     linear-gradient(180deg, rgba(30, 42, 66, 0.5) 0%, rgba(13, 18, 28, 0.42) 34%, rgba(10, 14, 22, 0.5) 100%),
     var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  backdrop-filter: blur(12px);
+  border-radius: 10px;
+  backdrop-filter: blur(14px) saturate(1.2);
   box-shadow:
     0 1px 0 0 rgba(150, 190, 255, 0.07) inset,
-    0 10px 30px -18px rgba(0, 0, 0, 0.9);
+    0 0 0 1px rgba(56, 225, 255, 0.025) inset,
+    0 14px 34px -20px rgba(0, 0, 0, 0.95);
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
@@ -83,7 +127,7 @@ body {
   position: absolute;
   inset: 0 0 auto 0;
   height: 1px;
-  border-radius: 8px 8px 0 0;
+  border-radius: 10px 10px 0 0;
   background: linear-gradient(90deg, transparent, rgba(56, 225, 255, 0.28), transparent);
   opacity: 0.7;
   pointer-events: none;
@@ -126,13 +170,14 @@ body {
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 1px 7px;
-  border-radius: 3px;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
   border: 1px solid var(--border);
   background: rgba(30, 40, 60, 0.4);
   font-size: 10px;
-  letter-spacing: 0.06em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-dim);
   white-space: nowrap;
@@ -148,31 +193,47 @@ body {
   align-items: center;
   gap: 6px;
   padding: 5px 12px;
-  border-radius: 4px;
+  border-radius: 6px;
   border: 1px solid var(--border-hi);
   background: rgba(28, 38, 58, 0.5);
   color: var(--text);
   font-size: 12px;
   cursor: pointer;
-  transition: border-color 120ms, background 120ms;
+  transition: border-color 120ms, background 120ms, box-shadow 160ms, transform 120ms, filter 120ms;
   white-space: nowrap;
 }
 .btn:hover { border-color: var(--accent); background: rgba(56, 225, 255, 0.08); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-primary { border-color: rgba(56, 225, 255, 0.5); color: var(--accent); }
+/* The one filled button: the action a page exists for. Dark text on the
+   brand gradient, with the glow the score bars already carry. */
+.btn-primary {
+  border-color: transparent;
+  background: linear-gradient(135deg, #38e1ff 0%, #4d8bff 100%);
+  color: #04121a;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: 0 0 22px -8px rgba(56, 225, 255, 0.7), 0 1px 0 0 rgba(255, 255, 255, 0.25) inset;
+}
+.btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #5ff0ff 0%, #5c96ff 100%);
+  border-color: transparent;
+  box-shadow: 0 0 30px -6px rgba(56, 225, 255, 0.85), 0 1px 0 0 rgba(255, 255, 255, 0.3) inset;
+  transform: translateY(-1px);
+}
 .btn-danger { border-color: rgba(255, 77, 109, 0.5); color: var(--neg); }
 
 .input {
   background: rgba(10, 14, 22, 0.8);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 5px 10px;
   font-size: 12.5px;
   color: var(--text);
   outline: none;
   font-family: var(--font-data);
+  transition: border-color 120ms, box-shadow 160ms;
 }
-.input:focus { border-color: var(--accent); }
+.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(56, 225, 255, 0.13); }
 
 .thead {
   font-size: 10px;
@@ -205,6 +266,9 @@ body {
 .scorebar > div {
   height: 100%;
   border-radius: 3px;
+  /* a sheen over whatever colour the score sets — Score sets background-color,
+     never the shorthand, so this layer survives */
+  background-image: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.22) 100%);
   box-shadow: 0 0 10px -1px currentColor;
   transition: width 420ms cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -213,7 +277,86 @@ body {
   from { transform: translateX(24px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
-.toast { animation: toast-in 200ms ease-out; }
+.toast {
+  animation: toast-in 200ms ease-out;
+  border-left: 2px solid var(--accent);
+  box-shadow:
+    0 0 28px -8px rgba(56, 225, 255, 0.5),
+    0 18px 40px -20px rgba(0, 0, 0, 0.95);
+}
+
+/* ---------- radar ornaments ----------
+   A sweep that only turns while the hunter is armed, and a bar that gives a
+   discovery's size a length, not just a number. Decoration that tracks state;
+   nothing here moves when nothing is happening. */
+.radar-sweep {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex: none;
+  background:
+    radial-gradient(circle, rgba(56, 225, 255, 0.9) 0 1.5px, transparent 2.5px),
+    conic-gradient(from 0deg, rgba(56, 225, 255, 0) 0deg, rgba(56, 225, 255, 0) 250deg, rgba(56, 225, 255, 0.85) 360deg);
+  box-shadow: inset 0 0 0 1px rgba(56, 225, 255, 0.3), 0 0 14px -4px rgba(56, 225, 255, 0.6);
+  opacity: 0.45;
+}
+.radar-sweep.on { opacity: 1; animation: sweep 2.6s linear infinite; }
+@keyframes sweep { to { transform: rotate(360deg); } }
+
+.minibar {
+  display: inline-block;
+  width: 44px;
+  height: 4px;
+  border-radius: 3px;
+  background: rgba(26, 34, 51, 0.9);
+  overflow: hidden;
+  vertical-align: middle;
+}
+.minibar > i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--pos), var(--accent));
+  box-shadow: 0 0 8px -2px var(--pos);
+}
+
+/* Concentric rings behind an empty signals panel while hunting: the shape
+   of a radar waiting, instead of a blank grey box. */
+.radar-rings {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  margin: 0 auto 10px;
+  background:
+    radial-gradient(circle, rgba(56, 225, 255, 0.55) 0 2px, transparent 3px),
+    repeating-radial-gradient(circle, rgba(56, 225, 255, 0.16) 0 1px, transparent 1px 20px);
+  -webkit-mask: radial-gradient(circle, #000 55%, transparent 72%);
+  mask: radial-gradient(circle, #000 55%, transparent 72%);
+  opacity: 0.7;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .radar-sweep.on { animation: none; }
+}
+
+/* The top bar wears the brand edge the site has: one gradient hairline. */
+.topbar { position: relative; }
+.topbar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(56, 225, 255, 0.55) 30%, rgba(139, 124, 255, 0.55) 70%, transparent 100%);
+  pointer-events: none;
+}
+.wordmark-nova {
+  background: linear-gradient(90deg, #38e1ff, #8b7cff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }

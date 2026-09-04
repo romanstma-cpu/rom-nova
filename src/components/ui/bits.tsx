@@ -39,7 +39,8 @@ export function Score({
         {value}
       </span>
       <span className="scorebar" style={{ width }}>
-        <div style={{ width: `${value}%`, background: scoreColor(value) }} />
+        {/* backgroundColor, not the shorthand: the stylesheet lays a sheen over it */}
+        <div style={{ width: `${value}%`, backgroundColor: scoreColor(value), color: scoreColor(value) }} />
       </span>
     </span>
   );

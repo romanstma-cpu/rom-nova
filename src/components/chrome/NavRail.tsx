@@ -114,10 +114,10 @@ export function NavRail({ onNavigate }: { onNavigate?: () => void }) {
         key={it.href}
         href={it.href}
         onClick={onNavigate}
-        className={`flex items-center gap-2.5 rounded px-2 py-[5px] text-[12.5px] transition-colors ${
+        className={`flex items-center gap-2.5 rounded-md px-2 py-[5px] text-[12.5px] transition-[color,background-color,box-shadow,transform] duration-150 ${
           active
-            ? "bg-[rgba(56,225,255,0.09)] text-[var(--accent)] border border-[rgba(56,225,255,0.25)]"
-            : "text-[var(--text-dim)] hover:text-[var(--text)] hover:bg-[rgba(40,55,85,0.25)] border border-transparent"
+            ? "bg-[rgba(56,225,255,0.09)] text-[var(--accent)] border border-[rgba(56,225,255,0.25)] shadow-[inset_2px_0_0_0_var(--accent),0_0_18px_-8px_rgba(56,225,255,0.55)]"
+            : "text-[var(--text-dim)] hover:text-[var(--text)] hover:bg-[rgba(40,55,85,0.25)] hover:translate-x-[1px] border border-transparent"
         }`}
         title={it.sim ? "deterministic simulation — labelled SIMULATED on the page" : undefined}
       >

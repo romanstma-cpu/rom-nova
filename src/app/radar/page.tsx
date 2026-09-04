@@ -90,13 +90,25 @@ export default function RadarPage() {
   const pump = hunter.streams.pump;
   const helius = hunter.helius;
   const [heliusDraft, setHeliusDraft] = useState("");
+  // The biggest discovery in view sets the scale for the size bars.
+  const maxWhaleSol = view.whales.reduce((m, w) => Math.max(m, w.sol), 1);
 
   return (
     <div className="p-3 flex flex-col gap-3">
       <div className="flex items-center gap-2 flex-wrap">
+        <span className={`radar-sweep${hunting ? " on" : ""}`} aria-hidden="true" />
         <h1 className="text-[15px] font-semibold tracking-wide">WHALE RADAR</h1>
         <span className={`chip ${hunting ? "chip-pos" : ""}`}>
-          {hunting ? "HUNTING · this device" : hunter.phase === "starting" ? "STARTING…" : "DISARMED"}
+          {hunting ? (
+            <>
+              <span className="live-dot" />
+              HUNTING · this device
+            </>
+          ) : hunter.phase === "starting" ? (
+            "STARTING…"
+          ) : (
+            "DISARMED"
+          )}
         </span>
         {hunting && pump && rpc && (
           <span className="chip text-[9.5px]">
@@ -289,6 +301,7 @@ export default function RadarPage() {
             ))}
             {view.signals.length === 0 && (
               <div className="px-3 py-8 text-center faint text-[11px]">
+                {(hunting || view.label === "REMOTE WORKER") && <div className="radar-rings" aria-hidden="true" />}
                 {hunting || view.label === "REMOTE WORKER"
                   ? "No signals yet. A signal needs a wallet that ALREADY proved a 70+ score on settled sells — snipers flip in minutes, so an armed evening is usually enough for the first proofs. The panels below show the pipeline filling."
                   : "Arm the radar to start hunting."}
@@ -359,6 +372,9 @@ export default function RadarPage() {
                   {shortAddr(w.wallet)}
                 </Link>
                 <span className="pos">{w.sol.toFixed(1)} SOL</span>
+                <span className="minibar" aria-hidden="true">
+                  <i style={{ width: `${Math.min(100, (w.sol / maxWhaleSol) * 100)}%` }} />
+                </span>
                 <Link href={`/token?m=${w.mint}`} className="link faint">
                   {shortAddr(w.mint)}
                 </Link>

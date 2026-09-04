@@ -31,13 +31,13 @@ export function TopBar({ onOpenPalette, onOpenNav }: { onOpenPalette: () => void
   const regime = m ? REGIME_LABEL[m.regime] : undefined;
 
   return (
-    <header className="h-[46px] shrink-0 border-b border-[var(--border)] bg-[rgba(6,9,14,0.9)] flex items-center gap-4 px-4">
+    <header className="topbar h-[46px] shrink-0 border-b border-[var(--border)] bg-[rgba(6,9,14,0.9)] flex items-center gap-4 px-4">
       <button className="md:hidden btn px-2 text-[14px]" onClick={onOpenNav} aria-label="Open navigation">
         ☰
       </button>
       <Link href="/" className="flex items-baseline gap-2 mr-2 select-none">
         <span className="text-[15px] font-semibold tracking-[0.22em] text-[var(--text)]">
-          ROM<span className="text-[var(--accent)]">NOVA</span>
+          ROM<span className="wordmark-nova">NOVA</span>
         </span>
         <span className="hidden lg:inline text-[9px] tracking-[0.28em] faint">SOLANA ON-CHAIN INTELLIGENCE</span>
       </Link>

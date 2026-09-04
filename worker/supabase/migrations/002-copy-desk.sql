@@ -12,7 +12,13 @@ alter table tracked_wallets
   add column if not exists median_hold_ms bigint,
   add column if not exists follow_ret_5m decimal,
   add column if not exists follow_hit_rate decimal,
-  add column if not exists signals_graded integer not null default 0;
+  add column if not exists signals_graded integer not null default 0,
+  -- 1.19.0 wallet intelligence: labels earned from fills, consistency
+  -- (mean over spread of per-trade ROI), deepest realized drawdown, mean hold.
+  add column if not exists labels text[] not null default '{}',
+  add column if not exists consistency decimal,
+  add column if not exists max_drawdown_sol decimal not null default 0,
+  add column if not exists avg_hold_ms bigint;
 
 alter table signals
   add column if not exists signal_key text,

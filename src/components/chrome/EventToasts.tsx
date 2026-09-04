@@ -23,6 +23,9 @@ const LOUD_KINDS = new Set([
   // The signal wallet selling. A copier who hears the buy and not the sell
   // is holding a bag by design; this is the other half of the same alert.
   "radar_exit",
+  // A dormant wallet waking up big, or a chart being painted with wash
+  // trades — the two behaviour reads worth interrupting for.
+  "radar_behaviour",
 ]);
 const MIN_USD = 40_000;
 
@@ -62,7 +65,8 @@ export function EventToasts() {
         e.kind === "cluster_detected" ||
         e.kind === "wallet_activity" ||
         e.kind === "radar_signal" ||
-        e.kind === "radar_exit");
+        e.kind === "radar_exit" ||
+        e.kind === "radar_behaviour");
     if (!loud) return;
     setToasts((ts) => [...ts.slice(-2), e]);
     setTimeout(() => setToasts((ts) => ts.filter((t) => t.id !== e.id)), 7000);

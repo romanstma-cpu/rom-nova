@@ -30,7 +30,7 @@ export const MIGRATION_FILE = "worker/supabase/migrations/002-copy-desk.sql";
 export const HORIZON_COLUMN = { m1: "ret_1m", m5: "ret_5m", m15: "ret_15m", h1: "ret_1h" };
 
 /** Columns the 1.17.0 migration adds, stripped from writes until it has run. */
-const WALLET_COLUMNS_1_17 = ["median_hold_ms", "follow_ret_5m", "follow_hit_rate", "signals_graded"];
+const WALLET_COLUMNS_1_17 = ["median_hold_ms", "follow_ret_5m", "follow_hit_rate", "signals_graded", "labels", "consistency", "max_drawdown_sol", "avg_hold_ms"];
 const SIGNAL_COLUMNS_1_17 = ["signal_key", "price_at_signal"];
 
 /** @param {Record<string, any>} row @param {string[]} columns */
@@ -86,7 +86,7 @@ export class Db {
     if (!this.client) return;
     // The newest column the migration adds is the marker, so a half-applied
     // earlier draft of it reads as "pending" and the re-run adds the rest.
-    const { error } = await this.client.from("signals").select("graded_lookup").limit(1);
+    const { error } = await this.client.from("tracked_wallets").select("avg_hold_ms").limit(1);
     const was = this.migrated;
     this.migrated = !error;
     if (this.migrated && was !== true) log("[db] schema current — grades and exits will be written");

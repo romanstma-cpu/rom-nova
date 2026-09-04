@@ -121,6 +121,10 @@ function onEffect(e) {
       if (e.horizon === "m5") log(`GRADE ${short(e.wallet)} on ${short(e.mint)}: +5m ${(e.ret * 100).toFixed(0)}%${e.stale ? " (stale)" : ""}`);
       return;
     }
+    case "behaviour":
+      feed.push("behaviours", "behaviour", e);
+      if (e.behaviour === "dormant_buy" || e.behaviour === "wash_like") log(`BEHAVIOUR ${e.behaviour} ${short(e.wallet)} on ${short(e.mint)}`);
+      return;
     case "exit": {
       if (e.first) {
         const patch = { whale_exit_ret: e.ret, whale_exit_after_ms: e.after_ms, whale_exit_fraction: e.fraction };

@@ -97,6 +97,12 @@ export interface HunterWalletRow {
   avg_roi: number;
   settled_sells: number;
   unmeasured_sells: number;
+  /** labels earned from measured fills: sniper, flipper, holder, accumulator, distributor, wash-like, dev */
+  labels: string[];
+  /** mean over spread of per-trade ROI — the shape of a Sharpe ratio on settled sells, not annualized */
+  consistency: number | null;
+  max_drawdown_sol: number;
+  avg_hold_ms: number | null;
   /** median settled hold, ms — how long a copier has before this wallet is out */
   median_hold_ms: number | null;
   /** median of what its signals were worth five minutes later, as a fraction */
@@ -120,6 +126,15 @@ export interface HunterTrade {
   buy_or_sell: "buy" | "sell";
   amount_sol: number;
   timestamp: string;
+}
+
+export interface HunterBehaviour {
+  behaviour: "dormant_buy" | "accumulation" | "distribution" | "wash_like";
+  wallet: string;
+  mint: string;
+  sol: number;
+  detail: string;
+  at: number;
 }
 
 export interface HunterLaunch {
@@ -155,6 +170,7 @@ export interface HunterSnapshot {
     signals: number;
     graded: number;
     exits: number;
+    behaviours: number;
     tracked: number;
   };
   streams: { pump: HunterStream | null; rpc: HunterStream | null };
@@ -166,6 +182,8 @@ export interface HunterSnapshot {
   whales: HunterWhale[];
   launches: HunterLaunch[];
   trades: (HunterTrade & { at: number })[];
+  /** What tracked wallets are doing: the reads that fired this session. */
+  behaviours: HunterBehaviour[];
   /** Last trade seen on each pinned mint — the copy desk's live marks. */
   prices: Record<string, { priceSol: number; at: number }>;
   asOf: number;
@@ -186,7 +204,7 @@ const SERVER_SNAPSHOT: HunterSnapshot = {
   phase: "off",
   backend: "memory",
   gates: HUNTER_DEFAULTS,
-  counts: { launches: 0, tradesSeen: 0, whales: 0, journaled: 0, signals: 0, graded: 0, exits: 0, tracked: 0 },
+  counts: { launches: 0, tradesSeen: 0, whales: 0, journaled: 0, signals: 0, graded: 0, exits: 0, behaviours: 0, tracked: 0 },
   streams: { pump: null, rpc: null },
   helius: HELIUS_OFF,
   hydrated: { wallets: 0, fills: 0 },
@@ -195,6 +213,7 @@ const SERVER_SNAPSHOT: HunterSnapshot = {
   whales: [],
   launches: [],
   trades: [],
+  behaviours: [],
   prices: {},
   asOf: 0,
 };
@@ -223,6 +242,7 @@ const rings = {
   whales: [] as HunterWhale[],
   launches: [] as HunterLaunch[],
   trades: [] as (HunterTrade & { at: number })[],
+  behaviours: [] as HunterBehaviour[],
 };
 let hydrated = { wallets: 0, fills: 0 };
 
@@ -460,7 +480,7 @@ function flush(): void {
     gates: state ? (state.gates as HunterGates) : { ...HUNTER_DEFAULTS, whaleThresholdSol: hunterConfig().thresholdSol },
     counts: state
       ? { ...state.counts, tracked: state.tracked.size }
-      : { launches: 0, tradesSeen: 0, whales: 0, journaled: 0, signals: 0, graded: 0, exits: 0, tracked: journalCounts().wallets },
+      : { launches: 0, tradesSeen: 0, whales: 0, journaled: 0, signals: 0, graded: 0, exits: 0, behaviours: 0, tracked: journalCounts().wallets },
     streams: { pump: streamOf("pump", pumpSock), rpc: streamOf("rpc", rpcSock) },
     helius: heliusStatusOf(),
     hydrated,
@@ -469,6 +489,7 @@ function flush(): void {
     whales: [...rings.whales],
     launches: [...rings.launches],
     trades: [...rings.trades],
+    behaviours: [...rings.behaviours],
     prices: pricesOf(),
     asOf: Date.now(),
   };
@@ -506,6 +527,9 @@ function onEffect(e: {
   fraction?: number | null;
   first?: boolean;
   after_ms?: number;
+  // behaviour
+  behaviour?: HunterBehaviour["behaviour"];
+  read?: { gapMs?: number; buys?: number; sells?: number; legs?: number };
 }): void {
   switch (e.kind) {
     case "launch": {
@@ -629,6 +653,29 @@ function onEffect(e: {
           source: "radar-hunter",
         });
         deliverRadarNotification(headline, detail, `${key}:exit`);
+      }
+      break;
+    }
+    case "behaviour": {
+      const kind = e.behaviour!;
+      const r = e.read ?? {};
+      const detail =
+        kind === "dormant_buy"
+          ? `quiet for ${fmtAfter(r.gapMs ?? 0)}, then bought ${(e.sol ?? 0).toFixed(2)} SOL of ${shortA(str(e.mint))}`
+          : kind === "accumulation"
+            ? `${r.buys ?? 0} buys of ${shortA(str(e.mint))} with no sell — building a position`
+            : kind === "distribution"
+              ? `${r.sells ?? 0} sells of ${shortA(str(e.mint))} with no buy in sight — unloading`
+              : `${r.legs ?? 0} alternating legs on ${shortA(str(e.mint))} inside ten minutes, ending flat — volume, not conviction`;
+      rings.behaviours.unshift({ behaviour: kind, wallet: str(e.wallet), mint: str(e.mint), sol: e.sol ?? 0, detail, at: e.at ?? Date.now() });
+      rings.behaviours.splice(80);
+      // Two of the four are worth interrupting for: a dormant wallet waking
+      // up big, and a wash pattern that says a chart is being painted.
+      if (kind === "dormant_buy" || kind === "wash_like") {
+        const headline = kind === "dormant_buy" ? "RADAR · DORMANT WALLET WOKE UP" : "RADAR · WASH-LIKE TRADING";
+        const text = `${shortA(str(e.wallet))}: ${detail}.`;
+        emitLiveEvent({ kind: "radar_behaviour", ts: e.at ?? Date.now(), wallet: e.wallet, mint: e.mint, headline, detail: text, real: true, source: "radar-hunter" });
+        if (kind === "dormant_buy") deliverRadarNotification(headline, text, `${str(e.wallet)}:${str(e.mint)}:dormant`);
       }
       break;
     }

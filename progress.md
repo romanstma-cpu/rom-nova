@@ -964,6 +964,34 @@ The dashboard shows the radar. Notifications enable from the plan. The
 site says all of it. The one open item is not code: migration 002 in
 LO's Supabase, which the worker names in /health until it is run.
 
+## 1.19.0 — wallet intelligence (2026-09-04, late afternoon)
+
+LO's big upgrade spec (wallet intelligence, scoring with social, copy
+execution, portfolio, community, ML, monetization). Answered with a
+review of what exists, three decisions he owns (execution: never
+custodial, non-custodial per-trade signing only if he wants it; accounts
+and payments; paid data budgets), and a phased plan whose MVP needs no
+decision. This is that MVP's first slice.
+
+**Labels earned, not assigned.** `engine/behaviour.js`: sniper / flipper
+/ holder from the median settled hold after three sells (thresholds
+60s, 30m, 24h); accumulator (≥3 buys of one mint, no sell of it in the
+recent ring); distributor (recent sells ≥ 4 and ≥ 2× buys); wash-like (≥4
+alternating legs on one mint inside 10 min, net tokens within 10% of
+gross); dev when the radar saw the wallet create a token (creator from
+the PumpPortal frame, remembered in an LruSet). **Consistency and
+drawdown** on the ledger: per-trade ROI ring → mean/σ (null under five
+settled sells, null with no spread — called consistency, not Sharpe,
+because it is neither annualized nor risk-free-adjusted); realized
+high-water mark → deepest fall. USD PNL at the live cross-checked SOL
+price. **Behaviour reads** fire once at a threshold: dormant_buy (quiet
+7d, then ≥5 SOL), accumulation (3rd buy), distribution (3rd bare sell),
+wash_like (4th flat leg). All four in a Behaviour panel on /radar; the
+wake-up and the wash pattern reach the toasts, the wake-up the OS.
+Worker carries the same on the feed; migration 002 (still unrun by LO)
+gains the four wallet columns rather than a 003. `medianOf` moved to
+util.js to break a score↔behaviour import cycle. Dry run 45s clean.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

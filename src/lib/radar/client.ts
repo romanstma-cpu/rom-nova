@@ -30,6 +30,10 @@ export interface RadarWalletRow {
   avg_roi: number;
   settled_sells: number;
   unmeasured_sells: number;
+  labels: string[];
+  consistency: number | null;
+  max_drawdown_sol: number;
+  avg_hold_ms: number | null;
   median_hold_ms: number | null;
   follow_ret_5m: number | null;
   follow_hit_rate: number | null;
@@ -66,6 +70,15 @@ export interface RadarTrade {
   at: number;
 }
 
+export interface RadarBehaviour {
+  behaviour: string;
+  wallet: string;
+  mint: string;
+  sol: number;
+  detail: string;
+  at: number;
+}
+
 export interface RadarState {
   phase: "off" | "connecting" | "connected" | "error";
   url: string;
@@ -78,6 +91,7 @@ export interface RadarState {
   launches: RadarLaunch[];
   whales: RadarWhale[];
   trades: RadarTrade[];
+  behaviours: RadarBehaviour[];
   /** receipt clock for "ago" rendering — ticks in the store, never in render */
   asOf: number;
 }
@@ -110,6 +124,7 @@ const SERVER_STATE: RadarState = {
   launches: [],
   whales: [],
   trades: [],
+  behaviours: [],
   asOf: 0,
 };
 
@@ -135,6 +150,10 @@ function normWallet(w: unknown): RadarWalletRow {
     avg_roi: num(o.avg_roi),
     settled_sells: num(o.settled_sells),
     unmeasured_sells: num(o.unmeasured_sells),
+    labels: Array.isArray(o.labels) ? o.labels.filter((l): l is string => typeof l === "string") : [],
+    consistency: numOrNull(o.consistency),
+    max_drawdown_sol: num(o.max_drawdown_sol),
+    avg_hold_ms: numOrNull(o.avg_hold_ms),
     median_hold_ms: numOrNull(o.median_hold_ms),
     follow_ret_5m: numOrNull(o.follow_ret_5m),
     follow_hit_rate: numOrNull(o.follow_hit_rate),
@@ -211,6 +230,23 @@ function normTrade(t: unknown): RadarTrade {
   };
 }
 
+/** A behaviour read, with the sentence the app prints for it. */
+function normBehaviour(b: unknown): RadarBehaviour {
+  const o = (b ?? {}) as Record<string, unknown>;
+  const kind = str(o.behaviour);
+  const r = (o.read ?? {}) as Record<string, unknown>;
+  const mint = str(o.mint);
+  const detail =
+    kind === "dormant_buy"
+      ? `quiet for ${Math.round(num(r.gapMs) / 86_400_000)}d, then bought ${num(o.sol).toFixed(2)} SOL of ${shortA(mint)}`
+      : kind === "accumulation"
+        ? `${num(r.buys)} buys of ${shortA(mint)} with no sell: building a position`
+        : kind === "distribution"
+          ? `${num(r.sells)} sells of ${shortA(mint)} with no buy in sight: unloading`
+          : `${num(r.legs)} alternating legs on ${shortA(mint)} inside ten minutes, ending flat: volume, not conviction`;
+  return { behaviour: kind, wallet: str(o.wallet), mint, sol: num(o.sol), detail, at: num(o.at) || Date.now() };
+}
+
 function healthOf(h: unknown): { health: Record<string, unknown> | null; coverage: string | null } {
   const o = h && typeof h === "object" ? (h as Record<string, unknown>) : null;
   return { health: o, coverage: o && typeof o.coverage === "string" ? o.coverage : null };
@@ -241,6 +277,7 @@ function openSocket(url: string) {
       launches: Array.isArray(o.launches) ? o.launches.map(normLaunch).reverse() : [],
       whales: Array.isArray(o.whales) ? o.whales.map(normWhale).reverse() : [],
       trades: Array.isArray(o.trades) ? o.trades.map(normTrade).reverse() : [],
+      behaviours: Array.isArray(o.behaviours) ? o.behaviours.map(normBehaviour).reverse() : [],
       ...healthOf(o.status),
     });
   });
@@ -265,6 +302,27 @@ function openSocket(url: string) {
       detail:
         `${sig.token_name ?? sig.token_address}: bought by a radar-tracked wallet scoring ${sig.wallet_score}` +
         ` on ${sig.settled_sells ?? "?"} settled sells — measured by your own Radar worker from observed fills.`,
+      real: true,
+      source: "radar-worker",
+    });
+  });
+  s.on("behaviour", (raw: unknown) => {
+    const o = (raw ?? {}) as Record<string, unknown>;
+    const kind = str(o.behaviour);
+    notify({ behaviours: [normBehaviour(raw), ...state.behaviours].slice(0, 80) });
+    if (kind !== "dormant_buy" && kind !== "wash_like") return;
+    const r = (o.read ?? {}) as Record<string, unknown>;
+    const detail =
+      kind === "dormant_buy"
+        ? `quiet for ${Math.round(num(r.gapMs) / 86_400_000)}d, then bought ${num(o.sol).toFixed(2)} SOL of ${shortA(str(o.mint))}`
+        : `${num(r.legs)} alternating legs on ${shortA(str(o.mint))} inside ten minutes, ending flat`;
+    emitLiveEvent({
+      kind: "radar_behaviour",
+      ts: num(o.at) || Date.now(),
+      wallet: str(o.wallet),
+      mint: str(o.mint),
+      headline: kind === "dormant_buy" ? "RADAR · DORMANT WALLET WOKE UP" : "RADAR · WASH-LIKE TRADING",
+      detail: `${shortA(str(o.wallet))}: ${detail} — heard by your Radar worker.`,
       real: true,
       source: "radar-worker",
     });

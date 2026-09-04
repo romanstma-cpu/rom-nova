@@ -17,6 +17,7 @@
 // on a token nobody trades again (then the mark is the last trade seen, and
 // the grade says so).
 
+import { detectBehaviour } from "./behaviour.js";
 import { isSignalBuy, isWhaleBuy } from "./classify.js";
 import { applyFill, applyFollowGrade, newWallet, scoreOf, walletRow } from "./score.js";
 import { LruMap, LruSet } from "./util.js";
@@ -65,8 +66,10 @@ export class RadarState {
      * @type {LruMap<string, { key: string, at: number, priceSol: number, wallet: string, mint: string, exited: boolean }>}
      */
     this.openSignals = new LruMap(2_000);
+    /** Creator wallets of launches this state saw — the dev label's evidence. */
+    this.devs = new LruSet(50_000);
 
-    this.counts = { launches: 0, tradesSeen: 0, whales: 0, journaled: 0, signals: 0, graded: 0, exits: 0 };
+    this.counts = { launches: 0, tradesSeen: 0, whales: 0, journaled: 0, signals: 0, graded: 0, exits: 0, behaviours: 0 };
   }
 
   /**
@@ -81,6 +84,7 @@ export class RadarState {
     if (this.launches.has(launch.mint)) return;
     const row = { ...launch, at: receivedAt };
     this.launches.set(launch.mint, row);
+    if (typeof launch.dev === "string" && launch.dev) this.devs.add(launch.dev);
     this.counts.launches++;
     this.emit({ kind: "launch", launch: row });
   }
@@ -135,8 +139,10 @@ export class RadarState {
     // The exit check also reads the position BEFORE the fill: what fraction
     // of what the wallet held did this sell let go of.
     const heldBefore = w.positions.get(trade.mint)?.heldTok ?? 0;
+    const prevFillTs = w.lastFillTs;
 
-    applyFill(w, { mint: trade.mint, isBuy: trade.isBuy, sol: trade.sol, tokens: trade.tokens, ts: trade.chainTs });
+    const fillLike = { mint: trade.mint, isBuy: trade.isBuy, sol: trade.sol, tokens: trade.tokens, ts: trade.chainTs };
+    applyFill(w, fillLike);
     this.counts.journaled++;
 
     this.emit({
@@ -152,7 +158,13 @@ export class RadarState {
         venue: trade.venue ?? "pumpfun",
       },
     });
-    this.emit({ kind: "wallet", row: walletRow(trade.user, w), settledSells: w.settledSells });
+    this.emit({ kind: "wallet", row: this.rowOf(trade.user, w), settledSells: w.settledSells });
+
+    // The behaviour reads: what this fill meant, fired once at a threshold.
+    for (const b of detectBehaviour(w, fillLike, prevFillTs)) {
+      this.counts.behaviours++;
+      this.emit({ kind: "behaviour", behaviour: b.kind, wallet: trade.user, mint: trade.mint, sol: Number(trade.sol.toFixed(9)), at: trade.chainTs, read: b });
+    }
 
     if (fires) {
       this.counts.signals++;
@@ -350,7 +362,7 @@ export class RadarState {
       const w = this.tracked.get(rec.wallet);
       if (w) {
         applyFollowGrade(w, ret);
-        this.emit({ kind: "wallet", row: walletRow(rec.wallet, w), settledSells: w.settledSells });
+        this.emit({ kind: "wallet", row: this.rowOf(rec.wallet, w), settledSells: w.settledSells });
       }
     }
     this.emit({
@@ -426,10 +438,15 @@ export class RadarState {
     }
   }
 
+  /** A wallet's row with what only the state knows: whether it created a token here. */
+  rowOf(address, w) {
+    return walletRow(address, w, { isDev: this.devs.has(address) });
+  }
+
   /** Top wallets by score, for the snapshot and the leaderboard push. */
   top(n = 10) {
     return [...this.tracked.entries()]
-      .map(([a, w]) => walletRow(a, w))
+      .map(([a, w]) => this.rowOf(a, w))
       .sort((x, y) => y.score - x.score || y.total_trades - x.total_trades)
       .slice(0, n);
   }

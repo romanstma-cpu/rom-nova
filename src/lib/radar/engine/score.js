@@ -18,7 +18,8 @@
 // five minutes later to someone who bought on the alert — the follower
 // return, graded by state.js from the same stream and folded in here.
 
-import { clamp } from "./util.js";
+import { classifyWallet } from "./behaviour.js";
+import { clamp, medianOf } from "./util.js";
 
 /**
  * @typedef {object} Position
@@ -41,12 +42,29 @@ import { clamp } from "./util.js";
  * @property {number[]} holds         last HOLD_RING settled hold durations, ms
  * @property {number[]} followRets    last FOLLOW_RING graded 5-minute follower returns
  * @property {number} signalsGraded   every 5-minute grade ever folded in
+ * @property {number[]} rets          last RET_RING per-settled-sell ROIs, for consistency
+ * @property {number} peakRealizedSol high-water mark of realized PNL
+ * @property {number} maxDrawdownSol  deepest fall from that mark, positive number
+ * @property {RecentFill[]} recent    last RECENT_RING fills, for behaviour reads
+ * @property {number} lastFillTs      chain time of the last fill, 0 before any
  * @property {Map<string, Position>} positions by mint
+ *
+ * @typedef {object} RecentFill
+ * @property {string} mint
+ * @property {boolean} isBuy
+ * @property {number} sol
+ * @property {number} tokens
+ * @property {number} ts
  */
 
 /** Samples kept per wallet for the medians. Small on purpose: a wallet changes. */
 export const HOLD_RING = 30;
 export const FOLLOW_RING = 30;
+export const RET_RING = 100;
+/** Fills kept for the behaviour reads — a busy bot's last hour, a human's last week. */
+export const RECENT_RING = 60;
+/** Settled sells before a consistency figure is shown at all. */
+export const MIN_CONSISTENCY_SELLS = 5;
 
 /** @returns {WalletStats} */
 export function newWallet(now) {
@@ -64,6 +82,11 @@ export function newWallet(now) {
     holds: [],
     followRets: [],
     signalsGraded: 0,
+    rets: [],
+    peakRealizedSol: 0,
+    maxDrawdownSol: 0,
+    recent: [],
+    lastFillTs: 0,
     positions: new Map(),
   };
 }
@@ -88,6 +111,9 @@ function pushRing(ring, v, cap) {
 export function applyFill(w, fill) {
   w.totalTrades++;
   w.lastActive = fill.ts;
+  w.lastFillTs = fill.ts;
+  w.recent.push({ mint: fill.mint, isBuy: fill.isBuy, sol: fill.sol, tokens: fill.tokens, ts: fill.ts });
+  if (w.recent.length > RECENT_RING) w.recent.shift();
   let pos = w.positions.get(fill.mint);
 
   if (fill.isBuy) {
@@ -124,13 +150,20 @@ export function applyFill(w, fill) {
 
   w.settledSells++;
   w.realizedSol += realized;
-  w.roiSum += basis > 0 ? realized / basis : 0;
+  const roi = basis > 0 ? realized / basis : 0;
+  w.roiSum += roi;
+  pushRing(w.rets, roi, RET_RING);
   if (realized > 0) {
     w.wins++;
     w.grossProfitSol += realized;
   } else {
     w.grossLossSol += -realized;
   }
+  // Drawdown on the realized curve: how far the running total fell from its
+  // best, the figure a copier feels in the stomach before the win rate.
+  if (w.realizedSol > w.peakRealizedSol) w.peakRealizedSol = w.realizedSol;
+  const dd = w.peakRealizedSol - w.realizedSol;
+  if (dd > w.maxDrawdownSol) w.maxDrawdownSol = dd;
   // Hold time is measured on settled sells only — the same fills the score
   // trusts — from the buy that opened the round trip.
   if (Number.isFinite(pos.firstBuyTs)) pushRing(w.holds, Math.max(0, fill.ts - pos.firstBuyTs), HOLD_RING);
@@ -188,17 +221,36 @@ export function avgRoiOf(w) {
   return w.settledSells > 0 ? w.roiSum / w.settledSells : 0;
 }
 
-/** @param {number[]} xs @returns {number | null} the median, null of nothing */
-export function medianOf(xs) {
-  if (xs.length === 0) return null;
-  const s = [...xs].sort((a, b) => a - b);
-  const mid = s.length >> 1;
-  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-}
+export { medianOf };
 
 /** @param {WalletStats} w @returns {number | null} median settled hold, ms; null until one settles */
 export function medianHoldMs(w) {
   return medianOf(w.holds);
+}
+
+/** @param {WalletStats} w @returns {number | null} mean settled hold, ms */
+export function avgHoldMs(w) {
+  if (w.holds.length === 0) return null;
+  return w.holds.reduce((a, b) => a + b, 0) / w.holds.length;
+}
+
+/**
+ * Consistency: mean per-trade ROI over its standard deviation — the shape
+ * of a Sharpe ratio applied to settled sells, NOT annualized and not
+ * risk-free-adjusted, which is why the row calls it consistency. Null
+ * until MIN_CONSISTENCY_SELLS have settled; a wallet whose every trade
+ * returned exactly the same thing has no spread and reads as null too.
+ *
+ * @param {WalletStats} w
+ * @returns {{ mean: number, sd: number, ratio: number | null } | null}
+ */
+export function consistencyOf(w) {
+  const n = w.rets.length;
+  if (n < MIN_CONSISTENCY_SELLS) return null;
+  const mean = w.rets.reduce((a, b) => a + b, 0) / n;
+  const variance = w.rets.reduce((a, r) => a + (r - mean) * (r - mean), 0) / (n - 1);
+  const sd = Math.sqrt(variance);
+  return { mean, sd, ratio: sd > 0 ? mean / sd : null };
 }
 
 /**
@@ -241,11 +293,18 @@ export function scoreOf(w) {
  * The row shape written to tracked_wallets and pushed over the socket.
  * @param {string} address
  * @param {WalletStats} w
+ * @param {{ isDev?: boolean }} [ctx] what the state knows that the ledger does not
  */
-export function walletRow(address, w) {
+export function walletRow(address, w, ctx = {}) {
   const follow = followStats(w);
   const hold = medianHoldMs(w);
+  const avgHold = avgHoldMs(w);
+  const consistency = consistencyOf(w);
   return {
+    labels: classifyWallet(w, ctx),
+    consistency: consistency?.ratio == null ? null : Number(consistency.ratio.toFixed(3)),
+    max_drawdown_sol: Number(w.maxDrawdownSol.toFixed(6)),
+    avg_hold_ms: avgHold === null ? null : Math.round(avgHold),
     wallet_address: address,
     score: scoreOf(w),
     win_rate: Number(winRateOf(w).toFixed(4)),

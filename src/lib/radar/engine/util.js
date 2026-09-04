@@ -45,6 +45,11 @@ export class LruSet {
     this.set = new Set();
   }
   /** @param {string} key @returns {boolean} true when the key was NEW */
+  /** @param {string} key */
+  has(key) {
+    return this.set.has(key);
+  }
+  /** @param {string} key */
   add(key) {
     if (this.set.has(key)) return false;
     this.set.add(key);
@@ -101,6 +106,14 @@ export class LruMap {
   keys() {
     return this.map.keys();
   }
+}
+
+/** @param {number[]} xs @returns {number | null} the median, null of nothing */
+export function medianOf(xs) {
+  if (xs.length === 0) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = s.length >> 1;
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
 /** Timestamped stdout line — Render's log view has no timestamps of its own. */

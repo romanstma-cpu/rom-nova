@@ -27,7 +27,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { fmtAge } from "@/lib/client";
+import { fmtAge, fmtUsd, useApi } from "@/lib/client";
 import { Hint } from "@/components/ui/Hint";
 import { PageTitle } from "@/components/ui/PageTitle";
 import { Score } from "@/components/ui/bits";
@@ -74,6 +74,23 @@ import type { RadarState } from "@/lib/radar/client";
 /** A median hold under this is a record nobody can copy: the wallet is out before a person is in. */
 const UNCOPYABLE_HOLD_MS = 60_000;
 
+/** What each earned label means, and how loudly to paint it. */
+const LABELS: Record<string, { title: string; cls: string }> = {
+  dev: { title: "created a token the radar saw launch; its trades in that token are the developer's, not a whale's", cls: "chip-warn" },
+  sniper: { title: "median settled hold under a minute: out before a person is in", cls: "chip-neg" },
+  flipper: { title: "median settled hold under thirty minutes", cls: "" },
+  holder: { title: "median settled hold over a day", cls: "chip-pos" },
+  accumulator: { title: "three or more buys of one token with no sell of it in its recent fills: building a position", cls: "chip-accent" },
+  distributor: { title: "recent sells outnumber buys two to one: unloading", cls: "chip-warn" },
+  "wash-like": { title: "four or more alternating buy/sell legs on one token inside ten minutes, ending flat: volume, not conviction", cls: "chip-neg" },
+};
+const BEHAVIOUR_LABEL: Record<string, { text: string; cls: string }> = {
+  dormant_buy: { text: "DORMANT WOKE", cls: "chip-warn" },
+  accumulation: { text: "ACCUMULATING", cls: "chip-accent" },
+  distribution: { text: "DISTRIBUTING", cls: "chip-warn" },
+  wash_like: { text: "WASH-LIKE", cls: "chip-neg" },
+};
+
 const shortAddr = (a: string) => (a.length <= 10 ? a : `${a.slice(0, 4)}…${a.slice(-4)}`);
 const fmtRet = (r: number) => `${r >= 0 ? "+" : ""}${(r * 100).toFixed(r > -0.1 && r < 0.1 ? 1 : 0)}%`;
 const retCls = (r: number) => (r >= 0.1 ? "pos" : r <= -0.1 ? "neg" : "dim");
@@ -101,11 +118,16 @@ interface RadarView {
     realized_pnl: number;
     settled_sells: number;
     unmeasured_sells: number;
+    labels: string[];
+    consistency: number | null;
+    max_drawdown_sol: number;
+    avg_hold_ms: number | null;
     median_hold_ms: number | null;
     follow_ret_5m: number | null;
     follow_hit_rate: number | null;
     signals_graded: number;
   }[];
+  behaviours: { behaviour: string; wallet: string; mint: string; sol: number; detail: string; at: number }[];
   whales: { wallet: string; mint: string; sol: number; launchAgeMs: number | null; at: number }[];
   launches: { mint: string; name?: string; symbol?: string; vSol: number | null; at: number }[];
   trades: { wallet_address: string; token_address: string; buy_or_sell: "buy" | "sell"; amount_sol: number; at: number }[];
@@ -119,6 +141,7 @@ const deviceView = (h: HunterSnapshot): RadarView => ({
   whales: h.whales,
   launches: h.launches,
   trades: h.trades,
+  behaviours: h.behaviours,
   asOf: h.asOf,
 });
 
@@ -129,6 +152,7 @@ const workerView = (w: RadarState): RadarView => ({
   whales: w.whales,
   launches: w.launches,
   trades: w.trades,
+  behaviours: w.behaviours,
   asOf: w.asOf,
 });
 
@@ -153,6 +177,9 @@ export default function RadarPage() {
   const follows = useSyncExternalStore(subscribeFollows, followsSnapshot, followsServerSnapshot);
   const plan = useSyncExternalStore(subscribeFollows, copyPlanSnapshot, copyPlanServerSnapshot);
   const notif = useSyncExternalStore(subscribeNotify, notifyState, notifyStateServer);
+  // The live cross-checked SOL price, for PNL in dollars beside PNL in SOL.
+  const { data: market } = useApi<{ reference: { priceUsd: number } | null }>("/api/market", 30_000);
+  const solUsd = market?.reference?.priceUsd ?? null;
   const [source, setSource] = useState<"device" | "worker">("device");
   const [bankrollDraft, setBankrollDraft] = useState<string | null>(null);
   /** An "I followed" form open on one signal: the entry price and size the reader confirms. */
@@ -219,7 +246,7 @@ export default function RadarPage() {
 
       <Hint
         id="radar"
-        summary="Armed, it watches every pump.fun launch and trade in this tab, tracks wallets that enter launches big, scores them on observed round trips, signals when a proven one buys, grades every signal from the same stream, and tells you when that wallet sells."
+        summary="Armed, it watches every pump.fun launch and trade in this tab, tracks wallets that enter launches big, scores and labels them from observed fills, signals when a proven one buys, grades every signal from the same stream, tells you when that wallet sells, and flags dormant wallets waking up and wash-like trading."
       >
         Armed, this app watches every pump.fun launch and every bonding-curve trade — two keyless public streams, read
         in this tab. A wallet that buys the threshold or more within ten minutes of a launch gets tracked; every
@@ -235,9 +262,15 @@ export default function RadarPage() {
         signal wallet&apos;s first sell after its signal is heard and announced, with how much it sold and at what
         return, because a copier who hears the buy and not the sell is holding the bag. <b>The copy desk</b> sizes
         each signal from a bankroll and a risk you set, opens the token in your own trading site, and keeps the
-        follows you record — your entry, the live mark, the wallet&apos;s exit, your close. Nothing here executes
-        trades or touches a wallet; every number in your record is one you typed. A fresh radar showing zero signals
-        is the honesty working.
+        follows you record — your entry, the live mark, the wallet&apos;s exit, your close. <b>Labels</b> are
+        earned, never assigned: sniper, flipper and holder from the median settled hold after three sells;
+        accumulator and distributor from a wallet&apos;s recent fills; wash-like from four alternating legs inside ten
+        minutes ending flat; dev when the radar saw the wallet create a token. <b>Behaviour reads</b> fire once at a
+        threshold — a wallet quiet for a week buying five SOL or more, a third buy with no sell, a third bare sell, a
+        fourth flat leg — and the two worth interrupting for reach the toasts. Consistency is the mean of per-trade
+        ROI over its spread, the shape of a Sharpe ratio on settled sells and not annualized; drawdown is the
+        deepest fall of realized PNL from its best. Nothing here executes trades or touches a wallet; every number in
+        your record is one you typed. A fresh radar showing zero signals is the honesty working.
       </Hint>
 
       {/* the switch */}
@@ -278,7 +311,7 @@ export default function RadarPage() {
             {hunter.counts.launches} launches · {hunter.counts.tradesSeen.toLocaleString()} trades observed ·{" "}
             {hunter.counts.whales} whales discovered · {hunter.counts.tracked} tracked ·{" "}
             {hunter.counts.journaled} fills journaled · {hunter.counts.signals} signals · {hunter.counts.graded} grades ·{" "}
-            {hunter.counts.exits} exits this session
+            {hunter.counts.exits} exits · {hunter.counts.behaviours} behaviour reads this session
           </div>
         )}
         {(hunter.hydrated.wallets > 0 || hunter.hydrated.fills > 0) && (
@@ -588,8 +621,20 @@ export default function RadarPage() {
                       <Link href={`/whale?a=${w.wallet_address}`} className="link">
                         {shortAddr(w.wallet_address)}
                       </Link>
+                      {w.labels.length > 0 && (
+                        <div className="flex gap-1 flex-wrap mt-0.5">
+                          {w.labels.map((l) => (
+                            <span key={l} className={`chip text-[8.5px] ${LABELS[l]?.cls ?? ""}`} title={LABELS[l]?.title}>
+                              {l}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </td>
-                    <td className="text-right px-2">
+                    <td
+                      className="text-right px-2"
+                      title={`consistency ${w.consistency === null ? "n/a (needs five settled sells)" : w.consistency.toFixed(2)}: mean over spread of per-trade ROI, not annualized. Max drawdown ${w.max_drawdown_sol.toFixed(2)} SOL from the realized high-water mark${w.avg_hold_ms !== null ? `. Mean hold ${fmtHold(w.avg_hold_ms)}` : ""}`}
+                    >
                       <Score value={w.score} width={40} />
                     </td>
                     <td className="text-right px-2">
@@ -609,7 +654,13 @@ export default function RadarPage() {
                       {w.median_hold_ms === null ? "—" : fmtHold(w.median_hold_ms)}
                     </td>
                     <td className="text-right px-2">{(w.win_rate * 100).toFixed(0)}%</td>
-                    <td className={`text-right px-2 ${w.realized_pnl >= 0 ? "pos" : "neg"}`}>{w.realized_pnl.toFixed(2)}</td>
+                    <td className={`text-right px-2 ${w.realized_pnl >= 0 ? "pos" : "neg"}`}>
+                      {w.realized_pnl.toFixed(2)}
+                      <div className="text-[9.5px] faint" title="dollars at the live cross-checked SOL price; dd is the deepest fall of realized PNL from its best">
+                        {solUsd !== null ? fmtUsd(w.realized_pnl * solUsd) : "—"}
+                        {w.max_drawdown_sol > 0 && ` · dd ${w.max_drawdown_sol.toFixed(2)}`}
+                      </div>
+                    </td>
                     <td className="text-right px-3 dim">
                       {w.settled_sells}/{w.unmeasured_sells}
                     </td>
@@ -762,8 +813,34 @@ export default function RadarPage() {
         )}
       </div>
 
-      {/* the pipeline filling */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      {/* the pipeline filling, and what the tracked wallets are doing */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+        <div className="panel flex flex-col">
+          <div className="px-3 pt-2.5 pb-1.5 panel-title">Behaviour · what tracked wallets are doing</div>
+          <div className="overflow-y-auto max-h-[300px]">
+            {view.behaviours.map((b, i) => (
+              <div key={`${b.wallet}-${b.at}-${i}`} className="px-3 py-1.5 border-b border-[rgba(27,35,51,0.5)] text-[11px] flex flex-col gap-0.5">
+                <div className="flex items-center gap-2 num">
+                  <span className={`chip text-[8.5px] ${BEHAVIOUR_LABEL[b.behaviour]?.cls ?? ""}`}>{BEHAVIOUR_LABEL[b.behaviour]?.text ?? b.behaviour}</span>
+                  <Link href={`/whale?a=${b.wallet}`} className="link">
+                    {shortAddr(b.wallet)}
+                  </Link>
+                  <span className="faint ml-auto">{fmtAge(Math.max(0, view.asOf - b.at))} ago</span>
+                </div>
+                <div className="dim text-[10.5px] leading-snug">
+                  {b.detail}
+                  {" · "}
+                  <Link href={`/token?m=${b.mint}`} className="link faint">
+                    {shortAddr(b.mint)}
+                  </Link>
+                </div>
+              </div>
+            ))}
+            {view.behaviours.length === 0 && (
+              <Waiting hunting={feeding} idle="A dormant wallet waking up big, a position being built or unloaded, a chart being painted." live="Reads fire once at a threshold, a third buy with no sell or a fourth flat leg, so this fills slowly and means it." />
+            )}
+          </div>
+        </div>
         <div className="panel flex flex-col">
           <div className="px-3 pt-2.5 pb-1.5 panel-title">Discoveries · whales entering launches</div>
           <div className="overflow-y-auto max-h-[300px]">

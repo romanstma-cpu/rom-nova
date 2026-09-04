@@ -14,6 +14,8 @@
 //   signal         a proven wallet buying — the reason this worker exists
 //   signal_outcome a grade for a signal: horizon, return vs the fill, peak
 //   exit           the signal wallet selling — first: true is the alert
+//   behaviour      a tracked wallet doing something worth a read: dormant_buy,
+//                  accumulation, distribution, wash_like
 //   wallet_update  a tracked wallet's row after a fill or a grade
 //   leaderboard    top wallets by score, when something changed
 //   status         every 30s
@@ -26,14 +28,14 @@ import { createServer } from "node:http";
 import { Server } from "socket.io";
 import { log } from "../../src/lib/radar/engine/util.js";
 
-const RING = { launches: 60, whales: 60, trades: 120, signals: 100 };
+const RING = { launches: 60, whales: 60, trades: 120, signals: 100, behaviours: 80 };
 
 export class Feed {
   /** @param {import("./config.js").Config} cfg @param {() => any} statusFn */
   constructor(cfg, statusFn) {
     this.cfg = cfg;
     this.statusFn = statusFn;
-    this.rings = { launches: [], whales: [], trades: [], signals: [] };
+    this.rings = { launches: [], whales: [], trades: [], signals: [], behaviours: [] };
     this.topWallets = [];
     this.clients = 0;
 
@@ -59,6 +61,7 @@ export class Feed {
         whales: this.rings.whales.slice(-30),
         trades: this.rings.trades.slice(-60),
         signals: this.rings.signals.slice(-50),
+        behaviours: this.rings.behaviours.slice(-40),
         wallets: this.topWallets,
         status: this.statusFn(),
       });
@@ -73,7 +76,7 @@ export class Feed {
     this.timer = setInterval(() => this.io.emit("status", this.statusFn()), 30_000);
   }
 
-  /** @param {"launches"|"whales"|"trades"|"signals"} ring @param {string} event @param {any} payload */
+  /** @param {"launches"|"whales"|"trades"|"signals"|"behaviours"} ring @param {string} event @param {any} payload */
   push(ring, event, payload) {
     const r = this.rings[ring];
     r.push(payload);

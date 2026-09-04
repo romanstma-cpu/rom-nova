@@ -1029,6 +1029,18 @@ an exit. **Fee honesty.** The copy plan carries `costPct` (1 / 2.5 / 5);
 the desk shows net returns with gross in the tooltip; `copyRecord` nets
 before counting hits and summing SOL.
 
+### 🚢 1.20.0 SHIPPED and proven (2026-09-04 ~6:40 PM)
+
+`9fe2ced` (8 files, +496/−12) → `a4a2292` (1.20.0) → tag → CI green.
+Installer SHA256 `289c8f06…51fc` = GitHub digest = SHA256SUMS; latest.yml
+1.20.0; 83,314,671 bytes. Site `38bc7ad`, Pages built, live 3×1.20.0 /
+0×1.19.0, 1,514-test band, the signal record on live /track. Desktop
+1.20.0.0: packaged track HTML carries the record, titled window, 4 procs
+→ 0, leveldb LOG 18:38. No engine or worker change, so Render correctly
+did not redeploy; the worker at 52 minutes had 32 signals, 96 grades and
+3 patches persisted, Jupiter 51 calls / 0 failures against DexScreener
+34 / 17. 783 tests.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

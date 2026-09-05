@@ -54,8 +54,6 @@ import type {
   StrategyProfileId,
 } from "../types";
 
-const HOUR = 3_600_000;
-
 /**
  * How long after a `signal_created` event the same mint stays quiet.
  *

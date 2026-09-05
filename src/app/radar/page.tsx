@@ -183,7 +183,8 @@ export default function RadarPage() {
   // The live cross-checked SOL price, for PNL in dollars beside PNL in SOL.
   const { data: market } = useApi<{ reference: { priceUsd: number } | null }>("/api/market", 30_000);
   const solUsd = market?.reference?.priceUsd ?? null;
-  const [source, setSource] = useState<"device" | "worker">("device");
+  /** The reader's choice of plane, or "auto": the worker whenever it is the only one feeding. */
+  const [sourceChoice, setSourceChoice] = useState<"auto" | "device" | "worker">("auto");
   const [bankrollDraft, setBankrollDraft] = useState<string | null>(null);
   /** An "I followed" form open on one signal: the entry price and size the reader confirms. */
   const [followDraft, setFollowDraft] = useState<{ key: string; price: string; size: string } | null>(null);
@@ -204,6 +205,11 @@ export default function RadarPage() {
   const [notesOpen, setNotesOpen] = useState<string | null>(null);
 
   const workerUp = worker.phase === "connected";
+  // Which plane is on screen: the reader's choice, or — untouched — the
+  // worker whenever it is the only one feeding, so a connected radar never
+  // opens on an empty device view.
+  const armedNow = hunter.phase === "hunting" || hunter.phase === "starting";
+  const source: "device" | "worker" = sourceChoice === "auto" ? (workerUp && !armedNow ? "worker" : "device") : sourceChoice;
   // Follow counts and notes exist only where there are readers to count: a
   // gated worker, this reader signed in, and the worker's plane on screen.
   const communityOn = source === "worker" && workerUp && acct.phase === "in" && !!acct.hosted && acct.hosted.access !== "open";
@@ -434,14 +440,14 @@ export default function RadarPage() {
           <button
             type="button"
             className={`chip text-[10px] cursor-pointer ${source === "device" ? "chip-accent" : ""}`}
-            onClick={() => setSource("device")}
+            onClick={() => setSourceChoice("device")}
           >
             THIS DEVICE
           </button>
           <button
             type="button"
             className={`chip text-[10px] cursor-pointer ${source === "worker" ? "chip-accent" : ""}`}
-            onClick={() => setSource("worker")}
+            onClick={() => setSourceChoice("worker")}
           >
             REMOTE WORKER
           </button>

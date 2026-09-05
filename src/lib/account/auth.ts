@@ -206,6 +206,22 @@ function messageOf(body: unknown, fallback: string): string {
   return fallback;
 }
 
+/**
+ * GoTrue's words are for the operator; these are for the reader. The
+ * first one is the common case on a fresh radar: the operator's mail
+ * domain is still verifying, and every code fails to send until it is.
+ */
+const FRIENDLY_AUTH: [RegExp, string][] = [
+  [/error sending .*email|smtp|mailer/i, "the radar's email service could not send the code — if the operator's mail domain is still being verified, try again in a few minutes"],
+  [/rate limit|too many/i, "too many codes requested — wait a minute and try again"],
+  [/signups? not allowed|disabled/i, "this radar is not accepting new sign-ins"],
+  [/expired|invalid/i, "that code was not accepted — codes expire after an hour; request a fresh one"],
+];
+export function friendlyAuthError(raw: string): string {
+  for (const [re, text] of FRIENDLY_AUTH) if (re.test(raw)) return text;
+  return raw;
+}
+
 /** A session out of a token response — /verify and /token answer in the same shape. */
 function sessionOf(p: AuthProvider, body: unknown): AccountSession | null {
   const o = (body ?? {}) as Record<string, unknown>;
@@ -282,7 +298,7 @@ export async function requestCode(email: string, fetchImpl: Fetch = fetch): Prom
     if (!r.ok) {
       notify({
         busy: false,
-        error: r.status === 429 ? "too many codes requested — wait a minute and try again" : messageOf(r.body, `sign-in refused (${r.status})`),
+        error: r.status === 429 ? "too many codes requested — wait a minute and try again" : friendlyAuthError(messageOf(r.body, `sign-in refused (${r.status})`)),
       });
       return false;
     }
@@ -311,7 +327,7 @@ export async function verifyCode(code: string, fetchImpl: Fetch = fetch): Promis
     if (!s) {
       notify({
         busy: false,
-        error: r.ok ? "the sign-in service returned no session" : messageOf(r.body, "that code was not accepted — codes expire after an hour"),
+        error: r.ok ? "the sign-in service returned no session" : friendlyAuthError(messageOf(r.body, "that code was not accepted — codes expire after an hour")),
       });
       return false;
     }

@@ -301,6 +301,16 @@ function openSocket(url: string) {
     const o = (g ?? {}) as Record<string, unknown>;
     const gate: RadarGate = o.status === 401 ? "signin" : o.status === 402 ? "subscribe" : "unavailable";
     notify({ phase: "error", error: str(o.reason) || "the radar closed the connection", gate });
+    // A session that expired mid-stream: the token refreshes on the next
+    // attempt, so make one, once, before asking the reader to sign in again.
+    if (gate === "signin") {
+      setTimeout(() => {
+        if (socket !== s || !state.enabled || holds === 0) return;
+        void accessToken().then((t) => {
+          if (t && socket === s) openSocket(url);
+        });
+      }, 1_500);
+    }
   });
   s.on("disconnect", (reason) => {
     if (reason === "io server disconnect") {

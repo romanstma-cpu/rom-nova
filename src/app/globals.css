@@ -185,6 +185,8 @@ body::after {
 
 .chip-pos { border-color: rgba(46, 230, 168, 0.35); color: var(--pos); background: rgba(46, 230, 168, 0.07); }
 .chip-neg { border-color: rgba(255, 77, 109, 0.35); color: var(--neg); background: rgba(255, 77, 109, 0.07); }
+/* The same red, by the name two panels already reach for: a chip that warns of harm, not of a loss. */
+.chip-danger { border-color: rgba(255, 77, 109, 0.35); color: var(--neg); background: rgba(255, 77, 109, 0.07); }
 .chip-warn { border-color: rgba(255, 180, 84, 0.35); color: var(--warn); background: rgba(255, 180, 84, 0.07); }
 .chip-accent { border-color: rgba(56, 225, 255, 0.35); color: var(--accent); background: rgba(56, 225, 255, 0.07); }
 

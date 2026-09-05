@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-export const metadata = { title: "Disclaimer & Privacy — ROM Nova" };
+export const metadata = { title: "Disclaimer & Privacy" };
 
 export default function LegalPage() {
   return (

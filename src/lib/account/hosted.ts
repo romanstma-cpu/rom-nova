@@ -179,10 +179,22 @@ function errorOf(body: unknown): string | null {
 
 type Fetch = typeof fetch;
 
-export async function fetchHostedConfig(url: string, fetchImpl: Fetch = fetch): Promise<HostedConfig> {
-  const res = await fetchImpl(`${url}/config`);
-  if (!res.ok) throw new HostedError(res.status, `the radar answered ${res.status} to /config`);
-  return normHostedConfig(url, await res.json());
+/** A free Render worker asleep takes half a minute to wake; the page should say so, not hang. */
+const CONFIG_TIMEOUT_MS = 12_000;
+
+export async function fetchHostedConfig(url: string, fetchImpl: Fetch = fetch, timeoutMs = CONFIG_TIMEOUT_MS): Promise<HostedConfig> {
+  const ctl = typeof AbortController === "function" ? new AbortController() : null;
+  const timer = ctl ? setTimeout(() => ctl.abort(), timeoutMs) : null;
+  try {
+    const res = await fetchImpl(`${url}/config`, ctl ? { signal: ctl.signal } : undefined);
+    if (!res.ok) throw new HostedError(res.status, `the radar answered ${res.status} to /config`);
+    return normHostedConfig(url, await res.json());
+  } catch (err) {
+    if (ctl?.signal.aborted) throw new HostedError(504, "the radar did not answer in time — a radar that was asleep takes about a minute to wake; try again shortly");
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export async function fetchMe(url: string, token: string, fetchImpl: Fetch = fetch): Promise<HostedMe> {

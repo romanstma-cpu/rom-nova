@@ -199,9 +199,27 @@ export default function AccountPage() {
         </div>
         {signedIn ? (
           <>
-            <div className="text-[12px]">
-              Signed in as <span className="num">{acct.user?.email || acct.user?.id}</span>
-              {me?.user && me.user.id === acct.user?.id ? <span className="faint"> · recognised by the radar</span> : acct.meError ? <span className="warn"> · {acct.meError}</span> : null}
+            <div className="flex items-center gap-3 flex-wrap">
+              <span
+                className="w-9 h-9 rounded-full grid place-items-center text-[15px] font-semibold text-[var(--accent)] border border-[rgba(56,225,255,0.35)] bg-[rgba(56,225,255,0.08)] shrink-0"
+                aria-hidden="true"
+              >
+                {(acct.user?.email || "?").slice(0, 1).toUpperCase()}
+              </span>
+              <div className="min-w-0">
+                <div className="text-[12.5px] font-semibold num truncate">{acct.user?.email || acct.user?.id}</div>
+                <div className="text-[10.5px] faint">
+                  {me?.user && me.user.id === acct.user?.id
+                    ? hosted?.access === "subscription"
+                      ? me.entitled
+                        ? "recognised by the radar · plan active"
+                        : "recognised by the radar · no active plan"
+                      : "recognised by the radar"
+                    : acct.meError
+                      ? acct.meError
+                      : "signed in"}
+                </div>
+              </div>
             </div>
             <div className="flex gap-2 flex-wrap">
               <button type="button" className="btn text-[11px]" onClick={() => void signOut()} disabled={acct.busy}>

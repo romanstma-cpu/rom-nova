@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSyncExternalStore } from "react";
 import { DataModeChip } from "./DataModeChip";
+import { accountServerSnapshot, accountSnapshot, subscribeAccount } from "@/lib/account/auth";
 
 export type NavItem = { href: string; label: string; glyph: string; hint: string; sim?: boolean };
 
@@ -114,6 +115,8 @@ export function NavRail({ onNavigate }: { onNavigate?: () => void }) {
   const more = useSyncExternalStore(subscribeMore, readMore, moreServer) === "1";
   const showMore = more || inMore;
   const toggleMore = () => writeMore(showMore ? "0" : "1");
+  // A signed-in reader sees it on the rail without opening the page: one dot.
+  const signedIn = useSyncExternalStore(subscribeAccount, accountSnapshot, accountServerSnapshot).phase === "in";
 
   const link = (it: NavItem) => {
     const active = it.href === "/" ? here === "/" : here.startsWith(it.href);
@@ -132,6 +135,9 @@ export function NavRail({ onNavigate }: { onNavigate?: () => void }) {
       >
         <span className="w-4 text-center text-[13px] opacity-80">{it.glyph}</span>
         {it.label}
+        {it.href === "/account" && signedIn && (
+          <span className="ml-auto w-1.5 h-1.5 rounded-full bg-[var(--pos)] shadow-[0_0_6px_var(--pos)]" title="signed in" aria-label="signed in" />
+        )}
       </Link>
     );
   };

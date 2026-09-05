@@ -119,7 +119,13 @@ describe("account store", () => {
     await a.requestCode("a@b.co", fakeFetch(() => ({ status: 200, body: {} })).fetchImpl);
     const wrong = fakeFetch(() => ({ status: 403, body: { error_code: "otp_expired", msg: "Token has expired or is invalid" } }));
     expect(await a.verifyCode("000000", wrong.fetchImpl)).toBe(false);
-    expect(a.accountSnapshot().error).toBe("Token has expired or is invalid");
+    // GoTrue's words are translated for the reader
+    expect(a.accountSnapshot().error).toMatch(/not accepted.*fresh one/);
+    // the common case on a fresh radar: the operator's mail domain is still verifying
+    a.cancelCode();
+    const unsent = fakeFetch(() => ({ status: 500, body: { code: 500, error_code: "unexpected_failure", msg: "Error sending magic link email" } }));
+    expect(await a.requestCode("a@b.co", unsent.fetchImpl)).toBe(false);
+    expect(a.accountSnapshot().error).toMatch(/email service could not send the code/);
   });
 
   it("restores a stored session on the first read, and refreshes it before it expires", async () => {

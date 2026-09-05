@@ -12,6 +12,10 @@
 // Inline, not stacked: every page keeps its filter chips and controls on the
 // title row, and a lede on its own line would push them all down.
 
+// The browser tab is NOT set from here: Next's head handling rewrites
+// document.title after hydration, so a client-side effect loses. Each route
+// carries a server layout.tsx with `metadata.title`, merged into the root
+// template — the title is in the static HTML itself.
 export function PageTitle({ title, lede, className = "" }: { title: string; lede?: string; className?: string }) {
   return (
     <span className={`flex items-baseline gap-2.5 min-w-0 mr-1 ${className}`}>

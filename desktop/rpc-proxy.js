@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- Electron main process: CommonJS by nature */
 // Solana RPC, forwarded through the main process so it carries no Origin.
 //
 // WHY THIS EXISTS

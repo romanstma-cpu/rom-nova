@@ -17,13 +17,14 @@ const mono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://romapps.xyz/nova"),
-  title: "ROM Nova — Solana On-Chain Intelligence",
+  // Each route's layout.tsx supplies the %s; the root page keeps the default.
+  title: { default: "ROM Nova — Solana On-Chain Intelligence", template: "%s · ROM Nova" },
   description:
-    "An explainable Solana intelligence terminal: whale tracking, signal scoring, backtesting and a live 3D network — running on clearly-labeled simulated data. Analytics and decision support, not investment advice.",
+    "A Solana intelligence terminal: a Whale Radar that finds and scores whale wallets by itself and grades its own signals, live tokens and launches, launch forensics, a wallet ledger with a measured reputation, and a copy desk that holds no key. What is simulated is labelled. Analytics and decision support, not investment advice.",
   openGraph: {
     title: "ROM Nova — Solana On-Chain Intelligence",
     description:
-      "Follow simulated smart money, rank setups by evidence, and explore the market as a living 3D network. Part of ROM Apps.",
+      "See the whales, trust the numbers: a radar that discovers and grades whale wallets on its own, live launches triaged in a second, and a copy desk that never holds a key. Part of ROM Apps.",
     type: "website",
     siteName: "ROM Nova",
   },

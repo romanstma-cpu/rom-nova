@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- Electron main process: CommonJS by nature */
 // Does the desktop shell actually reach the archive?
 //
 // Run with the real Electron binary and the real protocol handler, because the

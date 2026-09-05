@@ -18,6 +18,10 @@
   --neg: #ff4d6d;
   --warn: #ffb454;
   --font-data: var(--font-mono, ui-monospace, monospace);
+  /* Short aliases. The galaxy legend reaches for these two names, which no
+     rule defined, so its chevron and footnote rendered in full text colour. */
+  --dim: var(--text-dim);
+  --faint: var(--text-faint);
 }
 
 html,

@@ -9,6 +9,8 @@ import { EventToasts } from "./EventToasts";
 import { AlertMonitor } from "./AlertMonitor";
 import { RadarArm } from "./RadarArm";
 import { dataMode } from "@/lib/providers/registry";
+import { APP_VERSION, RELEASES_URL } from "@/lib/version";
+import { desktopServerSnapshot, desktopSnapshot, installDesktopUpdate, subscribeDesktop } from "@/lib/desktop";
 
 /**
  * What going offline actually stops, computed from the same resolution the
@@ -68,6 +70,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
   // paint reads the real answer without a setState-in-effect round trip.
   const offline = useSyncExternalStore(subscribeOnline, readOffline, readOfflineServer);
   const offlineText = useSyncExternalStore(subscribeNever, readOfflineText, readOfflineTextServer);
+  // The desktop shell's update state, for the one banner worth interrupting
+  // with: a downloaded update, which installs on the next start whether or
+  // not the reader restarts now. In a browser this snapshot never changes.
+  const desk = useSyncExternalStore(subscribeDesktop, desktopSnapshot, desktopServerSnapshot);
+  const [updateLaterFor, setUpdateLaterFor] = useState<string | null>(null);
+  const [installError, setInstallError] = useState<string | null>(null);
+  const updateVersion = desk.update.version ?? "?";
+  const updateReady = desk.update.state === "ready" && updateLaterFor !== updateVersion;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -98,6 +108,25 @@ export function Shell({ children }: { children: React.ReactNode }) {
       {offline && (
         <div className="shrink-0 bg-[rgba(255,180,84,0.12)] border-b border-[rgba(255,180,84,0.3)] text-[var(--warn)] text-[11.5px] text-center py-1">
           {offlineText}
+        </div>
+      )}
+      {updateReady && (
+        <div className="shrink-0 bg-[rgba(56,225,255,0.08)] border-b border-[rgba(56,225,255,0.3)] text-[11.5px] px-4 py-1 flex items-center justify-center gap-3 flex-wrap">
+          <span>
+            <span className="text-[var(--accent)] font-semibold">ROM Nova {updateVersion}</span> is downloaded — it installs the
+            next time the app starts.
+          </span>
+          <button
+            type="button"
+            className="btn btn-primary text-[10.5px] py-0.5"
+            onClick={() => void installDesktopUpdate().then((r) => setInstallError(r.ok ? null : r.error))}
+          >
+            Restart now
+          </button>
+          <button type="button" className="btn text-[10.5px] py-0.5" onClick={() => setUpdateLaterFor(updateVersion)}>
+            Later
+          </button>
+          {installError && <span className="warn">{installError}</span>}
         </div>
       )}
       <div className="flex flex-1 min-h-0">
@@ -140,7 +169,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <span className="truncate">
           Analytics and decision support, not investment advice. Live and simulated data are labelled on every screen.
         </span>
-        <Link href="/legal" className="link shrink-0 ml-auto">
+        <a
+          href={RELEASES_URL}
+          target="_blank"
+          rel="noopener"
+          className="num shrink-0 ml-auto hover:text-[var(--text)]"
+          title="this build — release notes on GitHub"
+        >
+          v{APP_VERSION}
+        </a>
+        <Link href="/legal" className="link shrink-0">
           Disclaimer &amp; privacy
         </Link>
         <a href="https://romapps.xyz" className="link shrink-0" target="_blank" rel="noopener">

@@ -29,6 +29,11 @@ export const metadata: Metadata = {
     siteName: "ROM Nova",
   },
   robots: { index: true, follow: true },
+  // Installable from the browser: the manifest names the app, its icons and
+  // its start URL, so Chrome and Edge offer "Install ROM Nova" and a phone
+  // can pin it to the home screen with the app's own icon and colour.
+  manifest: process.env.NEXT_PUBLIC_STATIC === "1" ? "/nova/manifest.webmanifest" : "/manifest.webmanifest",
+  appleWebApp: { capable: true, title: "ROM Nova", statusBarStyle: "black-translucent" },
 };
 
 export const viewport = {

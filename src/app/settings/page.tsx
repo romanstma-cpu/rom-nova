@@ -22,6 +22,7 @@ import { foldAllHints, hintsServerSnapshot, hintsSnapshot, openHintCount, subscr
 import { introSeenServer, introSeenSnapshot, showIntroAgain, subscribeIntro } from "@/components/FirstRun";
 import { journalCounts, radarJournalReady } from "@/lib/radar/journal";
 import { forgetRadarJournal } from "@/lib/radar/hunter";
+import { AboutPanel } from "@/components/settings/AboutPanel";
 
 const PROVIDERS: { name: string; healthKey: string; env: string[]; role: string; keyless?: boolean }[] = [
   { name: "CoinGecko", healthKey: "coingecko", env: ["keyless (COINGECKO_API_KEY optional)"], role: "live SOL reference price + global market context — active by default", keyless: true },
@@ -223,6 +224,8 @@ export default function SettingsPage() {
         signatures with explicit per-trade confirmation, behind ENABLE_REAL_TRADING, and ships disabled. See{" "}
         <Link href="/legal" className="link">the disclaimer</Link> for the full data-honesty statement.
       </div>
+
+      <AboutPanel />
     </div>
   );
 }

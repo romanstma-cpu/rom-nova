@@ -10,6 +10,9 @@ import { nudgeStats } from "@/lib/alerts/cadence";
 import { ledgerSnapshot, ledgerSnapshotServer, subscribeLedger, FILL_CAP, WALLET_CAP } from "@/lib/ledger/store";
 import { MIN_OBSERVED_DAYS, MIN_ROUND_TRIPS } from "@/lib/ledger/reputation";
 import type { ProviderHealth } from "@/lib/types";
+import Link from "next/link";
+import { radarConfiguredUrl, radarServerSnapshot, radarSnapshot, subscribeRadar } from "@/lib/radar/client";
+import { HOSTED_RADAR_URL } from "@/lib/account/hosted";
 
 /** Ticking clock so a socket's last-frame age counts without a re-fetch. */
 function useNow(ms = 1000): number {
@@ -225,6 +228,90 @@ interface Status {
   };
 }
 
+/**
+ * The hosted radar — the one connection this tab makes that is not keyless,
+ * and the one this page did not list.
+ *
+ * Its socket is a page-mount hold, released on leaving the Whale Radar page,
+ * so from here it is usually closed. What this panel can say for certain is
+ * which worker the browser remembers, what the gate last answered, and the
+ * worker's own counts whenever a hold is alive right now.
+ */
+function HostedRadar() {
+  const r = useSyncExternalStore(subscribeRadar, radarSnapshot, radarServerSnapshot);
+  // Read after mount only: the page renders nothing until /api/status has
+  // answered, so this never runs during hydration.
+  const url = r.url || radarConfiguredUrl();
+  const counts = (r.health?.counts ?? {}) as Record<string, unknown>;
+  const n = (k: string) => (typeof counts[k] === "number" ? fmtNum(counts[k] as number) : "—");
+  const gateText =
+    r.gate === "signin"
+      ? "sign in to use this radar"
+      : r.gate === "subscribe"
+        ? "subscription required"
+        : r.gate === "unavailable"
+          ? "could not check your access"
+          : r.phase === "connected"
+            ? "open to this tab"
+            : "—";
+  const stateText =
+    r.phase === "connected" ? "● connected" : r.phase === "connecting" ? "○ connecting" : r.phase === "error" ? `○ ${r.error ?? "error"}` : "○ closed";
+  return (
+    <div className="panel">
+      <div className="panel-title px-3 pt-2.5 pb-1 flex items-baseline gap-2">
+        <span>Hosted radar</span>
+        <span className="faint text-[10px] normal-case tracking-normal">
+          the one connection here that is not keyless — a worker that hunts around the clock and streams what it finds; the
+          socket is held open only while the Whale Radar page is showing
+        </span>
+      </div>
+      {!url ? (
+        <div className="px-3 py-3 text-[11.5px] dim">
+          No worker is remembered in this browser. The in-app radar needs none; to read the hosted one at{" "}
+          <span className="num">{HOSTED_RADAR_URL}</span>, connect it from the{" "}
+          <Link href="/radar" className="link">
+            Whale Radar
+          </Link>{" "}
+          page.
+        </div>
+      ) : (
+        <table className="w-full text-[12px]">
+          <thead className="thead">
+            <tr>
+              <th className="text-left px-3 py-1.5 font-medium">Worker</th>
+              <th className="text-left px-2 font-medium">State</th>
+              <th className="text-left px-2 font-medium">Gate</th>
+              <th className="text-right px-2 font-medium">Tracked</th>
+              <th className="text-right px-2 font-medium">Signals</th>
+              <th className="text-right px-2 font-medium" title="tabs connected to the worker right now, this one included">
+                Readers
+              </th>
+              <th className="text-left px-3 font-medium">Coverage</th>
+            </tr>
+          </thead>
+          <tbody className="num">
+            <tr className="trow">
+              <td className="px-3 py-2 break-all" style={{ fontFamily: "var(--font-sans)" }}>
+                {url}
+              </td>
+              <td className={`px-2 ${r.phase === "connected" ? "pos" : r.phase === "error" ? "neg" : "faint"}`}>{stateText}</td>
+              <td className={`px-2 ${r.gate ? "warn" : "dim"}`} style={{ fontFamily: "var(--font-sans)" }}>
+                {gateText}
+              </td>
+              <td className="text-right px-2">{n("tracked")}</td>
+              <td className="text-right px-2">{n("signals")}</td>
+              <td className="text-right px-2">{n("clients")}</td>
+              <td className="px-3 dim" style={{ fontFamily: "var(--font-sans)" }}>
+                {r.coverage ?? (r.phase === "off" ? "read while the Whale Radar page is open" : "—")}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 export default function StatusPage() {
   const { data, error } = useApi<Status>("/api/status", 8000);
   if (!data) return <Empty>{error ? "Status endpoint unavailable — retrying automatically." : "CHECKING PROVIDERS…"}</Empty>;
@@ -353,6 +440,7 @@ export default function StatusPage() {
       </div>
 
       <LiveSockets />
+      <HostedRadar />
       <WalletLedger />
 
       <div className="panel p-3.5 text-[11.5px] dim leading-relaxed">

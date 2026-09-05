@@ -28,6 +28,8 @@
     "files": [
       "main.js",
       "rpc-proxy.js",
+      "bridge.js",
+      "window-state.js",
       "icon.ico"
     ],
     "extraResources": [

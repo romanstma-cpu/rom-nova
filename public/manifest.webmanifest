@@ -1,0 +1,16 @@
+{
+  "name": "ROM Nova",
+  "short_name": "Nova",
+  "description": "Solana on-chain intelligence: a whale radar that finds and grades wallets on its own, live launches triaged in seconds, and a copy desk that holds no key.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#04060a",
+  "theme_color": "#04060a",
+  "categories": ["finance", "utilities"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

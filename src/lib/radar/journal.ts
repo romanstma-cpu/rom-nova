@@ -46,6 +46,8 @@ export interface RadarSignalRow {
   /** the graded model's guess at the moment the signal fired, from a worker with a fitted card */
   model_p?: number | null;
   model_version?: string | null;
+  /** readers of the connected radar who recorded following this signal — a count, never a name */
+  followers?: number;
   ret_1m?: number | null;
   ret_5m?: number | null;
   ret_15m?: number | null;

@@ -25,7 +25,7 @@
 // repo) doing the same thing on a server around the clock. Same engine,
 // same grades, same honesty.
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { Fragment, useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { fmtAge, fmtUsd, useApi } from "@/lib/client";
 import { Hint } from "@/components/ui/Hint";
@@ -35,6 +35,8 @@ import { HeliusKeyCard } from "@/components/radar/HeliusKeyCard";
 import { accountServerSnapshot, accountSnapshot, loadHosted, subscribeAccount } from "@/lib/account/auth";
 import { HOSTED_RADAR_URL } from "@/lib/account/hosted";
 import { venueRows } from "@/lib/handoff/venues";
+import { communityServerSnapshot, communitySnapshot, setShareFollows, shareFollow, subscribeCommunity } from "@/lib/community/store";
+import { WalletNotes } from "@/components/radar/WalletNotes";
 import {
   holdRadar,
   radarConnect,
@@ -197,8 +199,14 @@ export default function RadarPage() {
     if (!accountSnapshot().hosted) void loadHosted(radarSnapshot().url || HOSTED_RADAR_URL);
   }, []);
   const links = venueRows(acct.hosted?.referrals ?? {});
+  const community = useSyncExternalStore(subscribeCommunity, communitySnapshot, communityServerSnapshot);
+  /** A tracked wallet whose reader notes are open. */
+  const [notesOpen, setNotesOpen] = useState<string | null>(null);
 
   const workerUp = worker.phase === "connected";
+  // Follow counts and notes exist only where there are readers to count: a
+  // gated worker, this reader signed in, and the worker's plane on screen.
+  const communityOn = source === "worker" && workerUp && acct.phase === "in" && !!acct.hosted && acct.hosted.access !== "open";
   const view = source === "worker" && workerUp ? workerView(worker) : deviceView(hunter);
   const hunting = hunter.phase === "hunting";
   const starting = hunter.phase === "starting";
@@ -489,6 +497,11 @@ export default function RadarPage() {
                           p {Math.round(s.model_p * 100)}%
                         </span>
                       )}
+                      {typeof s.followers === "number" && s.followers > 0 && (
+                        <span className="chip text-[9px]" title="readers of this radar who recorded following this signal — a count, never a name or an amount">
+                          {s.followers} reader{s.followers === 1 ? "" : "s"} followed
+                        </span>
+                      )}
                       {typeof s.peak_ret_1h === "number" && (
                         <Grade label="peak" ret={s.peak_ret_1h} title="the best price seen inside the hour — what a perfect exit got, which nobody gets" />
                       )}
@@ -572,6 +585,8 @@ export default function RadarPage() {
                           sizeSol: Number(followDraft.size) || 0,
                         });
                         if (f) setFollowDraft(null);
+                        // One more in the count for other readers, when this reader chose to be counted.
+                        if (f && communityOn && community.share) void shareFollow(worker.url, key);
                       }}
                     >
                       <label className="flex items-center gap-1 faint">
@@ -597,6 +612,12 @@ export default function RadarPage() {
                         />
                         SOL
                       </label>
+                      {communityOn && (
+                        <label className="flex items-center gap-1 faint" title="Other readers of this radar see one more in the count on this signal. A number — never your name, price or size.">
+                          <input type="checkbox" checked={community.share} onChange={(e) => setShareFollows(e.target.checked)} />
+                          count me for other readers
+                        </label>
+                      )}
                       <button type="submit" className="btn btn-primary text-[10px]" disabled={!(Number(followDraft.price) > 0)}>
                         Record
                       </button>
@@ -655,7 +676,8 @@ export default function RadarPage() {
               </thead>
               <tbody className="num">
                 {view.wallets.map((w) => (
-                  <tr key={w.wallet_address} className="trow">
+                  <Fragment key={w.wallet_address}>
+                  <tr className="trow">
                     <td className="px-3 py-1.5">
                       <Link href={`/whale?a=${w.wallet_address}`} className="link">
                         {shortAddr(w.wallet_address)}
@@ -668,6 +690,15 @@ export default function RadarPage() {
                             </span>
                           ))}
                         </div>
+                      )}
+                      {communityOn && (
+                        <button
+                          type="button"
+                          className="text-[9.5px] link mt-0.5 block"
+                          onClick={() => setNotesOpen(notesOpen === w.wallet_address ? null : w.wallet_address)}
+                        >
+                          {notesOpen === w.wallet_address ? "hide notes" : "reader notes"}
+                        </button>
                       )}
                     </td>
                     <td
@@ -704,6 +735,14 @@ export default function RadarPage() {
                       {w.settled_sells}/{w.unmeasured_sells}
                     </td>
                   </tr>
+                  {communityOn && notesOpen === w.wallet_address && (
+                    <tr>
+                      <td colSpan={7} className="px-3 pb-2">
+                        <WalletNotes url={worker.url} wallet={w.wallet_address} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
                 {view.wallets.length === 0 && (
                   <tr>

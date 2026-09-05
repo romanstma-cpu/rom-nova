@@ -63,6 +63,24 @@ Rows carry the same fields the socket's events do; a signal's `ret_1m`,
 intelligence columns; `unmeasured_sells` says how much of its record the
 score does NOT stand on.
 
+Community, on a gated radar only (an open one has no readers to count),
+with a session or a key, under the same rate limit:
+
+| method   | path                               | body / result                                                        |
+| -------- | ---------------------------------- | -------------------------------------------------------------------- |
+| `POST`   | `/api/v1/follows`                  | `{"signal_key": "…"}` → `{signal_key, followers}` — one per reader   |
+| `DELETE` | `/api/v1/follows/<signal_key>`     | `{signal_key, followers}`                                            |
+| `GET`    | `/api/v1/follows?keys=a,b,c`       | `counts`: followers per key (up to 100)                              |
+| `GET`    | `/api/v1/wallets/<address>/notes`  | `notes`: id, handle (a pseudonym), body, created_at, mine            |
+| `POST`   | `/api/v1/wallets/<address>/notes`  | `{"body": "…"}` (≤ 280 chars, 3 per reader per wallet, 10 an hour)  |
+| `DELETE` | `/api/v1/notes/<id>`               | `{"deleted": id}` — one's own only                                   |
+
+A follow is a count, never a name or an amount; the socket carries
+`signal_followers` `{signal_key, followers}` as they change, and signal
+rows carry `followers`. A note's `handle` is derived from the reader's id
+and cannot be reversed; the operator hides a note by setting `hidden` on
+its row.
+
 Key management, with a **session** token (a key may not mint a key):
 
 | method   | path                | body / result                                  |

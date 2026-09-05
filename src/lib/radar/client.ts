@@ -190,6 +190,7 @@ function normSignal(s: unknown): RadarSignal {
     launch_age_ms: numOrNull(o.launch_age_ms),
     model_p: numOrNull(o.model_p),
     model_version: typeof o.model_version === "string" ? o.model_version : null,
+    followers: num(o.followers),
     ret_1m: numOrNull(o.ret_1m),
     ret_5m: numOrNull(o.ret_5m),
     ret_15m: numOrNull(o.ret_15m),
@@ -366,6 +367,11 @@ function openSocket(url: string) {
       real: true,
       source: "radar-worker",
     });
+  });
+  // One more reader counted on a signal: a number on the card, nothing else.
+  s.on("signal_followers", (raw: unknown) => {
+    const o = (raw ?? {}) as Record<string, unknown>;
+    if (str(o.signal_key)) patchSignal(str(o.signal_key), { followers: num(o.followers) });
   });
   s.on("signal_outcome", (raw: unknown) => {
     const o = (raw ?? {}) as Record<string, unknown>;

@@ -18,6 +18,7 @@ import { Api } from "./api.js";
 import { ApiKeys, RateLimiter } from "./apikeys.js";
 import { AuthVerifier } from "./auth.js";
 import { Billing } from "./billing.js";
+import { Community } from "./community.js";
 import { loadConfig } from "./config.js";
 import { Db, HORIZON_COLUMN } from "./db.js";
 import { dexScreenerLookup, dexScreenerStatus } from "./dexscreener.js";
@@ -81,6 +82,14 @@ function status() {
 // The graded model: trained on this worker's own history, judged forward.
 const model = new ModelDesk(db);
 
+// Community: a follow becomes a count on the signal for everyone connected.
+const community = new Community(db, {
+  onFollowers: (key, followers) => {
+    feed.patchSignal(key, { followers });
+    feed.io.emit("signal_followers", { signal_key: key, followers });
+  },
+});
+
 // The HTTP API reads the feed's rings and the state's wallets on demand;
 // the closures resolve at request time, after `feed` exists.
 const api = new Api({
@@ -98,6 +107,7 @@ const api = new Api({
     },
     model: () => model.full(),
   },
+  community,
 });
 feed = new Feed(cfg, status, { access, billing, api });
 
@@ -192,7 +202,7 @@ async function emitSignal(e) {
   // sees it, so the grade that lands later judges it without hindsight.
   Object.assign(s, model.annotate(s));
   db.addSignal(s);
-  feed.push("signals", "signal", { ...s, settled_sells: e.settledSells });
+  feed.push("signals", "signal", { ...s, settled_sells: e.settledSells, followers: 0 });
   log(`SIGNAL score ${s.wallet_score} wallet ${short(s.wallet_address)} bought ${s.buy_amount_sol} SOL of ${s.token_name ?? short(s.token_address)}`);
 }
 

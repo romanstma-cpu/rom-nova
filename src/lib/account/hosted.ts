@@ -214,6 +214,66 @@ export async function fetchPortalUrl(url: string, token: string, fetchImpl: Fetc
   return r.url;
 }
 
+// ------------------------------------------------------------ community
+
+export interface HostedNote {
+  id: string;
+  /** a stable pseudonym, never a name */
+  handle: string;
+  body: string;
+  created_at: string | null;
+  mine: boolean;
+}
+
+export function normHostedNote(raw: unknown): HostedNote | null {
+  const o = obj(raw);
+  if (!o || !str(o.id)) return null;
+  return { id: str(o.id), handle: str(o.handle), body: str(o.body), created_at: strOrNull(o.created_at), mine: o.mine === true };
+}
+
+async function communityRequest(url: string, path: string, token: string, init: { method: string; body?: unknown }, fetchImpl: Fetch): Promise<unknown> {
+  const res = await fetchImpl(`${url}${path}`, {
+    method: init.method,
+    headers: { authorization: `Bearer ${token}`, ...(init.body !== undefined ? { "content-type": "application/json" } : {}) },
+    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+  });
+  const body: unknown = await res.json().catch(() => null);
+  if (!res.ok) throw new HostedError(res.status, errorOf(body) ?? `the radar answered ${res.status}`);
+  return body;
+}
+
+/** "I followed this signal", as a count for everyone else. Returns the count. */
+export async function postFollowShare(url: string, token: string, signalKey: string, fetchImpl: Fetch = fetch): Promise<number> {
+  const o = obj(await communityRequest(url, "/api/v1/follows", token, { method: "POST", body: { signal_key: signalKey } }, fetchImpl));
+  return numOrNull(o?.followers) ?? 0;
+}
+
+export async function deleteFollowShare(url: string, token: string, signalKey: string, fetchImpl: Fetch = fetch): Promise<number> {
+  const o = obj(await communityRequest(url, `/api/v1/follows/${encodeURIComponent(signalKey)}`, token, { method: "DELETE" }, fetchImpl));
+  return numOrNull(o?.followers) ?? 0;
+}
+
+export async function fetchNotes(url: string, token: string, wallet: string, fetchImpl: Fetch = fetch): Promise<HostedNote[]> {
+  const o = obj(await communityRequest(url, `/api/v1/wallets/${encodeURIComponent(wallet)}/notes`, token, { method: "GET" }, fetchImpl));
+  return Array.isArray(o?.notes) ? o!.notes.map(normHostedNote).filter((n): n is HostedNote => n !== null) : [];
+}
+
+export async function postNote(url: string, token: string, wallet: string, body: string, fetchImpl: Fetch = fetch): Promise<HostedNote> {
+  const n = normHostedNote(await communityRequest(url, `/api/v1/wallets/${encodeURIComponent(wallet)}/notes`, token, { method: "POST", body: { body } }, fetchImpl));
+  if (!n) throw new HostedError(502, "the radar returned no note");
+  return n;
+}
+
+export async function deleteNoteRemote(url: string, token: string, id: string, fetchImpl: Fetch = fetch): Promise<boolean> {
+  try {
+    await communityRequest(url, `/api/v1/notes/${encodeURIComponent(id)}`, token, { method: "DELETE" }, fetchImpl);
+    return true;
+  } catch (err) {
+    if (err instanceof HostedError && err.status === 404) return false;
+    throw err;
+  }
+}
+
 const ZERO_DECIMAL = new Set(["jpy", "krw", "vnd", "clp", "isk", "huf", "twd"]);
 
 /** "$9.00 / month", from what Stripe said — or null when the radar had no price to show. */

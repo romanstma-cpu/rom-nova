@@ -153,6 +153,18 @@ journal. `schema.sql` (or `migrations/005-model.sql`) adds the columns;
 without them the model still trains on what exists, and the worker says so
 under `db.model_columns`.
 
+## Community (1.24.0)
+
+The cheapest honest version, and only where there are readers to count
+(`RADAR_ACCESS` account or subscription): a reader recording "I followed"
+on the app's copy desk can be counted on the signal for every other
+reader — a number, never a name or an amount, and their choice, remembered
+in their browser — and signed-in readers can leave short notes on a
+tracked wallet under a pseudonym derived from their id (three per wallet,
+ten an hour). `schema.sql` (or `migrations/006-community.sql`) adds the
+`follows` and `notes` tables; `/health` → `db.community` says when.
+Hide a note by setting `hidden = true` on its row in Supabase.
+
 ## What triggers a deploy
 
 The Blueprint's `buildFilter` deploys on changes under `worker/`, under

@@ -78,6 +78,44 @@ export function fakeDb(rows: SubscriptionRow[] = [], opts: { signals?: Record<st
       const k = apiKeys.get(id);
       if (k) k.last_used_at = at;
     },
+    communityReady: true as boolean | null,
+    follows: new Map<string, Record<string, unknown>>(),
+    notes: new Map<string, Record<string, unknown>>(),
+    async addFollow(row: { user_id: string; signal_key: string; at: string }): Promise<void> {
+      this.follows.set(`${row.user_id}|${row.signal_key}`, row);
+    },
+    async removeFollow(userId: string, key: string): Promise<void> {
+      this.follows.delete(`${userId}|${key}`);
+    },
+    async countFollows(keys: string[]): Promise<Map<string, number>> {
+      calls.reads++;
+      const out = new Map<string, number>();
+      for (const f of this.follows.values()) {
+        const k = String(f.signal_key);
+        if (keys.includes(k)) out.set(k, (out.get(k) ?? 0) + 1);
+      }
+      return out;
+    },
+    async listNotes(wallet: string, limit: number): Promise<Record<string, unknown>[]> {
+      return [...this.notes.values()]
+        .filter((n) => n.wallet_address === wallet && !n.hidden)
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+        .slice(0, limit);
+    },
+    async countUserNotes(userId: string, wallet: string): Promise<number> {
+      return [...this.notes.values()].filter((n) => n.user_id === userId && n.wallet_address === wallet).length;
+    },
+    async addNote(row: Record<string, unknown>): Promise<Record<string, unknown>> {
+      const stored = { id: randomUUID(), hidden: false, ...row };
+      this.notes.set(stored.id, stored);
+      return stored;
+    },
+    async deleteNote(userId: string, id: string): Promise<boolean> {
+      const n = this.notes.get(id);
+      if (!n || n.user_id !== userId) return false;
+      this.notes.delete(id);
+      return true;
+    },
     async gradedSignals({ since, limit }: { since: string; limit: number }): Promise<Record<string, unknown>[]> {
       return signals
         .filter((s) => typeof s.ret_5m === "number" && String(s.timestamp) >= since)

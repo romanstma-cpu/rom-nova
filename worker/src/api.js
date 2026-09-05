@@ -18,6 +18,11 @@ export const MAX_LIMIT = 200;
 const ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const SINCE_MAX_DAYS = 30;
 
+/** The routes that belong to community.js rather than the data planes. */
+export function isCommunityPath(path) {
+  return path === "/api/v1/follows" || path.startsWith("/api/v1/follows/") || /^\/api\/v1\/wallets\/[^/]+\/notes$/.test(path) || path.startsWith("/api/v1/notes/");
+}
+
 /** @param {unknown} raw @param {number} dflt @param {number} max */
 export function parseLimit(raw, dflt = DEFAULT_LIMIT, max = MAX_LIMIT) {
   const n = Number(raw);
@@ -43,16 +48,18 @@ export class Api {
    *   limiter: import("./apikeys.js").RateLimiter,
    *   db: { recentSignals: (opts: { since: string, limit: number }) => Promise<any[]> },
    *   data: { rings: () => Record<string, any[]>, topWallets: (n: number) => any[], wallet: (address: string) => any | null, model?: () => any },
+   *   community?: import("./community.js").Community | null,
    *   now?: () => number,
    * }} deps
    */
-  constructor({ cfg, access, apiKeys, limiter, db, data, now }) {
+  constructor({ cfg, access, apiKeys, limiter, db, data, community, now }) {
     this.cfg = cfg;
     this.access = access;
     this.apiKeys = apiKeys;
     this.limiter = limiter;
     this.db = db;
     this.data = data;
+    this.community = community ?? null;
     this.now = now ?? Date.now;
     this.counts = { requests: 0, denied: 0, limited: 0, served: 0 };
   }
@@ -66,6 +73,7 @@ export class Api {
     this.counts.requests++;
     try {
       if (path === "/api/keys" || path.startsWith("/api/keys/")) return await this.keysRoute(method, path, token, ctx.body);
+      if (isCommunityPath(path)) return await this.communityRoute(method, path, query, token, ctx.body);
       if (path.startsWith("/api/v1/")) return await this.dataRoute(method, path, query, token, ctx.remote ?? "");
       return { status: 404, body: { error: "not found" } };
     } catch (err) {
@@ -95,6 +103,57 @@ export class Api {
       return ok ? { status: 200, body: { revoked: m[1] } } : { status: 404, body: { error: "no such key" } };
     }
     return { status: 404, body: { error: "not found" } };
+  }
+
+  // -------------------------------------------------------- community
+
+  /**
+   * Follows and notes: a signed-in reader (session or key), the same rate
+   * limit as the data, and nothing at all on an open radar, which has no
+   * readers to count.
+   */
+  async communityRoute(method, path, query, token, body) {
+    if (this.cfg.access === "open" || !this.community) return { status: 404, body: { error: "this radar is open — it has no signed-in readers, so no follows or notes" } };
+    const who = await this.access.check(token);
+    if (!who.ok) {
+      this.counts.denied++;
+      return { status: who.status, body: { error: who.reason } };
+    }
+    const user = who.user;
+    if (!user) return { status: 401, body: { error: "sign in first" } };
+    const lim = this.limiter.take(/** @type {any} */ (user).keyId ?? user.id);
+    const headers = { "x-ratelimit-limit": String(this.limiter.perMinute), "x-ratelimit-remaining": String(lim.remaining) };
+    if (!lim.ok) {
+      this.counts.limited++;
+      return { status: 429, body: { error: "rate limit — try again shortly" }, headers: { ...headers, "retry-after": String(lim.retryAfterS) } };
+    }
+    const b = body && typeof body === "object" ? /** @type {Record<string, unknown>} */ (body) : {};
+    const c = this.community;
+
+    if (path === "/api/v1/follows") {
+      if (method === "GET") {
+        const keys = String(query.keys ?? "")
+          .split(",")
+          .map((k) => k.trim())
+          .filter(Boolean);
+        return { status: 200, body: { counts: await c.followerCounts(keys) }, headers };
+      }
+      if (method === "POST") return { status: 201, body: await c.follow(user, b.signal_key), headers };
+    }
+    let m = /^\/api\/v1\/follows\/(.+)$/.exec(path);
+    if (m && method === "DELETE") return { status: 200, body: await c.unfollow(user, decodeURIComponent(m[1])), headers };
+
+    m = /^\/api\/v1\/wallets\/([^/]+)\/notes$/.exec(path);
+    if (m) {
+      if (method === "GET") return { status: 200, body: { notes: await c.notes(user, m[1]) }, headers };
+      if (method === "POST") return { status: 201, body: await c.addNote(user, m[1], b.body), headers };
+    }
+    m = /^\/api\/v1\/notes\/([0-9a-f-]{36})$/.exec(path);
+    if (m && method === "DELETE") {
+      const ok = await c.deleteNote(user, m[1]);
+      return ok ? { status: 200, body: { deleted: m[1] }, headers } : { status: 404, body: { error: "no such note of yours" }, headers };
+    }
+    return { status: 404, body: { error: "not found" }, headers };
   }
 
   // ------------------------------------------------------------ data
@@ -145,6 +204,6 @@ export class Api {
   }
 
   status() {
-    return { ...this.counts, rate_per_min: this.limiter.perMinute, keys: this.apiKeys.status() };
+    return { ...this.counts, rate_per_min: this.limiter.perMinute, keys: this.apiKeys.status(), community: this.community ? this.community.status() : null };
   }
 }

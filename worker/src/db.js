@@ -30,6 +30,8 @@ export const MIGRATION_FILE = "worker/supabase/migrations/002-copy-desk.sql";
 export const ACCOUNTS_MIGRATION_FILE = "worker/supabase/migrations/003-accounts.sql";
 /** 1.22.0: API keys. */
 export const API_MIGRATION_FILE = "worker/supabase/migrations/004-api-keys.sql";
+/** 1.24.0: follows and notes. */
+export const COMMUNITY_MIGRATION_FILE = "worker/supabase/migrations/006-community.sql";
 
 /** The column each grading horizon lands in. */
 export const HORIZON_COLUMN = { m1: "ret_1m", m5: "ret_5m", m15: "ret_15m", h1: "ret_1h" };
@@ -63,6 +65,8 @@ export class Db {
     this.billingReady = null;
     /** null = not probed yet; false = the api_keys table is missing (004). */
     this.apiReady = null;
+    /** null = not probed yet; false = the follows/notes tables are missing (006). */
+    this.communityReady = null;
     /**
      * Are the radar tables still readable with the public anon key? The
      * schema once granted that; 003 revokes it, because with a gated feed a
@@ -79,10 +83,10 @@ export class Db {
     };
     this.dropped = 0;
     this.droppedPatches = 0;
-    this.written = { trades: 0, wallets: 0, launches: 0, signals: 0, patches: 0, subscriptions: 0, api_keys: 0 };
+    this.written = { trades: 0, wallets: 0, launches: 0, signals: 0, patches: 0, subscriptions: 0, api_keys: 0, follows: 0, notes: 0 };
     this.lastError = "";
     /** DRY_RUN mirror, capped. */
-    this.memory = { trades: [], launches: [], signals: [], wallets: new Map(), subscriptions: new Map(), apiKeys: new Map() };
+    this.memory = { trades: [], launches: [], signals: [], wallets: new Map(), subscriptions: new Map(), apiKeys: new Map(), follows: new Map(), notes: new Map() };
     /** @type {ReturnType<typeof setInterval> | null} */
     this.timer = null;
     /** @type {ReturnType<typeof setInterval> | null} */
@@ -95,6 +99,7 @@ export class Db {
       this.migrated = true;
       this.billingReady = true;
       this.apiReady = true;
+      this.communityReady = true;
       return;
     }
     const { createClient } = await import("@supabase/supabase-js");
@@ -123,6 +128,11 @@ export class Db {
     this.apiReady = !keys.error;
     if (this.apiReady && hadKeys !== true) log("[db] api_keys table present — readers can mint API keys");
     if (!this.apiReady && hadKeys !== false) log(`[db] no api_keys table — run ${API_MIGRATION_FILE} before anyone can mint a key`);
+    const c = await this.client.from("follows").select("signal_key").limit(1);
+    const hadCommunity = this.communityReady;
+    this.communityReady = !c.error;
+    if (this.communityReady && hadCommunity !== true) log("[db] follows and notes tables present — community is on");
+    if (!this.communityReady && hadCommunity !== false) log(`[db] no follows table — run ${COMMUNITY_MIGRATION_FILE} for follow counts and wallet notes`);
 
     if (!this.cfg.supabaseAnonKey) return;
     try {
@@ -237,6 +247,88 @@ export class Db {
     await this.client.from("api_keys").update({ last_used_at: at }).eq("id", id);
   }
 
+  // ------------------------------------------------------ community (1.24.0)
+
+  /** @param {{ user_id: string, signal_key: string, at: string }} row — a repeat is not an error, it is the same follow */
+  async addFollow(row) {
+    if (!this.client) {
+      this.memory.follows.set(`${row.user_id}|${row.signal_key}`, row);
+      this.written.follows++;
+      return;
+    }
+    const { error } = await this.client.from("follows").upsert(row, { onConflict: "user_id,signal_key", ignoreDuplicates: true });
+    if (error) throw new Error(`follows: ${error.message}`);
+    this.written.follows++;
+  }
+
+  async removeFollow(userId, key) {
+    if (!this.client) {
+      this.memory.follows.delete(`${userId}|${key}`);
+      return;
+    }
+    const { error } = await this.client.from("follows").delete().eq("user_id", userId).eq("signal_key", key);
+    if (error) throw new Error(`follows delete: ${error.message}`);
+  }
+
+  /** @param {string[]} keys @returns {Promise<Map<string, number>>} */
+  async countFollows(keys) {
+    const out = new Map();
+    if (!this.client) {
+      for (const f of this.memory.follows.values()) if (keys.includes(f.signal_key)) out.set(f.signal_key, (out.get(f.signal_key) ?? 0) + 1);
+      return out;
+    }
+    const { data, error } = await this.client.from("follows").select("signal_key").in("signal_key", keys);
+    if (error) throw new Error(`follows count: ${error.message}`);
+    for (const r of data ?? []) out.set(r.signal_key, (out.get(r.signal_key) ?? 0) + 1);
+    return out;
+  }
+
+  /** Visible notes on a wallet, newest first. */
+  async listNotes(wallet, limit) {
+    if (!this.client) {
+      return [...this.memory.notes.values()]
+        .filter((n) => n.wallet_address === wallet && !n.hidden)
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+        .slice(0, limit);
+    }
+    const { data, error } = await this.client.from("notes").select("id,user_id,body,created_at").eq("wallet_address", wallet).eq("hidden", false).order("created_at", { ascending: false }).limit(limit);
+    if (error) throw new Error(`notes: ${error.message}`);
+    return data ?? [];
+  }
+
+  async countUserNotes(userId, wallet) {
+    if (!this.client) return [...this.memory.notes.values()].filter((n) => n.user_id === userId && n.wallet_address === wallet).length;
+    const { count, error } = await this.client.from("notes").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("wallet_address", wallet);
+    if (error) throw new Error(`notes count: ${error.message}`);
+    return count ?? 0;
+  }
+
+  async addNote(row) {
+    if (!this.client) {
+      const stored = { id: randomUUID(), hidden: false, ...row };
+      this.memory.notes.set(stored.id, stored);
+      this.written.notes++;
+      return stored;
+    }
+    const { data, error } = await this.client.from("notes").insert(row).select("id,user_id,body,created_at").single();
+    if (error) throw new Error(`notes insert: ${error.message}`);
+    this.written.notes++;
+    return data;
+  }
+
+  /** @returns {Promise<boolean>} whether the reader's own note was found */
+  async deleteNote(userId, id) {
+    if (!this.client) {
+      const n = this.memory.notes.get(id);
+      if (!n || n.user_id !== userId) return false;
+      this.memory.notes.delete(id);
+      return true;
+    }
+    const { data, error } = await this.client.from("notes").delete().eq("id", id).eq("user_id", userId).select("id");
+    if (error) throw new Error(`notes delete: ${error.message}`);
+    return (data ?? []).length > 0;
+  }
+
   /** Graded signals since an instant, oldest first — what the model trains and judges on. */
   async gradedSignals({ since, limit }) {
     if (!this.client) return this.memory.signals.filter((s) => typeof s.ret_5m === "number" && s.timestamp >= since).slice(-limit);
@@ -278,7 +370,7 @@ export class Db {
     }, FLUSH_MS);
     this.probeTimer = setInterval(() => {
       if (this.migrated !== true || this.modelColumns !== true) this.probeSchema().catch(() => {});
-      if (this.cfg.access !== "open" && (this.billingReady !== true || this.apiReady !== true || this.anonReads === true)) this.probeAccounts().catch(() => {});
+      if (this.cfg.access !== "open" && (this.billingReady !== true || this.apiReady !== true || this.communityReady !== true || this.anonReads === true)) this.probeAccounts().catch(() => {});
     }, REPROBE_MS);
   }
 
@@ -539,6 +631,14 @@ export class Db {
             ? "current"
             : this.apiReady === false
               ? `migration pending — run ${API_MIGRATION_FILE} in the Supabase SQL editor`
+              : "probing",
+      community:
+        this.cfg.access === "open"
+          ? "not used (RADAR_ACCESS=open)"
+          : this.communityReady === true
+            ? "current"
+            : this.communityReady === false
+              ? `migration pending — run ${COMMUNITY_MIGRATION_FILE} (schema.sql carries it)`
               : "probing",
       anon_reads:
         this.cfg.access === "open" || !this.cfg.supabaseAnonKey || this.cfg.dryRun

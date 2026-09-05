@@ -1302,6 +1302,23 @@ unchanged.
 the gate flip lights it all up. The plan is now built end to end except
 Telegram, which he skipped.
 
+### 1.24.1 — the magic link lands on the Account page (2026-09-05, midday)
+
+LO, flipping the gate, sent a screenshot of Supabase's Emails page: "Set
+up custom SMTP to edit templates" — the built-in mailer sends the default
+template (a link, no code) and the template is LOCKED until custom SMTP
+exists. Two consequences. (1) The desktop app cannot sign in until SMTP +
+`{{ .Token }}`; documented. (2) The link path had a real bug: the link's
+redirect went to the Site URL (the dashboard), where nothing adopts the
+`#access_token` fragment — the session was dropped on the doorstep.
+`requestCode` now sends `?redirect_to=<this page>` on http/https (the
+Account page, which adopts the fragment) and nothing inside the app://
+shell. One test. 876 tests. Shipped as 1.24.1 (app only; no worker
+redeploy). The SMTP path LO needs for real readers: Resend (free tier),
+verify romapps.xyz, then Supabase's "Set up SMTP" with host
+smtp.resend.com, port 465, user `resend`, password = the Resend API key —
+after which the template unlocks and the code line goes in.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

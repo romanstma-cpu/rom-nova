@@ -1115,6 +1115,72 @@ screen (exit 16) — run it from PowerShell with Windows paths. The old
 worker's 404 to /config carries no CORS header, so a browser reports it
 as a bare "Failed to fetch"; the store names that case.
 
+## 1.22.0 — the API, referral codes, the read-only portfolio (2026-09-05, small hours)
+
+LO: "Skip telegram continue all other improvements." The three V2 slices
+left, in one release; none executes anything.
+
+**The HTTP API.** `worker/src/api.js` decides, `io.js` reads bytes.
+Everything the socket pushes as JSON on request: /api/v1/signals (the
+ring, or database history with ?since=, 30 days at most), /api/v1/wallets
+and /:address, launches, whales, trades, behaviours. Same gate as the
+feed. `apikeys.js`: a key is `nova_` + 40 url-safe chars, shown ONCE,
+SHA-256 in the table (migration 004), cached a minute, revocable, and
+judged as its owner (Access.identify resolves a key-shaped token to its
+user, so a lapsed subscriber's key gets the 402 their session would).
+The socket handshake takes the same key. Sliding one-minute rate limit
+per key with x-ratelimit headers and a 429 carrying retry-after. Keys are
+managed by sessions only — a key may not mint a key. `API.md` is the
+reference; the account page grew an API panel (mint with a name, the
+one-time reveal with a curl line, list, revoke).
+
+**Referral codes.** `REFERRAL_GMGN` on the worker → `/config.referrals`;
+the app ships no code. `src/lib/handoff/venues.ts` builds the links:
+GMGN's two documented token formats (web `gmgn.ai/sol/token/{code}_{mint}`
+and the Solana bot `t.me/GMGN_sol_bot?start=i_{code}_c_{mint}`, from
+docs.gmgn.ai) carry it; pump.fun, Jupiter and DexScreener stay plain; a
+venue whose token deep link with a code is undocumented (Trojan, Axiom,
+BullX, Photon — searched) is not guessed at. The radar page reads the
+codes once per session, labels carrying links "· ref", and says in a
+sentence beside the plan that they fund the hosted radar.
+
+**The portfolio, read-only.** `src/lib/portfolio/risk.ts` over the
+balances a read returned: top position and top three as shares of TOKEN
+value, native SOL beside them (a wallet 90% SOL and 10% one coin is not
+"one bet"), unknown-cost share named so no PnL claims it, dust and
+unpriced mints left out and counted; readings one bet / concentrated /
+spread. `fifo.ts`: lots consumed oldest first per mint; a sell's cost from
+the lots it consumed, proceeds on the MATCHED tokens alone, hold
+token-weighted, the one-year line flagged; a sell out of lots never seen
+is excluded, never booked at zero cost; every blank carries its reason.
+`csv.ts`: one row per fill, no totals row, "fifo-estimate" in the file
+name. `PortfolioRisk.tsx` sits under the coverage strip on every real
+wallet; "this is my wallet" remembers an address (only an address) for a
+MY WALLET chip on the wallet page's address bar. Seen on Binance's hot
+wallet: CONCENTRATED, top position 49% TRUMP, top three 85%, 58% in SOL,
+cost unknown 100%, 36 sells all from lots never seen → "nothing to
+realize", which is the honest answer for a two-day window on an exchange.
+
+### 🚢 1.22.0 SHIPPED and proven (2026-09-05 ~1:40 AM)
+
+`7cf3a15` (33 files, +2194/−29) → `90995b8` (1.22.0) → tag → CI green.
+Installer SHA256 `a5c35209…f3e0` = GitHub digest = SHA256SUMS; latest.yml
+1.22.0; 83,342,344 bytes. Site `bfd085f`, Pages built in 30s, live
+3×1.22.0 / 0×1.21.0, 1,583-test band, `/nova/whale/` 200 and its live
+chunk carries the risk panel. Desktop 1.22.0.0: packaged risk panel, API
+panel and GMGN bot link present, titled window at once, 4 procs → 0,
+leveldb LOG 01:34. Render redeployed the worker within minutes:
+`/config.api` present, and `GET /api/v1/signals?limit=2` on the LIVE
+worker answered 200 with x-ratelimit headers and the day's one signal
+(score 74). DRY_RUN smoke: open mode serves with headers and a 429 after
+the third call at API_RATE_PER_MIN=3, POST on data 405, bad since 400,
+bad JSON 400, DELETE in the preflight; account mode refuses every data
+and key route with 401. 852 tests.
+
+**LO's steps** for keys: migration 004 (only needed with a gate; open
+mode issues no keys). For referrals: sign up at GMGN → Referral, set
+`REFERRAL_GMGN` on Render. Both documented in worker/README.md.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

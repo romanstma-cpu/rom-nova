@@ -55,7 +55,8 @@ All `GET`. `limit` is 50 by default and 200 at most. Every response carries
 
 Rows carry the same fields the socket's events do; a signal's `ret_1m`,
 `ret_5m`, `ret_15m`, `ret_1h`, `peak_ret_1h`, `graded_stale`,
-`graded_lookup` and `whale_exit_*` are null until graded. A wallet's
+`graded_lookup` and `whale_exit_*` are absent (recent ring) or null
+(database history) until graded — treat a missing key and a null the same. A wallet's
 `labels`, `consistency`, `max_drawdown_sol`, `median_hold_ms`,
 `follow_ret_5m`, `follow_hit_rate` and `signals_graded` are the measured
 intelligence columns; `unmeasured_sells` says how much of its record the

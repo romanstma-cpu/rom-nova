@@ -1363,6 +1363,67 @@ Edit/Write of every file and the first Bash, and any `rm`, until "facts"
 (importers, API, data, the user's verbatim instruction) appear in the
 reply — then the retry passes. Budget two calls per new file.
 
+## 1.26.0 — the things an installed app has (2026-09-05, afternoon)
+
+LO: "keep going." The first pass fixed what the eye found; this one added
+what a real app has and Nova did not. Also found on the way, against
+Supabase directly with the public anon key: `follows` and `notes` answer
+PGRST205 — LO's last schema run predates the community block, so the
+worker reports community "migration pending". Re-running schema.sql is
+his one line; nothing to build.
+
+- **Error boundaries.** None existed: one thrown render error blanked the
+  terminal to Next's "Application error". `error.tsx` answers inside the
+  chrome (rail, search, footer survive; message shown; "copy details"
+  writes build/page/time/browser/error/12 stack lines, never the hash);
+  `global-error.tsx` dresses itself for a failed root layout. Both
+  exercised live in the pane: a patched `toFixed` threw on the scanner →
+  the page boundary; the same patch reaching the top bar's price a poll
+  later → the global one. Next 16's prop is `retry` (the docs are in
+  node_modules/next/dist/docs — read them, the framework changed).
+- **WebGL.** A `catchError` boundary around `<Canvas>` stayed silent when
+  `getContext` returned null: the fibre builds its renderer inside a
+  promise, so the failure is an unhandled rejection, not a render error.
+  Measured, then replaced with a probe BEFORE mount — a machine that
+  cannot draw gets "3D unavailable here" with a retry; the boundary stays
+  for the synchronous case.
+- **A version.** `next.config.ts` stamps desktop/package.json's version
+  into both builds (`NEXT_PUBLIC_APP_VERSION`); footer, Settings About
+  panel, error report. The site's copy must be rebuilt AFTER the bump or
+  it ships the old number — the drill order is feature commit → bump →
+  build:static → bump commit → tag.
+- **The desktop shell.** `desktop/bridge.js`: same-origin
+  `app://rom-nova/nova/__desktop` (GET version + updater state; POST
+  /check, /install) — no preload, no IPC, the RPC proxy's trick; page side
+  `src/lib/desktop.ts` polls it under app:// only, the Shell shows the
+  "downloaded — restart now" banner, Settings shows the state.
+  `desktop/window-state.js`: bounds/maximized/zoom in userData
+  `window-state.json`, validated against the displays present; Ctrl
+  +/-/0 zoom, F5/Ctrl+R, F12; updates checked every six hours, from rest
+  only (re-checking a downloaded update makes electron-updater announce
+  it again). Both files listed in build.files — the bundle test passed.
+- **Status** gained the hosted-radar panel (the one non-keyless
+  connection; a page-mount hold, so from Status it is usually closed and
+  the panel says so).
+- **Installable**: `public/manifest.webmanifest` + PNG icons rendered
+  from icon.svg by the project's Electron offscreen (`icon-render.js` in
+  the scratchpad; PIL on this machine is broken — `from PIL import Image`
+  fails). Chrome and Edge now offer "Install ROM Nova".
+- `--dim`/`--faint` aliased (the galaxy legend used them, undefined).
+
+Tests 919 (43 new: bridge, window state, page store, error report).
+
+| check | result |
+|---|---|
+| installer | `dd4e9206…f28d` = SHA256SUMS = GitHub digest; latest.yml 1.26.0, 83,405,130 bytes |
+| site | `7b726eb`, Pages built, 3 anchors at 1.26.0, manifest + icon-192 200 live |
+| desktop | 1.26.0.0 installed; bridge, window-state and the 6h check in app.asar; titled window; LOG 15:46; clean close; `window-state.json` written `{"x":540,"y":236,"width":1480,"height":920,"maximized":false,"zoom":0}` |
+| pane | About panel (web), Status panel, WebGL fallback, both boundaries — seen |
+
+Harness note: the pane's console shows two 404s on every page that are
+the harness's own root `/favicon.ico` (the local static server serves
+only `/nova/*`; the live site's root favicon is 200) — not the app.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

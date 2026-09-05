@@ -37,6 +37,10 @@ export const HORIZON_COLUMN = { m1: "ret_1m", m5: "ret_5m", m15: "ret_15m", h1: 
 /** Columns the 1.17.0 migration adds, stripped from writes until it has run. */
 const WALLET_COLUMNS_1_17 = ["median_hold_ms", "follow_ret_5m", "follow_hit_rate", "signals_graded", "labels", "consistency", "max_drawdown_sol", "avg_hold_ms"];
 const SIGNAL_COLUMNS_1_17 = ["signal_key", "price_at_signal"];
+/** Columns the 1.23.0 migration adds (the model's evidence and its guess), stripped until it has run. */
+const SIGNAL_COLUMNS_1_23 = ["settled_sells", "launch_age_ms", "model_p", "model_version"];
+/** 1.23.0: the graded model's columns on signals. */
+export const MODEL_MIGRATION_FILE = "worker/supabase/migrations/005-model.sql";
 
 /** @param {Record<string, any>} row @param {string[]} columns */
 function without(row, columns) {
@@ -53,6 +57,8 @@ export class Db {
     this.client = null;
     /** null = not probed yet; false = the 1.17.0 columns are missing. */
     this.migrated = null;
+    /** null = not probed yet; false = the 1.23.0 model columns are missing. */
+    this.modelColumns = null;
     /** null = not probed yet; false = the subscriptions table is missing (003). */
     this.billingReady = null;
     /** null = not probed yet; false = the api_keys table is missing (004). */
@@ -231,6 +237,14 @@ export class Db {
     await this.client.from("api_keys").update({ last_used_at: at }).eq("id", id);
   }
 
+  /** Graded signals since an instant, oldest first — what the model trains and judges on. */
+  async gradedSignals({ since, limit }) {
+    if (!this.client) return this.memory.signals.filter((s) => typeof s.ret_5m === "number" && s.timestamp >= since).slice(-limit);
+    const { data, error } = await this.client.from("signals").select("*").not("ret_5m", "is", null).gte("timestamp", since).order("timestamp", { ascending: true }).limit(limit);
+    if (error) throw new Error(`graded signals: ${error.message}`);
+    return data ?? [];
+  }
+
   /** Signals since an instant, newest first — the API's history read. */
   async recentSignals({ since, limit }) {
     if (!this.client) return this.memory.signals.filter((s) => s.timestamp >= since).slice(-limit).reverse();
@@ -249,6 +263,11 @@ export class Db {
     this.migrated = !error;
     if (this.migrated && was !== true) log("[db] schema current — grades and exits will be written");
     if (!this.migrated && was !== false) log(`[db] schema is pre-1.17.0 — writing base columns only until ${MIGRATION_FILE} is run`);
+    const m = await this.client.from("signals").select("model_p").limit(1);
+    const had = this.modelColumns;
+    this.modelColumns = !m.error;
+    if (this.modelColumns && had !== true) log("[db] model columns present — signals carry their evidence and the model's guess");
+    if (!this.modelColumns && had !== false) log(`[db] no model columns — the model trains on what exists; run ${MODEL_MIGRATION_FILE} for its evidence and forward record`);
   }
 
   start() {
@@ -258,7 +277,7 @@ export class Db {
       });
     }, FLUSH_MS);
     this.probeTimer = setInterval(() => {
-      if (this.migrated !== true) this.probeSchema().catch(() => {});
+      if (this.migrated !== true || this.modelColumns !== true) this.probeSchema().catch(() => {});
       if (this.cfg.access !== "open" && (this.billingReady !== true || this.apiReady !== true || this.anonReads === true)) this.probeAccounts().catch(() => {});
     }, REPROBE_MS);
   }
@@ -337,7 +356,11 @@ export class Db {
     this.queues.wallets.clear();
     const tradeBatch = trades.splice(0, trades.length);
     const launchBatch = launches.splice(0, launches.length);
-    const signalBatch = signals.splice(0, signals.length).map((r) => (migrated ? r : without(r, SIGNAL_COLUMNS_1_17)));
+    const modelColumns = this.modelColumns === true;
+    const signalBatch = signals
+      .splice(0, signals.length)
+      .map((r) => (migrated ? r : without(r, SIGNAL_COLUMNS_1_17)))
+      .map((r) => (modelColumns ? r : without(r, SIGNAL_COLUMNS_1_23)));
     const patchBatch = migrated ? [...this.queues.patches.entries()] : [];
     if (migrated) this.queues.patches.clear();
 
@@ -494,6 +517,13 @@ export class Db {
     return {
       mode: this.cfg.dryRun ? "dry-run (in-memory)" : "supabase",
       schema: this.migrated === true ? "current" : this.migrated === false ? `migration pending — run ${MIGRATION_FILE} in the Supabase SQL editor` : "probing",
+      model_columns: this.cfg.dryRun
+        ? "not probed (DRY_RUN)"
+        : this.modelColumns === true
+          ? "current"
+          : this.modelColumns === false
+            ? `migration pending — run ${MODEL_MIGRATION_FILE} (schema.sql carries it) for the model's evidence and forward record`
+            : "probing",
       accounts:
         this.cfg.access === "open"
           ? "not used (RADAR_ACCESS=open)"

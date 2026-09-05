@@ -78,6 +78,12 @@ export function fakeDb(rows: SubscriptionRow[] = [], opts: { signals?: Record<st
       const k = apiKeys.get(id);
       if (k) k.last_used_at = at;
     },
+    async gradedSignals({ since, limit }: { since: string; limit: number }): Promise<Record<string, unknown>[]> {
+      return signals
+        .filter((s) => typeof s.ret_5m === "number" && String(s.timestamp) >= since)
+        .sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)))
+        .slice(0, limit);
+    },
     async recentSignals({ since, limit }: { since: string; limit: number }): Promise<Record<string, unknown>[]> {
       return signals
         .filter((s) => String(s.timestamp) >= since)

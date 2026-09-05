@@ -41,6 +41,11 @@ export interface RadarSignalRow {
   // the signal's own fill price; null until it resolves.
   signal_key?: string;
   price_at_signal?: number;
+  /** minutes-since-launch evidence for the model: null when the launch predates this radar */
+  launch_age_ms?: number | null;
+  /** the graded model's guess at the moment the signal fired, from a worker with a fitted card */
+  model_p?: number | null;
+  model_version?: string | null;
   ret_1m?: number | null;
   ret_5m?: number | null;
   ret_15m?: number | null;

@@ -177,6 +177,10 @@ export class RadarState {
         timestamp: new Date(trade.chainTs).toISOString(),
         // The fill price the grades and the exit are measured against.
         price_at_signal: Number(trade.priceSol.toPrecision(9)),
+        // What was known at this moment, for the model: the record behind
+        // the score, and how far from launch the token was. Never revised.
+        settled_sells: statsBefore.settledSells,
+        launch_age_ms: launch ? trade.chainTs - launch.at : null,
         signal_key: "",
       };
       signal.signal_key = signalKeyOf(signal);

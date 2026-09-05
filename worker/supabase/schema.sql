@@ -111,6 +111,16 @@ alter table signals
 create unique index if not exists signals_key_idx on signals (signal_key);
 create index if not exists signals_wallet_ts_idx on signals (wallet_address, timestamp desc);
 
+-- 1.23.0, the graded model: two facts known when a signal fires (the
+-- settled sells behind the score, minutes since launch) and the model's own
+-- guess at that moment, judged later by the grade. migrations/005-model.sql
+-- is the same block.
+alter table signals
+  add column if not exists settled_sells integer,
+  add column if not exists launch_age_ms bigint,
+  add column if not exists model_p decimal,
+  add column if not exists model_version text;
+
 -- RLS on, no policies: nobody but the service role reads or writes these.
 -- The drops upgrade a database made from the earlier version of this file,
 -- which granted anon reads; migrations/003-accounts.sql carries the same.

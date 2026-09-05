@@ -42,7 +42,7 @@ export class Api {
    *   apiKeys: import("./apikeys.js").ApiKeys,
    *   limiter: import("./apikeys.js").RateLimiter,
    *   db: { recentSignals: (opts: { since: string, limit: number }) => Promise<any[]> },
-   *   data: { rings: () => Record<string, any[]>, topWallets: (n: number) => any[], wallet: (address: string) => any | null },
+   *   data: { rings: () => Record<string, any[]>, topWallets: (n: number) => any[], wallet: (address: string) => any | null, model?: () => any },
    *   now?: () => number,
    * }} deps
    */
@@ -133,6 +133,10 @@ export class Api {
     } else if (path === "/api/v1/launches" || path === "/api/v1/whales" || path === "/api/v1/trades" || path === "/api/v1/behaviours") {
       const ring = path.slice("/api/v1/".length);
       body = { [ring]: recent(ring), limit };
+    } else if (path === "/api/v1/model") {
+      // The whole card: verdict, folds, weights, norm — enough to reproduce
+      // a probability, and the forward record that judges the guesses.
+      body = this.data.model ? this.data.model() : { card: null, forward: null, refreshed_at: null };
     } else {
       return { status: 404, body: { error: "not found" }, headers };
     }

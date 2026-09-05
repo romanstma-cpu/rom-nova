@@ -481,6 +481,14 @@ export default function RadarPage() {
                       <Grade label="5m" ret={s.ret_5m} title="five minutes after — the follower return the leaderboard is ranked by" />
                       <Grade label="15m" ret={s.ret_15m} title="fifteen minutes after" />
                       <Grade label="1h" ret={s.ret_1h} title="one hour after" />
+                      {typeof s.model_p === "number" && (
+                        <span
+                          className="num text-[10.5px] faint cursor-help"
+                          title="The worker's graded model, stamped the moment this signal fired: its guess that +5m clears +10%. A guess, not an instruction — Track Record says whether the model has earned any trust, and its forward record judges exactly these guesses."
+                        >
+                          p {Math.round(s.model_p * 100)}%
+                        </span>
+                      )}
                       {typeof s.peak_ret_1h === "number" && (
                         <Grade label="peak" ret={s.peak_ret_1h} title="the best price seen inside the hour — what a perfect exit got, which nobody gets" />
                       )}

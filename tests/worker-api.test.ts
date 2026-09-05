@@ -35,7 +35,12 @@ function build(mode: "open" | "account" | "subscription", opts: { perMinute?: nu
   const apiKeys = new ApiKeys(db, { now: () => NOW });
   const access = new Access(cfg, { verifier: mode === "open" ? null : fakeVerifier(), db, apiKeys, now: () => NOW });
   const limiter = new RateLimiter({ perMinute: cfg.apiRatePerMinute, now: () => NOW });
-  const data = { rings, topWallets: (n: number) => [{ wallet_address: ADDR, score: 80 }, { wallet_address: "OTHER", score: 70 }].slice(0, n), wallet: (a: string) => (a === ADDR ? { wallet_address: ADDR, score: 80 } : null) };
+  const data = {
+    rings,
+    topWallets: (n: number) => [{ wallet_address: ADDR, score: 80 }, { wallet_address: "OTHER", score: 70 }].slice(0, n),
+    wallet: (a: string) => (a === ADDR ? { wallet_address: ADDR, score: 80 } : null),
+    model: () => ({ card: { verdict: "insufficient", usable: 3 }, forward: null, refreshed_at: null }),
+  };
   const api = new Api({ cfg, access, apiKeys, limiter, db, data, now: () => NOW });
   return { api, db, apiKeys };
 }
@@ -72,6 +77,7 @@ describe("an open radar", () => {
     expect((await api.handle("GET", `/api/v1/wallets/${"1".repeat(40)}`, {}, "")).status).toBe(404);
     expect((await api.handle("GET", "/api/v1/launches", {}, "")).body.launches).toEqual([{ mint: "L2" }, { mint: "L1" }]);
     expect((await api.handle("GET", "/api/v1/behaviours", {}, "")).body.behaviours).toEqual([]);
+    expect((await api.handle("GET", "/api/v1/model", {}, "")).body.card).toEqual({ verdict: "insufficient", usable: 3 });
     expect((await api.handle("GET", "/api/v1/nothing", {}, "")).status).toBe(404);
     expect((await api.handle("POST", "/api/v1/signals", {}, "")).status).toBe(405);
     expect((await api.handle("GET", "/api/keys", {}, "")).status).toBe(404);

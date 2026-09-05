@@ -52,6 +52,7 @@ All `GET`. `limit` is 50 by default and 200 at most. Every response carries
 | `/api/v1/whales`                 | `whales`: wallets crossing the discovery gate                     |
 | `/api/v1/trades`                 | `trades`: journaled fills by tracked wallets                      |
 | `/api/v1/behaviours`             | `behaviours`: dormant_buy, accumulation, distribution, wash_like  |
+| `/api/v1/model`                  | `card`: the graded model — verdict, folds, weights, norm; `forward`: its record on signals it stamped as they fired |
 
 Rows carry the same fields the socket's events do; a signal's `ret_1m`,
 `ret_5m`, `ret_15m`, `ret_1h`, `peak_ret_1h`, `graded_stale`,
@@ -69,6 +70,12 @@ Key management, with a **session** token (a key may not mint a key):
 | `GET`    | `/api/keys`         | `keys`: id, prefix, name, created, last used   |
 | `POST`   | `/api/keys`         | `{"name": "…"}` → the row plus `key`, once     |
 | `DELETE` | `/api/keys/<id>`    | `{"revoked": id}`                              |
+
+A signal may carry `model_p`, the graded model's probability that its
+five-minute grade clears +10%, stamped the moment it fired. It is a guess,
+not an instruction: `/api/v1/model` says whether the model has any edge on
+the fold it never saw, and its `forward` block is the only claim about it
+made without hindsight — read that before reading `model_p` as anything.
 
 ## Examples
 

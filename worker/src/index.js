@@ -22,6 +22,7 @@ import { loadConfig } from "./config.js";
 import { Db, HORIZON_COLUMN } from "./db.js";
 import { dexScreenerLookup, dexScreenerStatus } from "./dexscreener.js";
 import { Feed } from "./io.js";
+import { MODEL_REFRESH_MS, ModelDesk } from "./model.js";
 
 const startedAt = Date.now();
 const cfg = loadConfig();
@@ -68,6 +69,7 @@ function status() {
     access: { ...access.status(), sockets: feed?.counts ?? null },
     billing: billing.status(),
     api: api.status(),
+    model: model.summary(),
     dexscreener: dexScreenerStatus(),
     price_lookup: lookupStatus(),
     coverage:
@@ -75,6 +77,9 @@ function status() {
       (helius.enabled ? ", plus Helius off-curve coverage for top wallets" : " — off-curve trades are NOT observed (set HELIUS_API_KEY to extend)"),
   };
 }
+
+// The graded model: trained on this worker's own history, judged forward.
+const model = new ModelDesk(db);
 
 // The HTTP API reads the feed's rings and the state's wallets on demand;
 // the closures resolve at request time, after `feed` exists.
@@ -91,6 +96,7 @@ const api = new Api({
       const w = state.tracked.get(address);
       return w ? state.rowOf(address, w) : null;
     },
+    model: () => model.full(),
   },
 });
 feed = new Feed(cfg, status, { access, billing, api });
@@ -182,6 +188,9 @@ async function emitSignal(e) {
     const dex = await dexScreenerLookup(s.token_address);
     if (dex?.name) s.token_name = dex.name;
   }
+  // The model's guess, stamped before the row is written and before anyone
+  // sees it, so the grade that lands later judges it without hindsight.
+  Object.assign(s, model.annotate(s));
   db.addSignal(s);
   feed.push("signals", "signal", { ...s, settled_sells: e.settledSells });
   log(`SIGNAL score ${s.wallet_score} wallet ${short(s.wallet_address)} bought ${s.buy_amount_sol} SOL of ${s.token_name ?? short(s.token_address)}`);
@@ -190,6 +199,10 @@ async function emitSignal(e) {
 const hydrated = await db.hydrate(state);
 if (hydrated.wallets > 0) log(`resuming with ${hydrated.wallets} wallets from the journal`);
 if (hydrated.signals > 0) log(`resumed ${hydrated.signals} signals: ${hydrated.grades} grades replayed, ${hydrated.watching} still grading or awaiting an exit`);
+await model.refresh();
+setInterval(() => {
+  model.refresh().catch((err) => log("[model] refresh failed:", err?.message ?? err));
+}, MODEL_REFRESH_MS);
 
 db.start();
 feed.start();

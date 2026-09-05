@@ -137,6 +137,22 @@ handoff links (web and Telegram bot, in the formats GMGN documents). The
 app reads it from `/config`, ships no code of its own, and says on the
 radar page that the links carry one. Empty means plain links.
 
+## The graded model (1.23.0)
+
+A logistic regression over the worker's own graded signals — what was
+known when each fired against whether its five-minute grade cleared +10%
+— retrained hourly, judged only on the newest third it never saw, in
+time order. Its verdict is `insufficient` (under 200 usable graded
+signals), `no edge`, or `edge` (its top quarter beat following every
+signal by two standard errors, with a better Brier score). With a fitted
+card, every new signal is stamped with `model_p` BEFORE it is written, so
+the grade that lands later judges the guess with no hindsight: that
+forward record is on `/health` → `model.forward`, on `/api/v1/model`, and
+on the app's Track Record page beside a card trained on the browser's own
+journal. `schema.sql` (or `migrations/005-model.sql`) adds the columns;
+without them the model still trains on what exists, and the worker says so
+under `db.model_columns`.
+
 ## What triggers a deploy
 
 The Blueprint's `buildFilter` deploys on changes under `worker/`, under

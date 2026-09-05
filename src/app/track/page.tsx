@@ -22,6 +22,7 @@ import {
 } from "@/lib/track-store";
 import { Empty } from "@/components/ui/bits";
 import { RadarRecord } from "@/components/radar/RadarRecord";
+import { RadarModel } from "@/components/radar/RadarModel";
 import { clearLaunchRecord, launchSnapshot, launchSnapshotServer, subscribeLaunchRecord } from "@/lib/launch-record/store";
 import { ALIVE_LIQUIDITY_USD, LAUNCH_MIN_RESOLVED, launchReport, type LaunchBucketStat } from "@/lib/launch-record/report";
 
@@ -194,6 +195,9 @@ export default function TrackPage() {
       {/* The radar grades its own signals; that record comes first because it
           is the one a copier acts on. */}
       <RadarRecord />
+
+      {/* The model over that record, judged the same way, forward record first. */}
+      <RadarModel />
 
       {/* The claim, stated before any table so a reader meets the caveat first. */}
       <div className="panel p-3 flex flex-col gap-2">

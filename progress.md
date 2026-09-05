@@ -1245,6 +1245,63 @@ names migration 005 for LO. DRY_RUN smoke: an empty worker prints
 start the day the card fits. Until then the worker trains on what exists
 and says so.
 
+## 1.24.0 — community, and the site's hosted section (2026-09-05, late morning)
+
+LO: "GO" on the rest of the plan. The gate flip is his; the other two
+did not need to wait for it.
+
+**Community, the cheapest honest version** (`worker/src/community.js`).
+A follow becomes a number: "I followed" on the copy desk can, on a gated
+worker with a signed-in reader, be one more in a count every other reader
+sees on the signal — a number, never a name, a price or a size; the
+reader's choice, on by default, remembered in their browser
+(`whalenova_share_follows_v1`), a checkbox on the form. The worker
+upserts one follow per reader per signal, counts fresh, patches its ring
+and emits `signal_followers`. A note on a tracked wallet: ≤ 280 chars,
+under `reader-` + six hex of a hash of the id (stable, irreversible),
+three per reader per wallet, ten an hour, one's own to delete, the
+operator hides one with `hidden = true`. Routes under /api/v1/follows and
+/api/v1/wallets/:addr/notes, gated, rate limited, 404 on an open radar
+("no signed-in readers, so no follows or notes"). Migration 006
+(schema.sql carries it): follows, notes. App: `src/lib/community/store.ts`,
+`WalletNotes.tsx` under leaderboard rows ("reader notes" toggle), the
+"count me for other readers" checkbox on the follow form, the "N readers
+followed" chip on signals, `client.ts` hears `signal_followers`.
+
+**The site's hosted section**: a full-width feature card in the Nova
+section, "The hosted radar", whose one sentence is READ FROM THE RADAR as
+the page loads — /config for the gate (open today → "open to anyone", a
+plan → the price Stripe reported, formatted; account → "free with a
+sign-in") and /health for "Live as you read this: N wallets tracked, S
+signals and G grades since its last restart Xh ago, and the model's
+verdict on itself is 'insufficient'". Nothing typed that a flip would
+make false; with JS off the paragraph stands as written. The
+no-fake-profit rule: "a plan buys coverage, never a return."
+
+### 🚢 1.24.0 SHIPPED and proven (2026-09-05 ~11:20 AM)
+
+`a5421f4` (17 files, +929/−8) → `ad986b9` (1.24.0) → tag → CI green.
+Installer SHA256 `97fcca60…c1d4` = GitHub digest = SHA256SUMS; latest.yml
+1.24.0; 83,350,424 bytes. Site `e4bc7b5`, Pages built in 24s, live
+3×1.24.0 / 0×1.23.0, 1,606-test band, the hosted block in the HTML and
+the community form in the radar chunk. Desktop 1.24.0.0: packaged form
+and notes panel, titled window at once, 4 procs → 0, leveldb LOG 11:16.
+Render redeployed within minutes: `db.community: not used (open)`,
+`model_columns: current` — LO ran schema.sql — model at 100 usable.
+Live POST /api/v1/follows on the open radar → 404 with the sentence.
+DRY_RUN smoke: open → 404s; account with Supabase unreachable → 401 no
+token, 503 bad token. The site's script verified against the LIVE radar
+from the local server: "Open to anyone today" + "200 wallets tracked, 5
+signals and 18 grades since its last restart 0h ago". 875 tests.
+
+Hygiene after the tag: `tests/worker-community.test.ts` carried one NUL
+byte (git showed it as binary); removed in a follow-up commit, tests
+unchanged.
+
+**LO's steps**: none new for community beyond the schema he already ran;
+the gate flip lights it all up. The plan is now built end to end except
+Telegram, which he skipped.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

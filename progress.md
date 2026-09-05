@@ -1319,6 +1319,50 @@ verify romapps.xyz, then Supabase's "Set up SMTP" with host
 smtp.resend.com, port 465, user `resend`, password = the Resend API key —
 after which the template unlocks and the code line goes in.
 
+## 1.25.0 — the quality pass (2026-09-05, midday)
+
+LO, with the gate on and Resend pending: "make improvements and find all
+bugs in NOVA. make it look amazing and feel like a legit real deal app."
+Also, from the live health page: `RADAR_ACCESS` was still `open` after
+his dashboard edit — the Blueprint owned the value — so render.yaml now
+declares it `sync: false` (`cee4bfe`) and the dashboard owns it for good;
+a Blueprint sync could otherwise have silently unlocked a paid feed.
+
+**The walk.** Every route of the static build opened in the pane with the
+console watching — 22 pages, a real wallet, a real token, a missing
+address — zero errors. Eight screenshots reviewed at 1586px and the
+Account page at 375px. What it found, all fixed:
+
+- The radar page opened on the device plane even when the only feed was
+  a connected worker → the plane is "auto" until chosen.
+- A session expiring mid-stream ended in "sign in" though the token
+  refreshes → on a 401 `gate` the client refreshes and reconnects once.
+- Supabase's raw error words reached readers ("Error sending magic link
+  email" — the pending-SMTP case) → translated (mail, rate limit, expired
+  code, sign-ups off), with tests.
+- The Account page could hang on a sleeping free-plan radar → /config
+  times out at 12s with "a sleeping radar takes a minute to wake".
+- `chip-danger` was used by two panels and defined nowhere → the rule.
+- Next's bare white 404 → the app's own not-found page inside the chrome.
+- Every tab read the same title → per-route `layout.tsx` with
+  `metadata.title` merged into a root template ("Whale Radar · ROM
+  Nova"), IN THE STATIC HTML. A client-side `document.title` effect was
+  tried first and measured: Next's head handling rewrote it after
+  hydration (a manual set 1.5s later stuck; the effect's did not) —
+  replaced, not patched. The root meta description still said "running
+  on clearly-labeled simulated data" → rewritten to describe the app.
+- The rail shows a green dot beside Account when signed in; the Account
+  page shows an initial, the address, and whether the radar recognises
+  the session and the plan.
+- Lint clean for the whole project (the two Electron helpers carry the
+  CommonJS directive; the eslint config itself is hook-protected, so the
+  source was fixed, not the rule). 876 tests.
+
+GateGuard (ecc plugin hook) arrived mid-session: it denies the FIRST
+Edit/Write of every file and the first Bash, and any `rm`, until "facts"
+(importers, API, data, the user's verbatim instruction) appear in the
+reply — then the retry passes. Budget two calls per new file.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

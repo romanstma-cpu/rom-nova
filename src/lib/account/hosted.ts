@@ -13,9 +13,19 @@
 // Every response is normalized field by field before it touches state:
 // data from a user-configured server, never trusted to be well-formed.
 
+import { cleanReferrals, type Referrals } from "@/lib/handoff/venues";
+
 export const HOSTED_RADAR_URL = "https://rom-nova-radar.onrender.com";
 
 export type AccessMode = "open" | "account" | "subscription";
+
+export interface HostedApiInfo {
+  enabled: boolean;
+  /** keys can be minted (a gated radar) */
+  keys: boolean;
+  ratePerMin: number | null;
+  docs: string | null;
+}
 
 export interface HostedPrice {
   /** minor units, as Stripe stores them — 900 is $9.00 */
@@ -30,6 +40,9 @@ export interface HostedConfig {
   /** where sign-in goes: the radar's Supabase project, with its public key */
   auth: { url: string; anonKey: string } | null;
   billing: { enabled: boolean; price: HostedPrice | null };
+  api: HostedApiInfo;
+  /** the operator's referral codes for the handoff links, by venue */
+  referrals: Referrals;
   appUrl: string | null;
 }
 
@@ -69,6 +82,7 @@ export function normHostedConfig(url: string, raw: unknown): HostedConfig {
   const auth = a && str(a.url) && str(a.anon_key) ? { url: str(a.url).replace(/\/+$/, ""), anonKey: str(a.anon_key) } : null;
   const b = obj(o.billing);
   const p = obj(b?.price);
+  const a2 = obj(o.api);
   return {
     url,
     access: accessOf(o.access),
@@ -77,8 +91,64 @@ export function normHostedConfig(url: string, raw: unknown): HostedConfig {
       enabled: b?.enabled === true,
       price: p ? { amount: numOrNull(p.amount), currency: strOrNull(p.currency), interval: strOrNull(p.interval) } : null,
     },
+    api: { enabled: a2?.enabled === true, keys: a2?.keys === true, ratePerMin: numOrNull(a2?.rate_per_min), docs: strOrNull(a2?.docs) },
+    referrals: cleanReferrals(o.referrals),
     appUrl: strOrNull(o.app_url),
   };
+}
+
+// ------------------------------------------------------------ API keys
+
+export interface ApiKeyRow {
+  id: string;
+  /** "nova_" plus the first characters, then an ellipsis — never the key */
+  prefix: string;
+  name: string;
+  created_at: string | null;
+  last_used_at: string | null;
+}
+
+export function normApiKeyRow(raw: unknown): ApiKeyRow | null {
+  const o = obj(raw);
+  if (!o || !str(o.id)) return null;
+  return { id: str(o.id), prefix: str(o.prefix), name: str(o.name), created_at: strOrNull(o.created_at), last_used_at: strOrNull(o.last_used_at) };
+}
+
+async function keysRequest(url: string, path: string, token: string, init: { method: string; body?: unknown }, fetchImpl: Fetch): Promise<{ status: number; body: unknown }> {
+  const res = await fetchImpl(`${url}${path}`, {
+    method: init.method,
+    headers: { authorization: `Bearer ${token}`, ...(init.body !== undefined ? { "content-type": "application/json" } : {}) },
+    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+  });
+  const body: unknown = await res.json().catch(() => null);
+  if (!res.ok) throw new HostedError(res.status, errorOf(body) ?? `the radar answered ${res.status}`);
+  return { status: res.status, body };
+}
+
+export async function fetchApiKeys(url: string, token: string, fetchImpl: Fetch = fetch): Promise<ApiKeyRow[]> {
+  const { body } = await keysRequest(url, "/api/keys", token, { method: "GET" }, fetchImpl);
+  const o = obj(body);
+  return Array.isArray(o?.keys) ? o!.keys.map(normApiKeyRow).filter((k): k is ApiKeyRow => k !== null) : [];
+}
+
+/** Mints a key. The `key` in the result is the only time it exists in the clear. */
+export async function createApiKey(url: string, token: string, name: string, fetchImpl: Fetch = fetch): Promise<ApiKeyRow & { key: string }> {
+  const { body } = await keysRequest(url, "/api/keys", token, { method: "POST", body: { name } }, fetchImpl);
+  const row = normApiKeyRow(body);
+  const o = obj(body);
+  const key = o ? str(o.key) : "";
+  if (!row || !key) throw new HostedError(502, "the radar minted no key");
+  return { ...row, key };
+}
+
+export async function revokeApiKey(url: string, token: string, id: string, fetchImpl: Fetch = fetch): Promise<boolean> {
+  try {
+    await keysRequest(url, `/api/keys/${encodeURIComponent(id)}`, token, { method: "DELETE" }, fetchImpl);
+    return true;
+  } catch (err) {
+    if (err instanceof HostedError && err.status === 404) return false;
+    throw err;
+  }
 }
 
 export function normHostedMe(raw: unknown): HostedMe {

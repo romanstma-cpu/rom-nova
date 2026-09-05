@@ -10,6 +10,7 @@
 // the app keeps retrying and the reader sees "could not be verified" rather
 // than a feed that was never theirs.
 
+import { looksLikeApiKey } from "./apikeys.js";
 import { entitledAt, publicSubscription } from "./billing.js";
 
 const ENTITLEMENT_TTL_MS = 60_000;
@@ -18,13 +19,14 @@ const ENTITLEMENT_CACHE_CAP = 5_000;
 export class Access {
   /**
    * @param {import("./config.js").Config} cfg
-   * @param {{ verifier: import("./auth.js").AuthVerifier | null, db: { getSubscription: (id: string) => Promise<any>, billingReady: boolean | null }, now?: () => number }} deps
+   * @param {{ verifier: import("./auth.js").AuthVerifier | null, db: { getSubscription: (id: string) => Promise<any>, billingReady: boolean | null }, apiKeys?: import("./apikeys.js").ApiKeys | null, now?: () => number }} deps
    */
-  constructor(cfg, { verifier, db, now }) {
+  constructor(cfg, { verifier, db, apiKeys, now }) {
     this.cfg = cfg;
     this.mode = cfg.access;
     this.verifier = verifier;
     this.db = db;
+    this.apiKeys = apiKeys ?? null;
     this.now = now ?? Date.now;
     /** @type {Map<string, { entitled: boolean, row: any, until: number }>} */
     this.entCache = new Map();
@@ -40,6 +42,22 @@ export class Access {
    */
   async identify(token) {
     if (this.mode === "open" || !this.verifier) return { ok: true, user: null };
+    // An API key stands in for its owner's session, and is judged as its
+    // owner: the entitlement check downstream reads the same row.
+    if (this.apiKeys && looksLikeApiKey(token)) {
+      let hit;
+      try {
+        hit = await this.apiKeys.resolve(token);
+      } catch {
+        this.counts.unavailable++;
+        return { ok: false, status: 503, reason: "the API key could not be checked right now — try again shortly" };
+      }
+      if (!hit) {
+        this.counts.unauthenticated++;
+        return { ok: false, status: 401, reason: "API key not recognised, or revoked" };
+      }
+      return { ok: true, user: { id: hit.user_id, email: "", via: "key", keyId: hit.id } };
+    }
     let user;
     try {
       user = await this.verifier.verify(token);

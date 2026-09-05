@@ -19,6 +19,7 @@
 
 // The engine — the pure pipeline shared with the app's in-browser hunter —
 // lives in the app tree; this service is one of its two drivers.
+import { randomUUID } from "node:crypto";
 import { log } from "../../src/lib/radar/engine/util.js";
 
 const FLUSH_MS = 2_000;
@@ -27,6 +28,8 @@ const REPROBE_MS = 5 * 60_000;
 export const MIGRATION_FILE = "worker/supabase/migrations/002-copy-desk.sql";
 /** 1.21.0: the subscriptions table, and the end of anon reads on the radar tables. */
 export const ACCOUNTS_MIGRATION_FILE = "worker/supabase/migrations/003-accounts.sql";
+/** 1.22.0: API keys. */
+export const API_MIGRATION_FILE = "worker/supabase/migrations/004-api-keys.sql";
 
 /** The column each grading horizon lands in. */
 export const HORIZON_COLUMN = { m1: "ret_1m", m5: "ret_5m", m15: "ret_15m", h1: "ret_1h" };
@@ -52,6 +55,8 @@ export class Db {
     this.migrated = null;
     /** null = not probed yet; false = the subscriptions table is missing (003). */
     this.billingReady = null;
+    /** null = not probed yet; false = the api_keys table is missing (004). */
+    this.apiReady = null;
     /**
      * Are the radar tables still readable with the public anon key? The
      * schema once granted that; 003 revokes it, because with a gated feed a
@@ -68,10 +73,10 @@ export class Db {
     };
     this.dropped = 0;
     this.droppedPatches = 0;
-    this.written = { trades: 0, wallets: 0, launches: 0, signals: 0, patches: 0, subscriptions: 0 };
+    this.written = { trades: 0, wallets: 0, launches: 0, signals: 0, patches: 0, subscriptions: 0, api_keys: 0 };
     this.lastError = "";
     /** DRY_RUN mirror, capped. */
-    this.memory = { trades: [], launches: [], signals: [], wallets: new Map(), subscriptions: new Map() };
+    this.memory = { trades: [], launches: [], signals: [], wallets: new Map(), subscriptions: new Map(), apiKeys: new Map() };
     /** @type {ReturnType<typeof setInterval> | null} */
     this.timer = null;
     /** @type {ReturnType<typeof setInterval> | null} */
@@ -83,6 +88,7 @@ export class Db {
       log("[db] DRY_RUN — in-memory store, nothing persists");
       this.migrated = true;
       this.billingReady = true;
+      this.apiReady = true;
       return;
     }
     const { createClient } = await import("@supabase/supabase-js");
@@ -106,6 +112,11 @@ export class Db {
     this.billingReady = !error;
     if (this.billingReady && was !== true) log("[db] subscriptions table present — the gate can read entitlements");
     if (!this.billingReady && was !== false) log(`[db] no subscriptions table — run ${ACCOUNTS_MIGRATION_FILE} before RADAR_ACCESS=subscription can admit anyone`);
+    const keys = await this.client.from("api_keys").select("id").limit(1);
+    const hadKeys = this.apiReady;
+    this.apiReady = !keys.error;
+    if (this.apiReady && hadKeys !== true) log("[db] api_keys table present — readers can mint API keys");
+    if (!this.apiReady && hadKeys !== false) log(`[db] no api_keys table — run ${API_MIGRATION_FILE} before anyone can mint a key`);
 
     if (!this.cfg.supabaseAnonKey) return;
     try {
@@ -159,6 +170,75 @@ export class Db {
     this.written.subscriptions++;
   }
 
+  // ------------------------------------------------------ API keys (1.22.0)
+
+  /** @param {Record<string, any>} row without an id; returns the row with one */
+  async createApiKey(row) {
+    if (!this.client) {
+      const stored = { id: randomUUID(), last_used_at: null, revoked_at: null, ...row };
+      this.memory.apiKeys.set(stored.id, stored);
+      this.written.api_keys++;
+      return stored;
+    }
+    const { data, error } = await this.client.from("api_keys").insert(row).select().single();
+    if (error) {
+      this.lastError = `api_keys: ${error.message}`;
+      throw new Error(this.lastError);
+    }
+    this.written.api_keys++;
+    return data;
+  }
+
+  /** The reader's live keys, oldest first. @param {string} userId */
+  async listApiKeys(userId) {
+    if (!this.client) return [...this.memory.apiKeys.values()].filter((k) => k.user_id === userId && !k.revoked_at);
+    const { data, error } = await this.client.from("api_keys").select("id,user_id,prefix,name,created_at,last_used_at,revoked_at").eq("user_id", userId).is("revoked_at", null).order("created_at", { ascending: true });
+    if (error) throw new Error(`api_keys list: ${error.message}`);
+    return data ?? [];
+  }
+
+  /** @param {string} hash @returns {Promise<any | null>} the row, revoked or not */
+  async findApiKeyByHash(hash) {
+    if (!this.client) {
+      for (const k of this.memory.apiKeys.values()) if (k.key_hash === hash) return k;
+      return null;
+    }
+    const { data, error } = await this.client.from("api_keys").select("id,user_id,revoked_at").eq("key_hash", hash).maybeSingle();
+    if (error) throw new Error(`api_keys lookup: ${error.message}`);
+    return data ?? null;
+  }
+
+  /** Revoke one of the reader's own keys. @returns {Promise<boolean>} whether a live key was found */
+  async revokeApiKey(userId, id, at) {
+    if (!this.client) {
+      const k = this.memory.apiKeys.get(id);
+      if (!k || k.user_id !== userId || k.revoked_at) return false;
+      k.revoked_at = at;
+      return true;
+    }
+    const { data, error } = await this.client.from("api_keys").update({ revoked_at: at }).eq("id", id).eq("user_id", userId).is("revoked_at", null).select("id");
+    if (error) throw new Error(`api_keys revoke: ${error.message}`);
+    return (data ?? []).length > 0;
+  }
+
+  /** @param {string} id @param {string} at */
+  async touchApiKey(id, at) {
+    if (!this.client) {
+      const k = this.memory.apiKeys.get(id);
+      if (k) k.last_used_at = at;
+      return;
+    }
+    await this.client.from("api_keys").update({ last_used_at: at }).eq("id", id);
+  }
+
+  /** Signals since an instant, newest first — the API's history read. */
+  async recentSignals({ since, limit }) {
+    if (!this.client) return this.memory.signals.filter((s) => s.timestamp >= since).slice(-limit).reverse();
+    const { data, error } = await this.client.from("signals").select("*").gte("timestamp", since).order("timestamp", { ascending: false }).limit(limit);
+    if (error) throw new Error(`signals history: ${error.message}`);
+    return data ?? [];
+  }
+
   /** Are the copy-desk columns there? Cheap: one column, one row. */
   async probeSchema() {
     if (!this.client) return;
@@ -179,7 +259,7 @@ export class Db {
     }, FLUSH_MS);
     this.probeTimer = setInterval(() => {
       if (this.migrated !== true) this.probeSchema().catch(() => {});
-      if (this.cfg.access !== "open" && (this.billingReady !== true || this.anonReads === true)) this.probeAccounts().catch(() => {});
+      if (this.cfg.access !== "open" && (this.billingReady !== true || this.apiReady !== true || this.anonReads === true)) this.probeAccounts().catch(() => {});
     }, REPROBE_MS);
   }
 
@@ -421,6 +501,14 @@ export class Db {
             ? "current"
             : this.billingReady === false
               ? `migration pending — run ${ACCOUNTS_MIGRATION_FILE} in the Supabase SQL editor`
+              : "probing",
+      api_keys:
+        this.cfg.access === "open"
+          ? "not used (RADAR_ACCESS=open)"
+          : this.apiReady === true
+            ? "current"
+            : this.apiReady === false
+              ? `migration pending — run ${API_MIGRATION_FILE} in the Supabase SQL editor`
               : "probing",
       anon_reads:
         this.cfg.access === "open" || !this.cfg.supabaseAnonKey || this.cfg.dryRun

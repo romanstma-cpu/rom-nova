@@ -32,6 +32,9 @@ import { Hint } from "@/components/ui/Hint";
 import { PageTitle } from "@/components/ui/PageTitle";
 import { Score } from "@/components/ui/bits";
 import { HeliusKeyCard } from "@/components/radar/HeliusKeyCard";
+import { accountServerSnapshot, accountSnapshot, loadHosted, subscribeAccount } from "@/lib/account/auth";
+import { HOSTED_RADAR_URL } from "@/lib/account/hosted";
+import { venueRows } from "@/lib/handoff/venues";
 import {
   holdRadar,
   radarConnect,
@@ -100,13 +103,9 @@ const fmtHold = (ms: number) =>
   ms < 60_000 ? `${Math.round(ms / 1000)}s` : ms < 3_600_000 ? `${Math.round(ms / 60_000)}m` : `${(ms / 3_600_000).toFixed(1)}h`;
 const fmtPriceSol = (p: number) => (p >= 0.01 ? p.toFixed(4) : p.toExponential(2));
 
-/** Where a reader trades it, in their own wallet. Nova opens a tab and steps back. */
-const TRADE_LINKS: { label: string; href: (mint: string) => string }[] = [
-  { label: "pump.fun", href: (m) => `https://pump.fun/coin/${m}` },
-  { label: "Jupiter", href: (m) => `https://jup.ag/swap/SOL-${m}` },
-  { label: "GMGN", href: (m) => `https://gmgn.ai/sol/token/${m}` },
-  { label: "DexScreener", href: (m) => `https://dexscreener.com/solana/${m}` },
-];
+// Where a reader trades it, in their own wallet: src/lib/handoff/venues.ts.
+// Nova opens a tab and steps back; the referral codes on some venues come
+// from the hosted radar's /config, never from this bundle.
 
 /** The one shape both planes render as. */
 interface RadarView {
@@ -190,6 +189,14 @@ export default function RadarPage() {
   const [closeDraft, setCloseDraft] = useState<{ id: string; price: string } | null>(null);
 
   useEffect(() => holdRadar(), []);
+
+  // The referral codes for the handoff links live on the hosted radar's
+  // /config; read once per session, and plain links until it answers.
+  const acct = useSyncExternalStore(subscribeAccount, accountSnapshot, accountServerSnapshot);
+  useEffect(() => {
+    if (!accountSnapshot().hosted) void loadHosted(radarSnapshot().url || HOSTED_RADAR_URL);
+  }, []);
+  const links = venueRows(acct.hosted?.referrals ?? {});
 
   const workerUp = worker.phase === "connected";
   const view = source === "worker" && workerUp ? workerView(worker) : deviceView(hunter);
@@ -402,6 +409,13 @@ export default function RadarPage() {
         <span className="text-[10.5px] dim">
           You trade in your own wallet; Nova opens the token where you trade and never holds a key. Exits alert you
           when the signal wallet sells.
+          {acct.hosted?.referrals.gmgn && (
+            <>
+              {" "}
+              Links marked <span className="num">· ref</span> carry ROM&apos;s GMGN referral code: it costs you nothing and
+              funds the hosted radar.
+            </>
+          )}
         </span>
       </div>
 
@@ -508,7 +522,7 @@ export default function RadarPage() {
                       plan {sizeSol} SOL
                       {hold !== null && ` · time stop ≈ ${fmtHold(hold)}`}
                     </span>
-                    {TRADE_LINKS.map((t) => (
+                    {links.map((t) => (
                       <a
                         key={t.label}
                         href={t.href(s.token_address)}

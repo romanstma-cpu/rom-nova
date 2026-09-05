@@ -124,6 +124,19 @@ after the period rolls, and a paying reader must not lose the feed for the
 time Stripe's retries take. Connected sockets are re-checked every ten
 minutes; a lapsed one hears `gate` and is closed.
 
+## The HTTP API and referrals (1.22.0)
+
+Everything the socket pushes, as JSON on request, behind the same gate:
+[`API.md`](API.md). Readers mint keys on the app's Account page (needs
+[`supabase/migrations/004-api-keys.sql`](supabase/migrations/004-api-keys.sql)
+once; `/health` → `db.api_keys` says when). `API_RATE_PER_MIN` (60) and
+`API_KEYS_PER_USER` (10) are the knobs.
+
+`REFERRAL_GMGN` puts the operator's GMGN referral code on the app's GMGN
+handoff links (web and Telegram bot, in the formats GMGN documents). The
+app reads it from `/config`, ships no code of its own, and says on the
+radar page that the links carry one. Empty means plain links.
+
 ## What triggers a deploy
 
 The Blueprint's `buildFilter` deploys on changes under `worker/`, under

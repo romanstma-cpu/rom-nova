@@ -21,7 +21,11 @@ import {
   adoptHashSession,
   awaitEntitlement,
   cancelCode,
+  dismissNewKey,
+  dropApiKey,
+  loadApiKeys,
   loadHosted,
+  mintApiKey,
   openBillingPortal,
   refreshMe,
   requestCode,
@@ -79,6 +83,8 @@ export default function AccountPage() {
   const returned = useSyncExternalStore(noSubscribe, checkoutReturn, checkoutReturnServer);
   const [emailDraft, setEmailDraft] = useState("");
   const [codeDraft, setCodeDraft] = useState("");
+  const [keyName, setKeyName] = useState("");
+  const [copied, setCopied] = useState(false);
   /** The receipt's fate once Stripe has been asked: null while we still ask. */
   const [confirmed, setConfirmed] = useState<"done" | "slow" | null>(null);
 
@@ -99,6 +105,7 @@ export default function AccountPage() {
         window.history.replaceState(null, "", window.location.pathname + window.location.search);
       }
       await refreshMe(url);
+      if (accountSnapshot().me?.user && accountSnapshot().hosted?.api.keys) await loadApiKeys(url);
     });
     return release;
   }, []);
@@ -218,7 +225,10 @@ export default function AccountPage() {
               void verifyCode(codeDraft).then((ok) => {
                 if (ok) {
                   setCodeDraft("");
-                  void refreshMe(radarUrl).then(() => radarReconnect());
+                  void refreshMe(radarUrl).then(() => {
+                    radarReconnect();
+                    if (accountSnapshot().hosted?.api.keys) void loadApiKeys(radarUrl);
+                  });
                 }
               });
             }}
@@ -362,6 +372,101 @@ export default function AccountPage() {
               )}
             </>
           )}
+        </div>
+      )}
+
+      {/* API keys, where the radar issues them: a gated radar, a signed-in reader */}
+      {signedIn && hosted?.api.keys && (
+        <div className="panel p-3.5 flex flex-col gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="panel-title">API access</span>
+            <span className="chip text-[9.5px]">{acct.apiKeys ? `${acct.apiKeys.length} key${acct.apiKeys.length === 1 ? "" : "s"}` : "reading…"}</span>
+            {hosted.api.ratePerMin !== null && <span className="chip text-[9.5px] num">{hosted.api.ratePerMin} requests / min</span>}
+          </div>
+          <div className="text-[11.5px] dim leading-relaxed">
+            Everything the radar pushes, as JSON for your own scripts: signals with their grades and exits, the leaderboard,
+            launches, whales, fills, behaviours, and signal history. A key stands in for this sign-in
+            {hosted.access === "subscription" ? " and works while the plan is active" : ""}. It is shown once; the radar keeps
+            only a hash.{" "}
+            {hosted.api.docs && (
+              <a className="link" href={hosted.api.docs} target="_blank" rel="noopener noreferrer">
+                API reference ↗
+              </a>
+            )}
+          </div>
+          {acct.newKey && (
+            <div className="panel p-3 flex flex-col gap-1.5" style={{ borderColor: "rgba(56,225,255,0.35)" }}>
+              <div className="text-[11px] warn">Copy this key now. It will not be shown again.</div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <code className="num text-[12px] break-all">{acct.newKey.key}</code>
+                <button
+                  type="button"
+                  className="btn text-[11px]"
+                  onClick={() => {
+                    const nk = acct.newKey;
+                    if (nk) void navigator.clipboard?.writeText(nk.key).then(() => setCopied(true));
+                  }}
+                >
+                  {copied ? "COPIED" : "COPY"}
+                </button>
+                <button
+                  type="button"
+                  className="btn text-[11px]"
+                  onClick={() => {
+                    dismissNewKey();
+                    setCopied(false);
+                  }}
+                >
+                  done
+                </button>
+              </div>
+              <pre className="num text-[10.5px] dim whitespace-pre-wrap break-all m-0">{`curl -H "Authorization: Bearer ${acct.newKey.key}" "${radarUrl}/api/v1/signals?limit=20"`}</pre>
+            </div>
+          )}
+          {acct.apiKeys && acct.apiKeys.length > 0 && (
+            <div className="flex flex-col">
+              {acct.apiKeys.map((k) => (
+                <div key={k.id} className="flex items-center gap-3 flex-wrap py-1.5 border-b border-[rgba(27,35,51,0.5)] text-[11.5px]">
+                  <span className="num">{k.prefix}</span>
+                  <span className="dim">{k.name || "unnamed"}</span>
+                  <span className="faint num text-[10.5px]">
+                    made {fmtDate(k.created_at)}
+                    {k.last_used_at ? ` · used ${fmtDate(k.last_used_at)}` : " · never used"}
+                  </span>
+                  <button type="button" className="btn text-[10.5px] ml-auto" disabled={acct.busy} onClick={() => void dropApiKey(radarUrl, k.id)}>
+                    revoke
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <form
+            className="flex gap-2 flex-wrap items-center"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void mintApiKey(radarUrl, keyName).then((k) => {
+                if (k) {
+                  setKeyName("");
+                  setCopied(false);
+                }
+              });
+            }}
+          >
+            <input
+              type="text"
+              value={keyName}
+              onChange={(e) => setKeyName(e.target.value)}
+              placeholder="what this key is for (optional)"
+              maxLength={60}
+              className="input text-[12px] flex-1 min-w-[220px]"
+              aria-label="Key name"
+            />
+            <button type="submit" className="btn btn-primary text-[11px]" disabled={acct.busy || (hosted.access === "subscription" && !me?.entitled)}>
+              NEW KEY
+            </button>
+          </form>
+          {hosted.access === "subscription" && !me?.entitled && <div className="text-[11px] warn">Keys need an active plan.</div>}
+          {acct.keysError && <div className="text-[11px] text-[var(--danger)]">{acct.keysError}</div>}
         </div>
       )}
 

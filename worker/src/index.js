@@ -14,6 +14,8 @@ import { startRpcStream } from "../../src/lib/radar/engine/rpcstream.js";
 import { RadarState } from "../../src/lib/radar/engine/state.js";
 import { log, short } from "../../src/lib/radar/engine/util.js";
 import { Access } from "./access.js";
+import { Api } from "./api.js";
+import { ApiKeys, RateLimiter } from "./apikeys.js";
 import { AuthVerifier } from "./auth.js";
 import { Billing } from "./billing.js";
 import { loadConfig } from "./config.js";
@@ -34,7 +36,8 @@ const verifier =
   cfg.access === "open"
     ? null
     : new AuthVerifier({ supabaseUrl: cfg.supabaseUrl, apiKey: cfg.supabaseServiceKey || cfg.supabaseAnonKey });
-const access = new Access(cfg, { verifier, db });
+const apiKeys = new ApiKeys(db, { maxPerUser: cfg.apiKeysPerUser });
+const access = new Access(cfg, { verifier, db, apiKeys });
 const billing = new Billing(cfg, db, { onApplied: (userId) => access.forget(userId) });
 if (cfg.access === "subscription") await billing.loadPrice();
 
@@ -64,6 +67,7 @@ function status() {
     db: db.status(),
     access: { ...access.status(), sockets: feed?.counts ?? null },
     billing: billing.status(),
+    api: api.status(),
     dexscreener: dexScreenerStatus(),
     price_lookup: lookupStatus(),
     coverage:
@@ -72,7 +76,24 @@ function status() {
   };
 }
 
-feed = new Feed(cfg, status, { access, billing });
+// The HTTP API reads the feed's rings and the state's wallets on demand;
+// the closures resolve at request time, after `feed` exists.
+const api = new Api({
+  cfg,
+  access,
+  apiKeys,
+  limiter: new RateLimiter({ perMinute: cfg.apiRatePerMinute }),
+  db,
+  data: {
+    rings: () => feed.rings,
+    topWallets: (n) => state.top(n),
+    wallet: (address) => {
+      const w = state.tracked.get(address);
+      return w ? state.rowOf(address, w) : null;
+    },
+  },
+});
+feed = new Feed(cfg, status, { access, billing, api });
 
 /** A grade, as the columns it lands in. */
 function outcomePatch(e) {

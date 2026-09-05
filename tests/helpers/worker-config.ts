@@ -2,6 +2,7 @@
 // knob the worker reads, with the defaults loadConfig() would produce, and
 // the fields under test overridden per case.
 
+import { randomUUID } from "node:crypto";
 import type { Config } from "../../worker/src/config.js";
 
 export function workerConfig(over: Partial<Config> = {}): Config {
@@ -18,6 +19,9 @@ export function workerConfig(over: Partial<Config> = {}): Config {
     stripeWebhookSecret: "",
     appUrl: "https://romapps.xyz/nova",
     entitlementGraceMs: 24 * 3_600_000,
+    apiRatePerMinute: 60,
+    apiKeysPerUser: 10,
+    referrals: { gmgn: "" },
     gates: {
       whaleThresholdSol: 10,
       whaleWindowMs: 10 * 60_000,
@@ -36,14 +40,50 @@ export function workerConfig(over: Partial<Config> = {}): Config {
 
 export type SubscriptionRow = Record<string, unknown> & { user_id: string };
 
-/** The four calls billing and the gate make of the database, over a Map. */
-export function fakeDb(rows: SubscriptionRow[] = []) {
+export type ApiKeyRecord = Record<string, unknown> & { id: string; user_id: string; key_hash: string; revoked_at: string | null };
+
+/** The calls billing, the gate, the keys and the API make of the database, over Maps. */
+export function fakeDb(rows: SubscriptionRow[] = [], opts: { signals?: Record<string, unknown>[] } = {}) {
   const store = new Map<string, SubscriptionRow>(rows.map((r) => [r.user_id, r]));
-  const calls = { reads: 0, writes: 0 };
+  const apiKeys = new Map<string, ApiKeyRecord>();
+  const calls = { reads: 0, writes: 0, keyReads: 0, touches: 0 };
+  const signals = opts.signals ?? [];
   return {
     billingReady: true as boolean | null,
+    apiReady: true as boolean | null,
     store,
+    apiKeys,
     calls,
+    async createApiKey(row: Record<string, unknown>): Promise<ApiKeyRecord> {
+      const stored = { id: randomUUID(), last_used_at: null, revoked_at: null, ...row } as unknown as ApiKeyRecord;
+      apiKeys.set(stored.id, stored);
+      return stored;
+    },
+    async listApiKeys(userId: string): Promise<ApiKeyRecord[]> {
+      return [...apiKeys.values()].filter((k) => k.user_id === userId && !k.revoked_at);
+    },
+    async findApiKeyByHash(hash: string): Promise<ApiKeyRecord | null> {
+      calls.keyReads++;
+      for (const k of apiKeys.values()) if (k.key_hash === hash) return k;
+      return null;
+    },
+    async revokeApiKey(userId: string, id: string, at: string): Promise<boolean> {
+      const k = apiKeys.get(id);
+      if (!k || k.user_id !== userId || k.revoked_at) return false;
+      k.revoked_at = at;
+      return true;
+    },
+    async touchApiKey(id: string, at: string): Promise<void> {
+      calls.touches++;
+      const k = apiKeys.get(id);
+      if (k) k.last_used_at = at;
+    },
+    async recentSignals({ since, limit }: { since: string; limit: number }): Promise<Record<string, unknown>[]> {
+      return signals
+        .filter((s) => String(s.timestamp) >= since)
+        .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)))
+        .slice(0, limit);
+    },
     async getSubscription(id: string): Promise<SubscriptionRow | null> {
       calls.reads++;
       return store.get(id) ?? null;

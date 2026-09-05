@@ -63,3 +63,6 @@ services:
       #   STRIPE_SECRET_KEY      subscription — Stripe → Developers → API keys
       #   STRIPE_PRICE_ID        subscription — the recurring price to sell (price_…)
       #   STRIPE_WEBHOOK_SECRET  subscription — the endpoint's signing secret (whsec_…)
+      # 1.22.0 — the HTTP API (worker/API.md) and referral codes on the app's handoff links:
+      #   API_RATE_PER_MIN       default 60; API_KEYS_PER_USER default 10
+      #   REFERRAL_GMGN          the operator's GMGN referral code; public by design, empty = plain links

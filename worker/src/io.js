@@ -40,10 +40,14 @@ import { createServer } from "node:http";
 import { Server } from "socket.io";
 import { log } from "../../src/lib/radar/engine/util.js";
 import { BillingError, StripeError } from "./billing.js";
+import { HttpError } from "./http-error.js";
 
 const RING = { launches: 60, whales: 60, trades: 120, signals: 100, behaviours: 80 };
 /** Stripe events are a few KB; anything past this is not a webhook. */
 const BODY_CAP = 256 * 1024;
+/** A key's name is the whole body of the one JSON POST the API takes. */
+const JSON_BODY_CAP = 16 * 1024;
+const API_DOCS_URL = "https://github.com/romanstma-cpu/rom-nova/blob/main/worker/API.md";
 /** How often a connected socket is re-checked against the gate. */
 const SWEEP_MS = 10 * 60_000;
 
@@ -53,7 +57,8 @@ const SWEEP_MS = 10 * 60_000;
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-headers": "authorization, content-type",
-  "access-control-allow-methods": "GET, POST, OPTIONS",
+  "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+  "access-control-expose-headers": "x-ratelimit-limit, x-ratelimit-remaining, retry-after",
   "access-control-max-age": "600",
 };
 
@@ -87,13 +92,14 @@ export class Feed {
   /**
    * @param {import("./config.js").Config} cfg
    * @param {() => any} statusFn
-   * @param {{ access?: import("./access.js").Access, billing?: import("./billing.js").Billing }} [deps]
+   * @param {{ access?: import("./access.js").Access, billing?: import("./billing.js").Billing, api?: import("./api.js").Api }} [deps]
    */
   constructor(cfg, statusFn, deps = {}) {
     this.cfg = cfg;
     this.statusFn = statusFn;
     this.access = deps.access ?? null;
     this.billing = deps.billing ?? null;
+    this.api = deps.api ?? null;
     this.rings = { launches: [], whales: [], trades: [], signals: [], behaviours: [] };
     this.topWallets = [];
     this.clients = 0;
@@ -149,9 +155,9 @@ export class Feed {
     });
   }
 
-  /** @param {import("node:http").ServerResponse} res @param {number} status @param {any} body */
-  json(res, status, body) {
-    res.writeHead(status, { "content-type": "application/json", ...CORS });
+  /** @param {import("node:http").ServerResponse} res @param {number} status @param {any} body @param {Record<string, string>} [headers] */
+  json(res, status, body, headers = {}) {
+    res.writeHead(status, { "content-type": "application/json", ...CORS, ...headers });
     res.end(JSON.stringify(body, null, status === 200 && body?.service ? 2 : 0));
   }
 
@@ -161,12 +167,39 @@ export class Feed {
    */
   async handle(req, res) {
     this.counts.requests++;
-    const path = (req.url ?? "/").split("?")[0].replace(/\/+$/, "") || "/";
+    const [rawPath, rawQuery = ""] = (req.url ?? "/").split("?");
+    const path = rawPath.replace(/\/+$/, "") || "/";
     const method = req.method ?? "GET";
 
     if (method === "OPTIONS") {
       res.writeHead(204, CORS);
       res.end();
+      return;
+    }
+
+    // The HTTP API and the key routes: bytes read here, decisions in api.js.
+    if (this.api && (path === "/api" || path.startsWith("/api/"))) {
+      let body = null;
+      if (method === "POST") {
+        let raw;
+        try {
+          raw = await readBody(req, JSON_BODY_CAP);
+        } catch (err) {
+          this.json(res, 413, { error: err instanceof Error ? err.message : "bad body" });
+          return;
+        }
+        if (raw.trim() !== "") {
+          try {
+            body = JSON.parse(raw);
+          } catch {
+            this.json(res, 400, { error: "body must be JSON" });
+            return;
+          }
+        }
+      }
+      const query = Object.fromEntries(new URLSearchParams(rawQuery));
+      const out = await this.api.handle(method, path, query, bearerOf(req), { body, remote: req.socket?.remoteAddress ?? "" });
+      this.json(res, out.status, out.body, out.headers);
       return;
     }
 
@@ -176,10 +209,15 @@ export class Feed {
     }
 
     if (method === "GET" && path === "/config") {
+      /** @type {Record<string, string>} */
+      const referrals = {};
+      for (const [venue, code] of Object.entries(this.cfg.referrals ?? {})) if (code) referrals[venue] = code;
       this.json(res, 200, {
         access: this.cfg.access,
         auth: this.cfg.supabaseAnonKey ? { url: this.cfg.supabaseUrl, anon_key: this.cfg.supabaseAnonKey } : null,
         billing: this.billing ? this.billing.publicInfo() : { enabled: false, price: null },
+        api: { enabled: this.api !== null, keys: this.api !== null && this.cfg.access !== "open", rate_per_min: this.cfg.apiRatePerMinute, docs: API_DOCS_URL },
+        referrals,
         app_url: this.cfg.appUrl,
       });
       return;
@@ -266,7 +304,7 @@ export class Feed {
       const url = await mint(who.user);
       this.json(res, 200, { url });
     } catch (err) {
-      if (err instanceof BillingError) this.json(res, err.status, { error: err.message });
+      if (err instanceof BillingError || err instanceof HttpError) this.json(res, err.status, { error: err.message });
       else if (err instanceof StripeError) this.json(res, 502, { error: `stripe: ${err.message}` });
       else throw err;
     }

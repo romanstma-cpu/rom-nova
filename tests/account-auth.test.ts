@@ -181,6 +181,38 @@ describe("account store", () => {
     expect(await a.refreshMe(RADAR, radar.fetchImpl)).toBeNull();
   });
 
+  it("lists, mints and revokes API keys on the radar, showing a new key once", async () => {
+    store.set(
+      SESSION_KEY,
+      JSON.stringify({ accessToken: "tok", refreshToken: "r", expiresAt: NOW + 3_600_000, user: { id: "user-1", email: "r@x.y" }, auth: { url: AUTH, anonKey: "anon-1" } }),
+    );
+    const a = await freshStore();
+    const keys: Record<string, unknown>[] = [{ id: "11111111-1111-4111-8111-111111111111", prefix: "nova_abcdefgh…", name: "old bot", created_at: "2026-09-01T00:00:00Z", last_used_at: null }];
+    const radar = fakeFetch((url, init) => {
+      if (url === `${RADAR}/api/keys` && (init?.method ?? "GET") === "GET") return { status: 200, body: { keys } };
+      if (url === `${RADAR}/api/keys` && init?.method === "POST") {
+        const made = { id: "22222222-2222-4222-8222-222222222222", prefix: "nova_zzzzzzzz…", name: jsonOf({ url, init }).name, created_at: "2026-09-05T00:00:00Z", last_used_at: null };
+        keys.push(made);
+        return { status: 201, body: { ...made, key: "nova_" + "z".repeat(40) } };
+      }
+      if (url.startsWith(`${RADAR}/api/keys/`) && init?.method === "DELETE") return { status: 200, body: { revoked: url.split("/").pop() } };
+      return { status: 404, body: { error: "not found" } };
+    });
+    expect(await a.loadApiKeys(RADAR, radar.fetchImpl)).toHaveLength(1);
+    expect(headerOf(radar.calls[0], "authorization")).toBe("Bearer tok");
+    expect(await a.mintApiKey(RADAR, " new bot ", radar.fetchImpl)).toBe("nova_" + "z".repeat(40));
+    expect(jsonOf(radar.calls[1])).toEqual({ name: "new bot" });
+    expect(a.accountSnapshot().newKey).toMatchObject({ key: "nova_" + "z".repeat(40), prefix: "nova_zzzzzzzz…", name: "new bot" });
+    expect(a.accountSnapshot().apiKeys).toHaveLength(2);
+    a.dismissNewKey();
+    expect(a.accountSnapshot().newKey).toBeNull();
+    expect(await a.dropApiKey(RADAR, "11111111-1111-4111-8111-111111111111", radar.fetchImpl)).toBe(true);
+    expect(radar.calls.at(-1)?.url).toBe(`${RADAR}/api/keys/11111111-1111-4111-8111-111111111111`);
+    expect(a.accountSnapshot().apiKeys?.map((k) => k.id)).toEqual(["22222222-2222-4222-8222-222222222222"]);
+    await a.signOut(radar.fetchImpl);
+    expect(a.accountSnapshot().apiKeys).toBeNull();
+  });
+
   it("names a radar that does not recognise the session", async () => {
     store.set(
       SESSION_KEY,
@@ -202,9 +234,22 @@ describe("hosted helpers", () => {
       access: "subscription",
       auth: { url: AUTH, anonKey: "anon-1" },
       billing: { enabled: true, price: { amount: 900, currency: "usd", interval: "month" } },
+      api: { enabled: false, keys: false, ratePerMin: null, docs: null },
+      referrals: {},
       appUrl: "https://romapps.xyz/nova",
     });
-    expect(h.normHostedConfig(RADAR, null)).toEqual({ url: RADAR, access: "open", auth: null, billing: { enabled: false, price: null }, appUrl: null });
+    expect(h.normHostedConfig(RADAR, null)).toEqual({
+      url: RADAR,
+      access: "open",
+      auth: null,
+      billing: { enabled: false, price: null },
+      api: { enabled: false, keys: false, ratePerMin: null, docs: null },
+      referrals: {},
+      appUrl: null,
+    });
+    const withApi = h.normHostedConfig(RADAR, { access: "account", api: { enabled: true, keys: true, rate_per_min: 60, docs: "https://x/API.md" }, referrals: { gmgn: "romnova", bogus: "x" } });
+    expect(withApi.api).toEqual({ enabled: true, keys: true, ratePerMin: 60, docs: "https://x/API.md" });
+    expect(withApi.referrals).toEqual({ gmgn: "romnova" });
     expect(h.normHostedConfig(RADAR, { access: "nonsense", auth: { url: AUTH } }).auth).toBeNull();
     expect(h.fmtPrice({ amount: 900, currency: "usd", interval: "month" })).toBe("$9.00 / month");
     expect(h.fmtPrice({ amount: 1500, currency: "jpy", interval: "month" })).toBe("¥1,500 / month");

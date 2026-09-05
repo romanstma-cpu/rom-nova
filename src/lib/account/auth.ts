@@ -21,11 +21,15 @@
 // use for it. Every call takes a fetch so the tests can play Supabase.
 
 import {
+  createApiKey,
+  fetchApiKeys,
   fetchCheckoutUrl,
   fetchHostedConfig,
   fetchMe,
   fetchPortalUrl,
   HostedError,
+  revokeApiKey,
+  type ApiKeyRow,
   type HostedConfig,
   type HostedMe,
 } from "./hosted";
@@ -72,6 +76,11 @@ export interface AccountState {
   meError: string | null;
   /** a minted Checkout URL, kept so the page can offer a link if the popup was blocked */
   checkoutUrl: string | null;
+  /** the reader's API keys on the radar, last read — null until asked */
+  apiKeys: ApiKeyRow[] | null;
+  /** a key just minted, in the clear, until the reader dismisses it */
+  newKey: { key: string; prefix: string; name: string } | null;
+  keysError: string | null;
   asOf: number;
 }
 
@@ -87,6 +96,9 @@ const SERVER_STATE: AccountState = {
   me: null,
   meError: null,
   checkoutUrl: null,
+  apiKeys: null,
+  newKey: null,
+  keysError: null,
   asOf: 0,
 };
 
@@ -302,7 +314,7 @@ export async function signOut(fetchImpl: Fetch = fetch): Promise<void> {
   ensureRestored();
   const s = readSession();
   writeSession(null);
-  notify({ phase: "out", user: null, me: null, meError: null, error: null, checkoutUrl: null });
+  notify({ phase: "out", user: null, me: null, meError: null, error: null, checkoutUrl: null, apiKeys: null, newKey: null, keysError: null });
   if (!s) return;
   try {
     await gotrue(s.auth, "/logout", { token: s.accessToken }, fetchImpl);
@@ -445,6 +457,58 @@ export async function startCheckout(url: string, fetchImpl: Fetch = fetch): Prom
     notify({ busy: false, error: err instanceof Error ? err.message : "checkout could not be started" });
     return null;
   }
+}
+
+// ---------------------------------------------------------- API keys
+
+export async function loadApiKeys(url: string, fetchImpl: Fetch = fetch): Promise<ApiKeyRow[] | null> {
+  const token = await accessToken(fetchImpl);
+  if (!token) {
+    notify({ apiKeys: null, keysError: null });
+    return null;
+  }
+  try {
+    const keys = await fetchApiKeys(url, token, fetchImpl);
+    notify({ apiKeys: keys, keysError: null });
+    return keys;
+  } catch (err) {
+    notify({ apiKeys: null, keysError: err instanceof Error ? err.message : "could not read your keys" });
+    return null;
+  }
+}
+
+/** Mints a key and keeps it in the clear until dismissNewKey(). */
+export async function mintApiKey(url: string, name: string, fetchImpl: Fetch = fetch): Promise<string | null> {
+  const token = await accessToken(fetchImpl);
+  if (!token) return null;
+  notify({ busy: true, keysError: null });
+  try {
+    const made = await createApiKey(url, token, name.trim(), fetchImpl);
+    const { key, ...row } = made;
+    notify({ busy: false, newKey: { key, prefix: row.prefix, name: row.name }, apiKeys: [...(state.apiKeys ?? []), row] });
+    return key;
+  } catch (err) {
+    notify({ busy: false, keysError: err instanceof Error ? err.message : "the key could not be minted" });
+    return null;
+  }
+}
+
+export async function dropApiKey(url: string, id: string, fetchImpl: Fetch = fetch): Promise<boolean> {
+  const token = await accessToken(fetchImpl);
+  if (!token) return false;
+  notify({ busy: true, keysError: null });
+  try {
+    const ok = await revokeApiKey(url, token, id, fetchImpl);
+    notify({ busy: false, apiKeys: (state.apiKeys ?? []).filter((k) => k.id !== id), newKey: state.newKey && state.apiKeys?.find((k) => k.id === id)?.prefix === state.newKey.prefix ? null : state.newKey });
+    return ok;
+  } catch (err) {
+    notify({ busy: false, keysError: err instanceof Error ? err.message : "the key could not be revoked" });
+    return false;
+  }
+}
+
+export function dismissNewKey(): void {
+  if (state.newKey) notify({ newKey: null });
 }
 
 export async function openBillingPortal(url: string, fetchImpl: Fetch = fetch): Promise<string | null> {

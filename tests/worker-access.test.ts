@@ -78,6 +78,20 @@ describe("Access", () => {
     expect(db.calls.reads).toBe(3);
   });
 
+  it("account: an API key is identified as its owner, and an unknown one refused", async () => {
+    const db = fakeDb();
+    const { ApiKeys } = await import("../worker/src/apikeys.js");
+    const apiKeys = new ApiKeys(db, { now: () => NOW });
+    const minted = await apiKeys.create({ id: "user-1" }, "bot");
+    const access = new Access(workerConfig({ access: "account" }), { verifier: fakeVerifier(), db, apiKeys });
+    expect(await access.identify(minted.key)).toEqual({ ok: true, user: { id: "user-1", email: "", via: "key", keyId: minted.id } });
+    expect(await access.check(minted.key)).toMatchObject({ ok: true, entitled: true });
+    expect(await access.identify("nova_" + "x".repeat(40))).toMatchObject({ ok: false, status: 401 });
+    // a key-shaped token on a radar that issues no keys falls through to the verifier
+    const noKeys = new Access(workerConfig({ access: "account" }), { verifier: fakeVerifier(), db });
+    expect(await noKeys.identify(minted.key)).toMatchObject({ ok: false, status: 401 });
+  });
+
   it("subscription: a table that cannot be read is 503, not a refusal", async () => {
     const db = fakeDb();
     db.getSubscription = async () => {

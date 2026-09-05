@@ -20,6 +20,7 @@ import { Stat, Empty } from "@/components/ui/bits";
 import type { WalletFill, WalletHolding, WalletProfile } from "@/lib/types";
 import { movementLabel } from "@/lib/engine/fill-label";
 import { LedgerPanel } from "./LedgerPanel";
+import { PortfolioRisk } from "./PortfolioRisk";
 
 /** A measured value, or an explicit statement that nobody measured it. */
 function Measured({
@@ -393,6 +394,10 @@ export function RealWalletProfile({ p }: { p: WalletProfile }) {
       </div>
 
       <CoverageStrip p={p} />
+
+      {/* Under the coverage strip on purpose: every share and every FIFO
+          figure is conditional on the window the strip names. */}
+      <PortfolioRisk p={p} />
 
       <LedgerPanel address={p.address} profile={p} />
 

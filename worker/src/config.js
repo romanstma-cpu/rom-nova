@@ -72,6 +72,19 @@ export function loadConfig() {
      */
     entitlementGraceMs: num("ENTITLEMENT_GRACE_HOURS", 24) * 3_600_000,
 
+    /** The HTTP API: requests a key (or a session) may make per minute, and keys a reader may hold. */
+    apiRatePerMinute: num("API_RATE_PER_MIN", 60),
+    apiKeysPerUser: num("API_KEYS_PER_USER", 10),
+
+    /**
+     * Referral codes the app puts on its handoff links, by venue. Public by
+     * design (they are in every link), set here so the app ships none and a
+     * self-hosted worker carries its own operator's. Empty means plain links.
+     */
+    referrals: {
+      gmgn: (process.env.REFERRAL_GMGN ?? "").trim(),
+    },
+
     gates: {
       whaleThresholdSol: num("WHALE_THRESHOLD_SOL", 10),
       whaleWindowMs: num("WHALE_WINDOW_MIN", 10) * 60_000,

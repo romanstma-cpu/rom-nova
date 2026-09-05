@@ -142,3 +142,22 @@ alter table subscriptions enable row level security;
 do $$ begin
   create policy subscriptions_own_read on subscriptions for select using (auth.uid() = user_id);
 exception when duplicate_object then null; end $$;
+
+-- 1.22.0, API keys: one row per key a reader minted; the key itself is
+-- shown once and only its SHA-256 is kept. migrations/004-api-keys.sql is
+-- the same block.
+create table if not exists api_keys (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  key_hash text unique not null,
+  prefix text not null,
+  name text,
+  created_at timestamptz not null default now(),
+  last_used_at timestamptz,
+  revoked_at timestamptz
+);
+create index if not exists api_keys_user_idx on api_keys (user_id);
+alter table api_keys enable row level security;
+do $$ begin
+  create policy api_keys_own_read on api_keys for select using (auth.uid() = user_id);
+exception when duplicate_object then null; end $$;

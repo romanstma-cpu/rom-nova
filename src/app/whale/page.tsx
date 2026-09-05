@@ -14,7 +14,8 @@
 // spaces are shaped identically — the generator emits 44-character base58 too —
 // so there is no way to tell them apart by looking at one.
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useState, useSyncExternalStore } from "react";
+import { myWalletServer, myWalletSnapshot, subscribeMyWallet } from "@/lib/portfolio/mine";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiGet, useApi, fmtUsd, fmtPct, fmtAgo, shortAddr } from "@/lib/client";
@@ -62,6 +63,9 @@ function AddressBar({ current }: { current: string }) {
   const router = useRouter();
   const [value, setValue] = useState(current);
   const ok = PLAUSIBLE.test(value.trim());
+  // The address the reader asked to be remembered on a profile page — one
+  // click back to their own risk panel and export.
+  const mine = useSyncExternalStore(subscribeMyWallet, myWalletSnapshot, myWalletServer);
   return (
     <form
       className="panel px-3 py-2.5 flex items-center gap-2 flex-wrap"
@@ -82,6 +86,11 @@ function AddressBar({ current }: { current: string }) {
       <button type="submit" className={`chip ${ok ? "chip-accent" : ""} cursor-pointer`} disabled={!ok}>
         {ok ? "PROFILE" : "not a Solana address"}
       </button>
+      {mine && mine !== current && (
+        <Link href={`/whale?a=${mine}`} className="chip cursor-pointer" title="The address you asked this browser to remember — risk and the FIFO export.">
+          MY WALLET
+        </Link>
+      )}
     </form>
   );
 }

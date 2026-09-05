@@ -1,0 +1,98 @@
+# ROM Nova Radar — HTTP API
+
+Everything the radar pushes over its socket, as JSON on request: recent
+signals with their grades and exits, the leaderboard with its intelligence
+columns, launches, whale discoveries, tracked-wallet fills, behaviour reads,
+and signal history out of the database. One base URL — the worker's — and
+one header.
+
+## Authentication
+
+The API sits behind the same gate as the feed (`RADAR_ACCESS`, see the
+[README](README.md#accounts-and-billing-1210)):
+
+| mode           | what a request needs                                        |
+| -------------- | ----------------------------------------------------------- |
+| `open`         | nothing                                                     |
+| `account`      | an API key, or a session token                              |
+| `subscription` | an API key or session token whose owner is paid up          |
+
+Mint a key on the app's **Account** page (signed in). It is shown once; the
+worker stores only its SHA-256. Send it as a Bearer:
+
+```
+Authorization: Bearer nova_…
+```
+
+A key is judged as its owner: a lapsed subscription stops the key the
+minute it would stop the session. Keys are revoked from the same page, and
+a revoked key stops within a minute everywhere.
+
+The socket takes the same key: `io(url, { auth: { token: "nova_…" } })`.
+
+## Rate limit
+
+Per key (or per session, or per address on an open radar): `API_RATE_PER_MIN`
+requests a minute, default 60, sliding window. Every data response carries
+`x-ratelimit-limit` and `x-ratelimit-remaining`; a refusal is `429` with
+`retry-after` in seconds.
+
+## Endpoints
+
+All `GET`. `limit` is 50 by default and 200 at most. Every response carries
+`as_of`, the worker's clock at the answer.
+
+| path                             | body                                                              |
+| -------------------------------- | ----------------------------------------------------------------- |
+| `/api/v1/signals`                | `signals`: the most recent, newest first, with grades and exits   |
+| `/api/v1/signals?since=<ISO>`    | `signals` from the database since that instant (30 days at most)  |
+| `/api/v1/wallets`                | `wallets`: the leaderboard by score, with the intelligence columns |
+| `/api/v1/wallets/<address>`      | `wallet`: one tracked wallet's row; `signals`: its recent signals |
+| `/api/v1/launches`               | `launches`: the creation stream, newest first                     |
+| `/api/v1/whales`                 | `whales`: wallets crossing the discovery gate                     |
+| `/api/v1/trades`                 | `trades`: journaled fills by tracked wallets                      |
+| `/api/v1/behaviours`             | `behaviours`: dormant_buy, accumulation, distribution, wash_like  |
+
+Rows carry the same fields the socket's events do; a signal's `ret_1m`,
+`ret_5m`, `ret_15m`, `ret_1h`, `peak_ret_1h`, `graded_stale`,
+`graded_lookup` and `whale_exit_*` are null until graded. A wallet's
+`labels`, `consistency`, `max_drawdown_sol`, `median_hold_ms`,
+`follow_ret_5m`, `follow_hit_rate` and `signals_graded` are the measured
+intelligence columns; `unmeasured_sells` says how much of its record the
+score does NOT stand on.
+
+Key management, with a **session** token (a key may not mint a key):
+
+| method   | path                | body / result                                  |
+| -------- | ------------------- | ---------------------------------------------- |
+| `GET`    | `/api/keys`         | `keys`: id, prefix, name, created, last used   |
+| `POST`   | `/api/keys`         | `{"name": "…"}` → the row plus `key`, once     |
+| `DELETE` | `/api/keys/<id>`    | `{"revoked": id}`                              |
+
+## Examples
+
+```bash
+curl -H "Authorization: Bearer nova_…" \
+  "https://rom-nova-radar.onrender.com/api/v1/signals?limit=20"
+
+curl -H "Authorization: Bearer nova_…" \
+  "https://rom-nova-radar.onrender.com/api/v1/signals?since=2026-09-05T00:00:00Z&limit=200"
+```
+
+```js
+import { io } from "socket.io-client";
+const s = io("https://rom-nova-radar.onrender.com", { auth: { token: "nova_…" } });
+s.on("signal", (sig) => console.log(sig.wallet_score, sig.token_address, sig.buy_amount_sol));
+s.on("exit", (e) => e.first && console.log("exit", e.wallet, e.ret));
+s.on("connect_error", (err) => console.error(err.message, err.data));
+```
+
+## Honesty
+
+The rows are observations from the worker's own stream — pump.fun
+bonding-curve trades program-wide, plus off-curve coverage for top wallets
+when the operator set a Helius key — and nothing else. Grades are marked to
+the last trade seen (`graded_stale`) or to an off-curve quote
+(`graded_lookup`) when the stream went quiet. No row is advice, no
+endpoint executes anything, and the radar has never held a key to any
+wallet.

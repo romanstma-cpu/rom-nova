@@ -1181,6 +1181,70 @@ and key route with 401. 852 tests.
 mode issues no keys). For referrals: sign up at GMGN → Referral, set
 `REFERRAL_GMGN` on Render. Both documented in worker/README.md.
 
+## 1.23.0 — the graded model (2026-09-05, morning)
+
+LO: "next" after the ranked list (flip the gate — his; the graded model;
+community; the site's hosted section). The model first, since it needs
+no account.
+
+**The engine** (`src/lib/radar/engine/model.js`, pure, shared): a
+logistic regression over graded signals. Features are what was known
+when the signal fired — wallet score, log settled sells, log size, log10
+fill price (curve stage), launch age (with an "unknown" flag, imputed to
+the train mean), hour of day as sin/cos, the wallet's signals in the
+previous hour, earlier signals on the mint in the previous day, minutes
+since the wallet's previous signal — every context from EARLIER rows
+only. Target: `ret_5m ≥ +10%`. Stale grades, ungraded and unpriced rows
+excluded and counted by reason. Standardized on the train fold; full-batch
+gradient descent with L2, 400 iterations, no library. The split is in
+TIME ORDER, 70/30, never random. The fold judgement: base rate, the top
+quarter's precision with a binomial SE and lift, Brier vs the base rate,
+what it would act on at p ≥ 0.5. Verdict: insufficient (< 200 usable or
+< 60 in the fold), no edge, edge (top quarter beats the base rate by 2 SE,
+lift ≥ 1.2, better Brier). `predictP(card, row, ctx)` and `forwardRecord`
+(rows that carried `model_p` when they fired and were graded fresh, judged
+the same way). Tests: a planted score→hit relationship is found on the
+held-out fold with the right weight and ordered probabilities; three seeds
+of 30% noise are never called an edge.
+
+**The engine writes two facts on a signal as it fires** — `settled_sells`
+and `launch_age_ms` — evidence known at that moment, never revised.
+
+**The worker** (`worker/src/model.js`): hourly refresh over 90 days /
+5,000 graded rows, the live context seeded from history, `annotate(s)`
+stamps `model_p` + `model_version` BEFORE the row is written or pushed
+(index.js emitSignal), so the grade that lands later judges the guess
+with no hindsight. `/health.model` = the summary (+ the socket's status);
+`/api/v1/model` = the whole card + forward record. Migration 005
+(schema.sql carries it) adds the four columns; until it runs db.js strips
+them and reports `db.model_columns`.
+
+**The app**: `RadarModel.tsx` on /track under the signal record — this
+browser's card (trained here over the journal, weights named for what they
+measure) beside the connected worker's card and forward record (holds the
+radar so the status flows); the radar page shows a dim "p 63%" chip with
+the caveat in the tooltip on signals that carry one. `src/lib/radar/
+model.ts` types the card and normalizes the worker's summary.
+
+### 🚢 1.23.0 SHIPPED and proven (2026-09-05 ~10:55 AM)
+
+`9f69405` (19 files, +1129/−4) → `e994ce2` (1.23.0) → tag → CI green.
+Installer SHA256 `0af19366…83d2` = GitHub digest = SHA256SUMS; latest.yml
+1.23.0; 83,347,641 bytes. Site `b7f0ca1`, Pages built in 30s, live
+3×1.23.0 / 0×1.22.0, 1,594-test band, `/nova/track/` 200 with the model
+panel in its chunk. Desktop 1.23.0.0: packaged panel and p chip present,
+titled window at once, 4 procs → 0, leveldb LOG 10:51. Render redeployed
+within minutes; the LIVE worker's card: **insufficient, 98 usable graded
+signals of 98 rows** (0 stale, 0 unpriced) — the 200 floor is two or
+three days of signals away at the current pace, and `db.model_columns`
+names migration 005 for LO. DRY_RUN smoke: an empty worker prints
+"insufficient · 0 usable" on /health and /api/v1/model, stamps nothing.
+863 tests.
+
+**LO's step**: run schema.sql (carries 005) so the forward record can
+start the day the card fits. Until then the worker trains on what exists
+and says so.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

@@ -3,8 +3,10 @@
 -- Idempotent: every statement is IF NOT EXISTS / OR REPLACE-safe to re-run.
 --
 -- Write path: ONLY the worker's service-role key writes (service role
--- bypasses RLS). Read path: the anon key may SELECT everything — these are
--- public market observations, and the frontend never needs a write.
+-- bypasses RLS). Read path: the worker's Socket.io feed, which carries the
+-- gate (RADAR_ACCESS). The tables themselves are not readable with the
+-- public anon key — they were until 1.21.0, when the feed gained a gate and
+-- a world-readable table became the same feed with the gate left open.
 
 create extension if not exists pgcrypto;
 
@@ -109,21 +111,34 @@ alter table signals
 create unique index if not exists signals_key_idx on signals (signal_key);
 create index if not exists signals_wallet_ts_idx on signals (wallet_address, timestamp desc);
 
--- RLS: anon reads, nobody but the service role writes.
+-- RLS on, no policies: nobody but the service role reads or writes these.
+-- The drops upgrade a database made from the earlier version of this file,
+-- which granted anon reads; migrations/003-accounts.sql carries the same.
 alter table tracked_wallets enable row level security;
 alter table wallet_trades enable row level security;
 alter table signals enable row level security;
 alter table token_launches enable row level security;
+drop policy if exists tracked_wallets_read on tracked_wallets;
+drop policy if exists wallet_trades_read on wallet_trades;
+drop policy if exists signals_read on signals;
+drop policy if exists token_launches_read on token_launches;
 
+-- 1.21.0, accounts and billing: one row per reader who has been through
+-- Stripe, written by the worker from signed webhooks, read by its gate.
+-- migrations/003-accounts.sql is the same block.
+create table if not exists subscriptions (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  email text,
+  stripe_customer_id text unique,
+  stripe_subscription_id text,
+  status text not null default 'none',
+  price_id text,
+  current_period_end timestamptz,
+  cancel_at_period_end boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+create index if not exists subscriptions_customer_idx on subscriptions (stripe_customer_id);
+alter table subscriptions enable row level security;
 do $$ begin
-  create policy tracked_wallets_read on tracked_wallets for select using (true);
-exception when duplicate_object then null; end $$;
-do $$ begin
-  create policy wallet_trades_read on wallet_trades for select using (true);
-exception when duplicate_object then null; end $$;
-do $$ begin
-  create policy signals_read on signals for select using (true);
-exception when duplicate_object then null; end $$;
-do $$ begin
-  create policy token_launches_read on token_launches for select using (true);
+  create policy subscriptions_own_read on subscriptions for select using (auth.uid() = user_id);
 exception when duplicate_object then null; end $$;

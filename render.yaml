@@ -51,3 +51,15 @@ services:
         value: "1"
       - key: MAX_TRACKED_WALLETS
         value: "200"
+      # 1.21.0 — who may read the feed: open (default), account, subscription.
+      # Flip it in the dashboard, not here, once the keys below are set there.
+      - key: RADAR_ACCESS
+        value: "open"
+      - key: APP_URL
+        value: "https://romapps.xyz/nova"
+      # Set these in Render's dashboard when turning the gate on; they are not
+      # declared as prompts so an existing service keeps deploying without them:
+      #   SUPABASE_ANON_KEY      account + subscription — the public key the app signs in with
+      #   STRIPE_SECRET_KEY      subscription — Stripe → Developers → API keys
+      #   STRIPE_PRICE_ID        subscription — the recurring price to sell (price_…)
+      #   STRIPE_WEBHOOK_SECRET  subscription — the endpoint's signing secret (whsec_…)

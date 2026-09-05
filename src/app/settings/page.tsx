@@ -212,7 +212,10 @@ export default function SettingsPage() {
 
       <div className="panel p-3.5 text-[11.5px] dim leading-relaxed">
         <span className="panel-title block mb-1.5">Security posture</span>
-        No accounts, no personal data collected, no cookies beyond your browser&apos;s own storage of your workspace.
+        No account is needed for anything in this app, no personal data is collected by it, and there are no cookies beyond
+        your browser&apos;s own storage of your workspace. The one optional account, on the{" "}
+        <Link href="/account" className="link">Account</Link> page, exists for the hosted Whale Radar alone: an email with
+        Supabase Auth and, if you subscribe, a Stripe customer id — cards go to Stripe&apos;s page and never touch this app.
         Vendor API keys exist only server-side in server mode; the two exceptions are the keys YOU choose to paste
         above — the optional AI key and the Whale Radar&apos;s optional Helius key — which are stored in your browser
         alone and sent only to their own vendors. There is no private-key or seed-phrase handling anywhere in this

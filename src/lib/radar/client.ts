@@ -16,10 +16,18 @@
 // trusted to be well-formed.
 
 import { io, type Socket } from "socket.io-client";
+import { accessToken } from "@/lib/account/auth";
 import { emitLiveEvent } from "@/lib/live/bus";
 import { HORIZON_FIELD, signalKeyOf, type RadarHorizon, type RadarSignalRow } from "./journal";
 
 const CONFIG_KEY = "whalenova_radar_v1";
+
+/**
+ * Why a worker refused this connection, when it did — keyed on the status
+ * the worker's gate sends: 401 wants a sign-in, 402 wants a subscription,
+ * 503 could not check right now and will be retried.
+ */
+export type RadarGate = "signin" | "subscribe" | "unavailable" | null;
 
 export interface RadarWalletRow {
   wallet_address: string;
@@ -84,6 +92,7 @@ export interface RadarState {
   url: string;
   enabled: boolean;
   error: string | null;
+  gate: RadarGate;
   health: Record<string, unknown> | null;
   coverage: string | null;
   wallets: RadarWalletRow[];
@@ -117,6 +126,7 @@ const SERVER_STATE: RadarState = {
   url: "",
   enabled: false,
   error: null,
+  gate: null,
   health: null,
   coverage: null,
   wallets: [],
@@ -254,18 +264,45 @@ function healthOf(h: unknown): { health: Record<string, unknown> | null; coverag
 
 function openSocket(url: string) {
   closeSocket();
-  notify({ phase: "connecting", url, error: null });
+  notify({ phase: "connecting", url, error: null, gate: null });
   const s = io(url, {
     transports: ["websocket", "polling"],
     reconnection: true,
     reconnectionDelayMax: 15_000,
     timeout: 8_000,
+    // The account's token, fetched fresh for every attempt: a worker with a
+    // gate reads it at the handshake, an open one ignores it. The function
+    // form means a reconnect after a refresh carries the new token.
+    auth: (cb) => {
+      accessToken()
+        .then((t) => cb(t ? { token: t } : {}))
+        .catch(() => cb({}));
+    },
   });
   socket = s;
 
-  s.on("connect", () => notify({ phase: "connected", error: null }));
-  s.on("connect_error", (err) => notify({ phase: "error", error: err?.message ? String(err.message) : "connection failed" }));
+  s.on("connect", () => notify({ phase: "connected", error: null, gate: null }));
+  s.on("connect_error", (err) => {
+    const status = (err as { data?: { status?: unknown } }).data?.status;
+    const gate: RadarGate = status === 401 ? "signin" : status === 402 ? "subscribe" : status === 503 ? "unavailable" : null;
+    notify({ phase: "error", error: err?.message ? String(err.message) : "connection failed", gate });
+    // A refusal the next retry cannot change. Stop; the account page
+    // reconnects after a sign-in or a purchase.
+    if (gate === "signin" || gate === "subscribe") s.disconnect();
+  });
+  // The worker closing a connection on purpose: a session that expired or
+  // a subscription that lapsed. It says why first, then disconnects, and
+  // socket.io does not retry a server-side disconnect on its own.
+  s.on("gate", (g: unknown) => {
+    const o = (g ?? {}) as Record<string, unknown>;
+    const gate: RadarGate = o.status === 401 ? "signin" : o.status === 402 ? "subscribe" : "unavailable";
+    notify({ phase: "error", error: str(o.reason) || "the radar closed the connection", gate });
+  });
   s.on("disconnect", (reason) => {
+    if (reason === "io server disconnect") {
+      if (state.phase !== "error") notify({ phase: "error", error: "the radar closed the connection" });
+      return;
+    }
     if (state.enabled) notify({ phase: "connecting", error: String(reason) });
   });
 
@@ -414,7 +451,23 @@ export function radarDisconnect(): void {
     /* fine */
   }
   closeSocket();
-  notify({ phase: "off", enabled: false, error: null });
+  notify({ phase: "off", enabled: false, error: null, gate: null });
+}
+
+/** The worker URL this browser remembers, connected or not. */
+export function radarConfiguredUrl(): string {
+  return readConfig().url;
+}
+
+/**
+ * Try again with the current account: after a sign-in or a purchase, when
+ * the gate that refused the last attempt would now let it through.
+ */
+export function radarReconnect(): void {
+  const cfg = readConfig();
+  const url = state.url || cfg.url;
+  if (!url || (!state.enabled && !cfg.enabled) || holds === 0) return;
+  openSocket(url);
 }
 
 /**

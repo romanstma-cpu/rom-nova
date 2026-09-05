@@ -12,9 +12,18 @@ function num(name, dflt) {
   return v;
 }
 
+/**
+ * Who may read the feed.
+ *   open          anyone with the URL — the default, and what a self-hosted
+ *                 worker for one person wants
+ *   account       anyone signed in through Supabase Auth (email code)
+ *   subscription  signed in AND holding an active Stripe subscription
+ */
+export const ACCESS_MODES = ["open", "account", "subscription"];
+
 export function loadConfig() {
   const dryRun = process.env.DRY_RUN === "1" || process.env.DRY_RUN === "true";
-  const supabaseUrl = process.env.SUPABASE_URL ?? "";
+  const supabaseUrl = (process.env.SUPABASE_URL ?? "").replace(/\/+$/, "");
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY ?? "";
   if (!dryRun && (!supabaseUrl || !supabaseServiceKey)) {
     throw new Error(
@@ -22,14 +31,46 @@ export function loadConfig() {
     );
   }
 
+  const access = (process.env.RADAR_ACCESS ?? "open").trim().toLowerCase() || "open";
+  if (!ACCESS_MODES.includes(access)) {
+    throw new Error(`RADAR_ACCESS must be one of ${ACCESS_MODES.join(", ")} — got "${access}"`);
+  }
+  // The anon (publishable) key is public by design: the app fetches it from
+  // /config to sign people in. It is the SERVICE key that must never leave
+  // this process.
+  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY ?? "";
+  if (access !== "open" && (!supabaseUrl || !supabaseAnonKey)) {
+    throw new Error(`RADAR_ACCESS=${access} needs SUPABASE_URL and SUPABASE_ANON_KEY — the app signs in through them.`);
+  }
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY ?? "";
+  const stripePriceId = process.env.STRIPE_PRICE_ID ?? "";
+  const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET ?? "";
+  if (access === "subscription" && (!stripeSecretKey || !stripePriceId || !stripeWebhookSecret)) {
+    throw new Error("RADAR_ACCESS=subscription needs STRIPE_SECRET_KEY, STRIPE_PRICE_ID and STRIPE_WEBHOOK_SECRET.");
+  }
+
   return {
     dryRun,
     supabaseUrl,
     supabaseServiceKey,
+    supabaseAnonKey,
     /** Optional. Enables the enhanced coverage stream for top wallets. */
     heliusApiKey: process.env.HELIUS_API_KEY ?? "",
 
     port: num("PORT", 8790),
+
+    access,
+    stripeSecretKey,
+    stripePriceId,
+    stripeWebhookSecret,
+    /** Where Stripe sends people back to: the app's origin plus its base path, no trailing slash. */
+    appUrl: (process.env.APP_URL ?? "https://romapps.xyz/nova").replace(/\/+$/, ""),
+    /**
+     * A subscription whose period ended this long ago still counts. Renewal
+     * webhooks land minutes after the period rolls, and a paying reader must
+     * not lose the feed for the time Stripe's retries take.
+     */
+    entitlementGraceMs: num("ENTITLEMENT_GRACE_HOURS", 24) * 3_600_000,
 
     gates: {
       whaleThresholdSol: num("WHALE_THRESHOLD_SOL", 10),

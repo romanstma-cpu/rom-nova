@@ -64,6 +64,9 @@ export const NAV_MORE: { title: string; items: NavItem[] }[] = [
 // "more" toggle is a settings page nobody finds.
 export const NAV_SYSTEM: NavItem[] = [
   { href: "/status", label: "Status", glyph: "◒", hint: "every source, socket and store this tab uses" },
+  // The one page that knows who you are — for the hosted radar, and only
+  // for it. Pinned beside Settings so the sign-in is never a hunt.
+  { href: "/account", label: "Account", glyph: "◐", hint: "sign in for the hosted radar; your plan" },
   { href: "/settings", label: "Settings", glyph: "⚙", hint: "your keys, this browser's memory, data providers" },
 ];
 

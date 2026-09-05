@@ -13,6 +13,9 @@ import { startPumpPortal } from "../../src/lib/radar/engine/pumpportal.js";
 import { startRpcStream } from "../../src/lib/radar/engine/rpcstream.js";
 import { RadarState } from "../../src/lib/radar/engine/state.js";
 import { log, short } from "../../src/lib/radar/engine/util.js";
+import { Access } from "./access.js";
+import { AuthVerifier } from "./auth.js";
+import { Billing } from "./billing.js";
 import { loadConfig } from "./config.js";
 import { Db, HORIZON_COLUMN } from "./db.js";
 import { dexScreenerLookup, dexScreenerStatus } from "./dexscreener.js";
@@ -20,10 +23,20 @@ import { Feed } from "./io.js";
 
 const startedAt = Date.now();
 const cfg = loadConfig();
-log("radar starting", JSON.stringify({ dryRun: cfg.dryRun, gates: cfg.gates, port: cfg.port }));
+log("radar starting", JSON.stringify({ dryRun: cfg.dryRun, gates: cfg.gates, port: cfg.port, access: cfg.access }));
 
 const db = new Db(cfg);
 await db.connect();
+
+// The gate and the desk. In open mode the verifier is null and Access lets
+// everything through; the routes still answer, saying so.
+const verifier =
+  cfg.access === "open"
+    ? null
+    : new AuthVerifier({ supabaseUrl: cfg.supabaseUrl, apiKey: cfg.supabaseServiceKey || cfg.supabaseAnonKey });
+const access = new Access(cfg, { verifier, db });
+const billing = new Billing(cfg, db, { onApplied: (userId) => access.forget(userId) });
+if (cfg.access === "subscription") await billing.loadPrice();
 
 /** @type {Feed} */
 let feed; // assigned before any stream starts; statusFn closes over the box
@@ -49,6 +62,8 @@ function status() {
       helius: helius.status(),
     },
     db: db.status(),
+    access: { ...access.status(), sockets: feed?.counts ?? null },
+    billing: billing.status(),
     dexscreener: dexScreenerStatus(),
     price_lookup: lookupStatus(),
     coverage:
@@ -57,7 +72,7 @@ function status() {
   };
 }
 
-feed = new Feed(cfg, status);
+feed = new Feed(cfg, status, { access, billing });
 
 /** A grade, as the columns it lands in. */
 function outcomePatch(e) {

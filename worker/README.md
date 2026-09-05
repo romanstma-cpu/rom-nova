@@ -66,6 +66,64 @@ the columns exist. Paste that file (or re-run `schema.sql`, which carries the
 same block) into the Supabase SQL editor once; the worker re-probes every
 five minutes and starts writing grades and exits without a restart.
 
+## Accounts and billing (1.21.0)
+
+The feed can sit behind a gate. `RADAR_ACCESS` picks it:
+
+| mode           | who may read the feed                                   |
+| -------------- | ------------------------------------------------------- |
+| `open`         | anyone with the URL — the default, unchanged behaviour  |
+| `account`      | anyone signed in through Supabase Auth (email code)     |
+| `subscription` | signed in AND holding an active Stripe subscription     |
+
+The app's **Account** page reads the gate from the worker's `/config` and
+shows exactly what that mode needs: nothing, a sign-in, or a plan with the
+price Stripe reports. Sign-in is an email and a six-digit code — no
+password anywhere. Payment is Stripe's own hosted page; the worker mints
+the Checkout URL and believes Stripe's signed webhooks, and never sees a
+card. Routes: `GET /config`, `GET /me`, `POST /billing/checkout`,
+`POST /billing/portal`, `POST /billing/webhook`; `/health` stays public and
+reports `access` and `billing` counters.
+
+Turn it on in this order; `/health` names the step you are on.
+
+1. **Migration.** Supabase → SQL editor → paste
+   [`supabase/migrations/003-accounts.sql`](supabase/migrations/003-accounts.sql)
+   → Run. It creates `subscriptions` and closes anon reads on the radar
+   tables (the feed is the read path now; with a gate on it, a table anyone
+   can read with the public key is the feed with the gate left open).
+   `/health` → `db.accounts` says `current`, `db.anon_reads` says `closed`.
+2. **Email code.** Supabase → Authentication → Email Templates → *Magic
+   Link*: add `{{ .Token }}` to the body (e.g. `Your code: {{ .Token }}`).
+   Without it the email carries a link only, which works on the web app
+   but not inside the desktop app. Authentication → URL Configuration →
+   add `https://romapps.xyz/nova/account/` to Redirect URLs so the link
+   path lands on the account page.
+3. **Sign-in.** Render → the service → Environment: `SUPABASE_ANON_KEY`
+   (Project Settings → API → the anon / publishable key — public by
+   design) and `RADAR_ACCESS=account`. Deploy. The Account page now signs
+   readers in and the feed refuses connections without a session.
+4. **Stripe** (test mode first). Product catalog → add a product with a
+   recurring price → copy `price_…`. Developers → API keys → the secret
+   key. Developers → Webhooks → add endpoint
+   `https://<your-service>.onrender.com/billing/webhook` with events
+   `checkout.session.completed`, `customer.subscription.created`,
+   `customer.subscription.updated`, `customer.subscription.deleted` → copy
+   `whsec_…`. Settings → Billing → Customer portal → activate (the Manage
+   billing button needs it). Then in Render: `STRIPE_SECRET_KEY`,
+   `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`, `APP_URL=https://romapps.xyz/nova`,
+   `RADAR_ACCESS=subscription`. Deploy. `/health` → `billing.price` shows
+   what Stripe will charge. Pay once with Stripe's test card
+   (4242 4242 4242 4242) and watch `billing.applied` go to 1.
+5. **Live.** Swap the three Stripe values for live-mode ones (a second
+   webhook endpoint in live mode, with its own secret). Nothing else changes.
+
+A subscription whose period has ended still reads the feed for
+`ENTITLEMENT_GRACE_HOURS` (default 24) — renewal webhooks land minutes
+after the period rolls, and a paying reader must not lose the feed for the
+time Stripe's retries take. Connected sockets are re-checked every ten
+minutes; a lapsed one hears `gate` and is closed.
+
 ## What triggers a deploy
 
 The Blueprint's `buildFilter` deploys on changes under `worker/`, under

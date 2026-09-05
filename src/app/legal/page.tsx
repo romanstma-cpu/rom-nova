@@ -88,7 +88,10 @@ export default function LegalPage() {
       <section className="panel p-4 text-[12.5px] leading-relaxed dim flex flex-col gap-2">
         <h2 className="panel-title">Privacy</h2>
         <p>
-          There are no accounts, no sign-ups, and no tracking of you. The entire engine runs inside your browser. Your
+          The app needs no account and never asks for one, and there is no tracking of you. The one optional account, on
+          the Account page, exists for the hosted Whale Radar alone: it stores your email with the sign-in provider
+          (Supabase Auth) and, if you subscribe, a Stripe customer id; card details go to Stripe&apos;s own page and never
+          touch this app. The entire engine runs inside your browser. Your
           watchlists, alerts, paper portfolio, and research notes are stored only in your browser&apos;s local storage on
           your device — they are never uploaded, and clearing your browser data removes them completely. The only network
           requests this app makes are to the public price APIs named above; those requests carry no personal data or

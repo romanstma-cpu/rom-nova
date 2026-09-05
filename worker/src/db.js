@@ -25,6 +25,8 @@ const FLUSH_MS = 2_000;
 const QUEUE_CAP = 5_000;
 const REPROBE_MS = 5 * 60_000;
 export const MIGRATION_FILE = "worker/supabase/migrations/002-copy-desk.sql";
+/** 1.21.0: the subscriptions table, and the end of anon reads on the radar tables. */
+export const ACCOUNTS_MIGRATION_FILE = "worker/supabase/migrations/003-accounts.sql";
 
 /** The column each grading horizon lands in. */
 export const HORIZON_COLUMN = { m1: "ret_1m", m5: "ret_5m", m15: "ret_15m", h1: "ret_1h" };
@@ -48,6 +50,15 @@ export class Db {
     this.client = null;
     /** null = not probed yet; false = the 1.17.0 columns are missing. */
     this.migrated = null;
+    /** null = not probed yet; false = the subscriptions table is missing (003). */
+    this.billingReady = null;
+    /**
+     * Are the radar tables still readable with the public anon key? The
+     * schema once granted that; 003 revokes it, because with a gated feed a
+     * world-readable table is the feed with the gate left open. null until
+     * probed, and only probed when a gate is on and the key is known.
+     */
+    this.anonReads = null;
     this.queues = {
       /** @type {any[]} */ trades: [],
       /** @type {Map<string, any>} */ wallets: new Map(), // coalesced by address
@@ -57,10 +68,10 @@ export class Db {
     };
     this.dropped = 0;
     this.droppedPatches = 0;
-    this.written = { trades: 0, wallets: 0, launches: 0, signals: 0, patches: 0 };
+    this.written = { trades: 0, wallets: 0, launches: 0, signals: 0, patches: 0, subscriptions: 0 };
     this.lastError = "";
     /** DRY_RUN mirror, capped. */
-    this.memory = { trades: [], launches: [], signals: [], wallets: new Map() };
+    this.memory = { trades: [], launches: [], signals: [], wallets: new Map(), subscriptions: new Map() };
     /** @type {ReturnType<typeof setInterval> | null} */
     this.timer = null;
     /** @type {ReturnType<typeof setInterval> | null} */
@@ -71,6 +82,7 @@ export class Db {
     if (this.cfg.dryRun) {
       log("[db] DRY_RUN — in-memory store, nothing persists");
       this.migrated = true;
+      this.billingReady = true;
       return;
     }
     const { createClient } = await import("@supabase/supabase-js");
@@ -79,6 +91,72 @@ export class Db {
     });
     log("[db] supabase client ready");
     await this.probeSchema();
+    if (this.cfg.access !== "open") await this.probeAccounts();
+  }
+
+  /**
+   * Is the accounts migration in? The subscriptions table is the marker.
+   * Then the honesty check the migration also carries: with the public key
+   * alone, can anyone still read the signals table around the gate?
+   */
+  async probeAccounts() {
+    if (!this.client) return;
+    const { error } = await this.client.from("subscriptions").select("user_id").limit(1);
+    const was = this.billingReady;
+    this.billingReady = !error;
+    if (this.billingReady && was !== true) log("[db] subscriptions table present — the gate can read entitlements");
+    if (!this.billingReady && was !== false) log(`[db] no subscriptions table — run ${ACCOUNTS_MIGRATION_FILE} before RADAR_ACCESS=subscription can admit anyone`);
+
+    if (!this.cfg.supabaseAnonKey) return;
+    try {
+      const res = await fetch(`${this.cfg.supabaseUrl}/rest/v1/signals?select=id&limit=1`, {
+        headers: { apikey: this.cfg.supabaseAnonKey, authorization: `Bearer ${this.cfg.supabaseAnonKey}` },
+      });
+      const rows = res.ok ? await res.json().catch(() => null) : null;
+      const open = Array.isArray(rows) && rows.length > 0;
+      if (open && this.anonReads !== true) log(`[db] the radar tables are still readable with the anon key — ${ACCOUNTS_MIGRATION_FILE} closes that`);
+      this.anonReads = open;
+    } catch {
+      /* the probe is advisory; the next one will say */
+    }
+  }
+
+  // ------------------------------------------------- subscriptions (1.21.0)
+  // Direct reads and writes, not the batched queue: a webhook must be on
+  // disk before Stripe hears 200, and the gate reads on demand.
+
+  /** @param {string} userId @returns {Promise<any | null>} */
+  async getSubscription(userId) {
+    if (!this.client) return this.memory.subscriptions.get(userId) ?? null;
+    const { data, error } = await this.client.from("subscriptions").select("*").eq("user_id", userId).maybeSingle();
+    if (error) throw new Error(`subscriptions read: ${error.message}`);
+    return data ?? null;
+  }
+
+  /** @param {string} customerId @returns {Promise<any | null>} */
+  async findSubscriptionByCustomer(customerId) {
+    if (!this.client) {
+      for (const row of this.memory.subscriptions.values()) if (row.stripe_customer_id === customerId) return row;
+      return null;
+    }
+    const { data, error } = await this.client.from("subscriptions").select("*").eq("stripe_customer_id", customerId).limit(1).maybeSingle();
+    if (error) throw new Error(`subscriptions lookup: ${error.message}`);
+    return data ?? null;
+  }
+
+  /** @param {Record<string, any>} row keyed on user_id; replaces the row's known fields */
+  async upsertSubscription(row) {
+    if (!this.client) {
+      this.memory.subscriptions.set(row.user_id, row);
+      this.written.subscriptions++;
+      return;
+    }
+    const { error } = await this.client.from("subscriptions").upsert(row, { onConflict: "user_id" });
+    if (error) {
+      this.lastError = `subscriptions: ${error.message}`;
+      throw new Error(this.lastError);
+    }
+    this.written.subscriptions++;
   }
 
   /** Are the copy-desk columns there? Cheap: one column, one row. */
@@ -101,6 +179,7 @@ export class Db {
     }, FLUSH_MS);
     this.probeTimer = setInterval(() => {
       if (this.migrated !== true) this.probeSchema().catch(() => {});
+      if (this.cfg.access !== "open" && (this.billingReady !== true || this.anonReads === true)) this.probeAccounts().catch(() => {});
     }, REPROBE_MS);
   }
 
@@ -335,6 +414,22 @@ export class Db {
     return {
       mode: this.cfg.dryRun ? "dry-run (in-memory)" : "supabase",
       schema: this.migrated === true ? "current" : this.migrated === false ? `migration pending — run ${MIGRATION_FILE} in the Supabase SQL editor` : "probing",
+      accounts:
+        this.cfg.access === "open"
+          ? "not used (RADAR_ACCESS=open)"
+          : this.billingReady === true
+            ? "current"
+            : this.billingReady === false
+              ? `migration pending — run ${ACCOUNTS_MIGRATION_FILE} in the Supabase SQL editor`
+              : "probing",
+      anon_reads:
+        this.cfg.access === "open" || !this.cfg.supabaseAnonKey || this.cfg.dryRun
+          ? null
+          : this.anonReads === true
+            ? `OPEN — the radar tables are readable with the public key; run ${ACCOUNTS_MIGRATION_FILE}`
+            : this.anonReads === false
+              ? "closed"
+              : "probing",
       queued:
         this.queues.trades.length +
         this.queues.launches.length +

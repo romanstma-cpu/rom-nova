@@ -952,7 +952,12 @@ export default function RadarPage() {
               <a className="link" href="https://github.com/romanstma-cpu/rom-nova/tree/main/worker#readme" target="_blank" rel="noreferrer">
                 worker/README
               </a>
-              ) that never sleeps; connect yours here and a source toggle appears above to read its feed.
+              ) that never sleeps; connect yours here and a source toggle appears above to read its feed. ROM runs one — it
+              asks for a sign-in, on the{" "}
+              <Link href="/account" className="link">
+                Account
+              </Link>{" "}
+              page, which also connects it.
             </div>
             <form
               className="flex gap-2 flex-wrap items-center"
@@ -980,7 +985,25 @@ export default function RadarPage() {
                 </button>
               )}
             </form>
-            {worker.error && <div className="text-[11px] text-[var(--danger)]">{worker.error}</div>}
+            {worker.gate === "signin" ? (
+              <div className="text-[11px] warn">
+                This worker asks for a sign-in.{" "}
+                <Link href="/account" className="link">
+                  Account
+                </Link>{" "}
+                → sign in, and it connects.
+              </div>
+            ) : worker.gate === "subscribe" ? (
+              <div className="text-[11px] warn">
+                This worker&apos;s feed is a subscription.{" "}
+                <Link href="/account" className="link">
+                  Account
+                </Link>{" "}
+                → plan.
+              </div>
+            ) : (
+              worker.error && <div className="text-[11px] text-[var(--danger)]">{worker.error}</div>
+            )}
           </div>
         </div>
       </details>

@@ -52,9 +52,11 @@ services:
       - key: MAX_TRACKED_WALLETS
         value: "200"
       # 1.21.0 — who may read the feed: open (default), account, subscription.
-      # Flip it in the dashboard, not here, once the keys below are set there.
+      # Owned by the dashboard (sync: false), so the value set there is never
+      # reset to "open" by a Blueprint sync when this file changes — which
+      # would silently unlock a paid feed. Set it in Render's Environment tab.
       - key: RADAR_ACCESS
-        value: "open"
+        sync: false
       - key: APP_URL
         value: "https://romapps.xyz/nova"
       # Set these in Render's dashboard when turning the gate on; they are not

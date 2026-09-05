@@ -1041,6 +1041,80 @@ did not redeploy; the worker at 52 minutes had 32 signals, 96 grades and
 3 patches persisted, Jupiter 51 calls / 0 failures against DexScreener
 34 / 17. 783 tests.
 
+## 1.21.0 — accounts and billing for the hosted radar (2026-09-04, night)
+
+LO: "next." The V2 layer everything else in V2 sits on. The Radar
+worker's feed can sit behind a gate, `RADAR_ACCESS`: open (the default,
+unchanged), account (a live Supabase Auth session), subscription (that
+plus an active Stripe subscription). The app gains the one page that
+knows who you are, for this and nothing else.
+
+**Worker.** `access.js` is the gate, at the Socket.io handshake and on
+the routes, with the status the app keys on — 401 sign in, 402 costs
+money, 503 could not check — and it fails closed. `auth.js` verifies a
+session with Supabase's own /auth/v1/user (the call supabase-js makes),
+cached a minute or until the token's exp, negatives fifteen seconds.
+`billing.js` is Stripe over REST with fetch, no SDK: a Checkout Session
+(the reader's customer reused when the table knows one), a Customer
+Portal session, the price read at boot so /config shows what Stripe will
+charge, and the webhook's HMAC-SHA256 with a five-minute tolerance and
+timingSafeEqual. Webhooks are upserts keyed on the reader's user id, so
+retries and out-of-order deliveries land once, and a checkout receipt
+never overrides a status a subscription event set; past_due rides on a
+24h grace after the period end; sockets are re-checked every ten minutes
+and a lapsed one hears `gate` before it closes. `io.js` became a route
+table with preflight and a capped raw body: /config, /me,
+/billing/checkout, /billing/portal, /billing/webhook; /health stays
+public. Migration 003: the subscriptions table (own-row read policy) and
+the END of anon reads on the radar tables — a world-readable table beside
+a gated feed is the feed with the gate left open; `db.js` probes both and
+names the file in /health until it has run. Nothing changes for a
+deployed worker until the mode is set. The README walks the operator
+through it: migration, `{{ .Token }}` in Supabase's Magic Link template,
+the anon key, then Stripe's product, webhook endpoint and signing secret,
+test mode first.
+
+**App.** `/account`, pinned beside Settings: the radar's gate read from
+its own /config (an open radar says so and offers nothing to sign in
+to); an email and a six-digit code — GoTrue's four endpoints called
+directly, no supabase-js in the bundle; the session in this browser,
+refreshed a minute before expiry, single-flight across reconnects; the
+magic-link fragment adopted only after /user vouches for it; and, where
+the radar sells one, the plan — Stripe's price, Subscribe (Stripe's
+hosted page in a new tab, the system browser on desktop), Manage
+billing, the receipt confirmed by asking /me until the webhook lands.
+`client.ts` hands the token over in the handshake, fresh per attempt;
+401 and 402 stop the retries and the radar page says which page fixes
+it. Settings and the disclaimer stopped saying "no accounts" and say
+what the one optional account is for and what it stores.
+
+Smoked in DRY_RUN: open mode unchanged (everything connects, /me says
+open, /billing 404); subscription mode with Supabase unreachable → no
+token 401, bad token 503 (never a yes), unsigned webhook 400, and the
+socket's connect_error carrying `data.status` for the app to key on.
+
+### 🚢 1.21.0 SHIPPED and proven (2026-09-04 ~9:35 PM)
+
+`0ee3e58` (25 files, +3061/−39) → `b3758a7` (1.21.0) → tag → CI green.
+Installer SHA256 `756138c4…6b55` = GitHub digest = SHA256SUMS; latest.yml
+1.21.0; 83,337,162 bytes. Site `697eb38`, Pages built in 30s, live
+3×1.21.0 / 0×1.20.0, 1,552-test band, `/nova/account/` 200 with its
+lede. Desktop 1.21.0.0: packaged account page and nav string present,
+titled window at once, 4 procs → 0, leveldb LOG 21:30. Render redeployed
+the worker on the push (worker/** is in the buildFilter): `/health`
+`access.mode: open`, `db.accounts: not used (RADAR_ACCESS=open)`, 199
+wallets rehydrated — nothing changed for the live feed. 821 tests.
+
+**LO's steps to turn the gate on** are worker/README.md → "Accounts and
+billing (1.21.0)": migration 003, the `{{ .Token }}` template line, the
+anon key with RADAR_ACCESS=account, then Stripe. The price is his call;
+the app shows whatever Stripe reports.
+
+Trap: robocopy under the Bash tool turns Unix-style paths into its usage
+screen (exit 16) — run it from PowerShell with Windows paths. The old
+worker's 404 to /config carries no CORS header, so a browser reports it
+as a bare "Failed to fetch"; the store names that case.
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

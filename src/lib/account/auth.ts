@@ -244,7 +244,21 @@ export async function loadHosted(url: string, fetchImpl: Fetch = fetch): Promise
   }
 }
 
-/** Step one: an email, and Supabase sends it a code. */
+/**
+ * Where a magic link should land: this very page, on the web, so the
+ * fragment it carries is adopted by the code that knows how. Inside the
+ * desktop app there is no web address to land on — the link opens the
+ * system browser and signs the WEB app in — so the desktop relies on the
+ * code, and the operator's email template must carry {{ .Token }}.
+ */
+function redirectTarget(): string | null {
+  if (typeof window === "undefined" || !window.location) return null;
+  const { protocol, origin, pathname } = window.location;
+  if (protocol !== "https:" && protocol !== "http:") return null;
+  return `${origin}${pathname.endsWith("/") ? pathname : `${pathname}/`}`;
+}
+
+/** Step one: an email, and Supabase sends it a code (and a link that lands back here). */
 export async function requestCode(email: string, fetchImpl: Fetch = fetch): Promise<boolean> {
   ensureRestored();
   const p = state.provider;
@@ -259,7 +273,12 @@ export async function requestCode(email: string, fetchImpl: Fetch = fetch): Prom
   }
   notify({ busy: true, error: null });
   try {
-    const r = await gotrue(p, "/otp", { body: { email: addr, create_user: true } }, fetchImpl);
+    // Supabase's default email carries a link and no code until the operator
+    // edits the template; the link must come back to THIS page or the
+    // session it carries is dropped on a page that does not look for it.
+    const target = redirectTarget();
+    const path = target ? `/otp?redirect_to=${encodeURIComponent(target)}` : "/otp";
+    const r = await gotrue(p, path, { body: { email: addr, create_user: true } }, fetchImpl);
     if (!r.ok) {
       notify({
         busy: false,

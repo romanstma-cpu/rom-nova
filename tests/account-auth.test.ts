@@ -88,6 +88,28 @@ describe("account store", () => {
     expect(saved).toMatchObject({ accessToken: "access-1", refreshToken: "refresh-1", expiresAt: (NOW / 1000 + 3600) * 1000, auth: { url: AUTH, anonKey: "anon-1" } });
   });
 
+  it("asks the link to come back to this page on the web, and to nowhere inside the desktop app", async () => {
+    const a = await freshStore();
+    await a.loadHosted(RADAR, fakeFetch(() => ({ status: 200, body: configBody("account") })).fetchImpl);
+    const web = fakeFetch(() => ({ status: 200, body: {} }));
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { location: { protocol: "https:", origin: "https://romapps.xyz", pathname: "/nova/account" } },
+    });
+    try {
+      expect(await a.requestCode("a@b.co", web.fetchImpl)).toBe(true);
+      expect(web.calls[0].url).toBe(`${AUTH}/auth/v1/otp?redirect_to=${encodeURIComponent("https://romapps.xyz/nova/account/")}`);
+      a.cancelCode();
+      // the desktop shell serves the app over its own scheme: no web address to land on
+      (globalThis as unknown as { window: { location: Record<string, string> } }).window.location = { protocol: "app:", origin: "app://rom-nova", pathname: "/nova/account/" };
+      const desktop = fakeFetch(() => ({ status: 200, body: {} }));
+      expect(await a.requestCode("a@b.co", desktop.fetchImpl)).toBe(true);
+      expect(desktop.calls[0].url).toBe(`${AUTH}/auth/v1/otp`);
+    } finally {
+      delete (globalThis as { window?: unknown }).window;
+    }
+  });
+
   it("says why a code was refused, and rate limits in plain words", async () => {
     const a = await freshStore();
     await a.loadHosted(RADAR, fakeFetch(() => ({ status: 200, body: configBody("account") })).fetchImpl);

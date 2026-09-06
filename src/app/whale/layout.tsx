@@ -4,7 +4,7 @@
 
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Wallet" };
+export const metadata: Metadata = { title: "Wallet", description: "Any wallet's real record off the chain: fills, holdings, round trips and a measured reputation, with its coverage window stated." };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return children;

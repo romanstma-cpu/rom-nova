@@ -4,7 +4,7 @@
 
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Tokens" };
+export const metadata: Metadata = { title: "Tokens", description: "The trending list with scores, risk and whale flow, read keylessly from public sources." };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return children;

@@ -208,7 +208,7 @@ function ChartReadout({ bar, last }: { bar: Readout | null; last: Candle | undef
   if (!b) return null;
   const up = b.c >= b.o;
   return (
-    <div className="absolute top-1 left-2 flex gap-3 num text-[10px] pointer-events-none">
+    <div className="absolute top-1 left-2 right-2 flex flex-wrap gap-x-3 gap-y-0.5 num text-[10px] pointer-events-none">
       <span className="faint">{new Date(b.t).toISOString().slice(0, 16).replace("T", " ")}</span>
       <span className="faint">
         O <span className={up ? "pos" : "neg"}>{price(b.o)}</span>

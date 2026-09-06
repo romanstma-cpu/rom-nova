@@ -127,48 +127,50 @@ function LiveMovers() {
       </div>
       {lastPress && <div className="px-3 pb-1 text-[10.5px] dim">{lastPress}</div>}
       <div className="max-h-[320px] overflow-y-auto">
-        <table className="w-full text-[12px]">
-          <thead className="thead">
-            <tr>
-              <th className="text-left px-3 py-1.5 font-medium">Wallet</th>
-              <th className="text-right px-2 font-medium">Net moved</th>
-              <th className="text-right px-2 font-medium">Gross moved</th>
-              <th className="text-left px-3 font-medium">Tokens</th>
-            </tr>
-          </thead>
-          <tbody className="num">
-            {movers.map((m) => {
-              const rec = byAddress.get(m.owner);
-              const rep = rec?.reputation;
-              return (
-              <tr key={m.owner} className="trow">
-                <td className="px-3 py-1.5">
-                  <Link href={`/whale?a=${m.owner}`} className="hover:text-[var(--accent)]">
-                    {shortAddr(m.owner)}
-                  </Link>
-                  {rec?.recording && (
-                    <span
-                      className={`chip ml-2 text-[9.5px] ${rep?.smart ? "chip-accent" : ""}`}
-                      title={
-                        rep?.verdict === "measured"
-                          ? `grade ${rep.grade} · ${rep.score}/100 over ${rep.roundTrips} round trips`
-                          : `recording · ${rec.fills} fills · ${rep?.needs.join(", ") ?? "reading"}`
-                      }
-                    >
-                      {rep?.verdict === "measured" ? `${rep.grade}${rep.smart ? " · SMART" : ""}` : "● REC"}
-                    </span>
-                  )}
-                </td>
-                <td className={`text-right px-2 ${m.netUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(m.netUsd)}</td>
-                <td className="text-right px-2 dim">{fmtUsd(m.grossUsd)}</td>
-                <td className="px-3 faint" style={{ fontFamily: "var(--font-sans)" }}>
-                  {m.tokens.slice(0, 4).join(", ")}
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead className="thead">
+              <tr>
+                <th className="text-left px-3 py-1.5 font-medium">Wallet</th>
+                <th className="text-right px-2 font-medium">Net moved</th>
+                <th className="text-right px-2 font-medium">Gross moved</th>
+                <th className="text-left px-3 font-medium">Tokens</th>
               </tr>
-              );
-            })}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="num">
+              {movers.map((m) => {
+                const rec = byAddress.get(m.owner);
+                const rep = rec?.reputation;
+                return (
+                <tr key={m.owner} className="trow">
+                  <td className="px-3 py-1.5">
+                    <Link href={`/whale?a=${m.owner}`} className="hover:text-[var(--accent)]">
+                      {shortAddr(m.owner)}
+                    </Link>
+                    {rec?.recording && (
+                      <span
+                        className={`chip ml-2 text-[9.5px] ${rep?.smart ? "chip-accent" : ""}`}
+                        title={
+                          rep?.verdict === "measured"
+                            ? `grade ${rep.grade} · ${rep.score}/100 over ${rep.roundTrips} round trips`
+                            : `recording · ${rec.fills} fills · ${rep?.needs.join(", ") ?? "reading"}`
+                        }
+                      >
+                        {rep?.verdict === "measured" ? `${rep.grade}${rep.smart ? " · SMART" : ""}` : "● REC"}
+                      </span>
+                    )}
+                  </td>
+                  <td className={`text-right px-2 ${m.netUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(m.netUsd)}</td>
+                  <td className="text-right px-2 dim">{fmtUsd(m.grossUsd)}</td>
+                  <td className="px-3 faint" style={{ fontFamily: "var(--font-sans)" }}>
+                    {m.tokens.slice(0, 4).join(", ")}
+                  </td>
+                </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
         {movers.length === 0 && (
           <Empty>{loading ? "READING FLOW…" : "No wallet movement measured in the current window."}</Empty>
         )}

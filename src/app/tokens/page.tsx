@@ -41,13 +41,22 @@ export default function TokenRadar() {
   }, [data, quick, q, sort]);
 
   // render helper (not a component — keeps the sortable header terse)
+  // A real button inside the header cell, with aria-sort on the cell: a bare
+  // <th onClick> could only be sorted with a mouse and never told a screen
+  // reader it was sortable, or which way.
   const th = (k: keyof TokenRow, label: string, right = true) => (
     <th
-      onClick={() => setSort((s) => ({ key: k, dir: s.key === k ? ((-s.dir) as 1 | -1) : -1 }))}
-      className={`${right ? "text-right" : "text-left"} px-2 py-2 font-medium cursor-pointer hover:text-[var(--text)] select-none whitespace-nowrap`}
+      aria-sort={sort.key === k ? (sort.dir === -1 ? "descending" : "ascending") : "none"}
+      className={`${right ? "text-right" : "text-left"} px-2 py-2 font-medium whitespace-nowrap`}
     >
-      {label}
-      {sort.key === k ? (sort.dir === -1 ? " ▾" : " ▴") : ""}
+      <button
+        type="button"
+        onClick={() => setSort((s) => ({ key: k, dir: s.key === k ? ((-s.dir) as 1 | -1) : -1 }))}
+        className="cursor-pointer hover:text-[var(--text)] select-none"
+      >
+        {label}
+        {sort.key === k ? (sort.dir === -1 ? " ▾" : " ▴") : ""}
+      </button>
     </th>
   );
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { NavRail } from "./NavRail";
 import { TopBar } from "./TopBar";
@@ -65,6 +65,19 @@ const subscribeNever = () => () => {};
 export function Shell({ children }: { children: React.ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  // The drawer is the only navigation on a phone. Focus moves into it on
+  // open (the close button takes it) and back to whatever opened it on
+  // close, so a keyboard or screen-reader user is never left on <body>.
+  const navOpener = useRef<HTMLElement | null>(null);
+  const openNav = () => {
+    navOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setNavOpen(true);
+  };
+  useEffect(() => {
+    if (navOpen || !navOpener.current) return;
+    navOpener.current.focus();
+    navOpener.current = null;
+  }, [navOpen]);
   // Both browser facts through the external-store seam: the prerendered
   // shell says "online" with the default sentence, and the first client
   // paint reads the real answer without a setState-in-effect round trip.
@@ -104,7 +117,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
-      <TopBar onOpenPalette={() => setPaletteOpen(true)} onOpenNav={() => setNavOpen(true)} />
+      <TopBar onOpenPalette={() => setPaletteOpen(true)} onOpenNav={openNav} />
       {offline && (
         <div className="shrink-0 bg-[rgba(255,180,84,0.12)] border-b border-[rgba(255,180,84,0.3)] text-[var(--warn)] text-[11.5px] text-center py-1">
           {offlineText}
@@ -140,13 +153,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
       {navOpen && (
         <div className="fixed inset-0 z-50 md:hidden" onClick={() => setNavOpen(false)}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
-          <div className="absolute left-0 top-0 bottom-0 fade-up" onClick={(e) => e.stopPropagation()}>
+          <div role="dialog" aria-modal="true" aria-label="Navigation" className="absolute left-0 top-0 bottom-0 fade-up" onClick={(e) => e.stopPropagation()}>
             <div className="h-full flex flex-col bg-[#080b12] border-r border-[var(--border)]">
               <div className="flex items-center justify-between px-4 h-[46px] border-b border-[var(--border)]">
                 <span className="text-[13px] font-semibold tracking-[0.2em]">
                   ROM<span className="text-[var(--accent)]">NOVA</span>
                 </span>
-                <button className="btn text-[11px]" onClick={() => setNavOpen(false)}>
+                <button type="button" className="btn text-[11px]" onClick={() => setNavOpen(false)} aria-label="Close navigation" autoFocus>
                   ✕
                 </button>
               </div>

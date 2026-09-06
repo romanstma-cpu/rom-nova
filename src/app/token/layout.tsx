@@ -4,7 +4,7 @@
 
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Token" };
+export const metadata: Metadata = { title: "Token", description: "One token audited: score, security panel, holders, launch forensics and the chart, with every measurement named to its source." };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return children;

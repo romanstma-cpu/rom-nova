@@ -27,6 +27,15 @@ export const metadata: Metadata = {
       "See the whales, trust the numbers: a radar that discovers and grades whale wallets on its own, live launches triaged in a second, and a copy desk that never holds a key. Part of ROM Apps.",
     type: "website",
     siteName: "ROM Nova",
+    // The card a shared link unfurls into — Discord, X, iMessage, Slack —
+    // rendered from the app's own palette and icon (public/og.png).
+    images: [{ url: "/nova/og.png", width: 1200, height: 630, alt: "ROM Nova — Solana on-chain intelligence" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "ROM Nova — Solana On-Chain Intelligence",
+    description: "A whale radar that finds and grades wallets by itself, launches triaged in seconds, and a copy desk that never holds a key.",
+    images: ["/nova/og.png"],
   },
   robots: { index: true, follow: true },
   // Installable from the browser: the manifest names the app, its icons and

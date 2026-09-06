@@ -4,7 +4,7 @@
 
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Alerts" };
+export const metadata: Metadata = { title: "Alerts", description: "Rules this browser evaluates while it is open: whale moves, watched wallets and radar signals, with system notifications when you allow them." };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return children;

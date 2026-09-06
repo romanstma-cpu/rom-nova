@@ -124,34 +124,36 @@ export default function BacktestPage() {
                 real market. The spread of mean scores across these rows is the honest measure of
                 what the engine did.
               </p>
-              <table className="w-full text-[11.5px]">
-                <thead className="thead">
-                  <tr>
-                    <th className="text-left px-3 py-1.5 font-medium">Archetype</th>
-                    <th className="text-right px-2 font-medium">Offered</th>
-                    <th className="text-right px-2 font-medium">Mean score</th>
-                    <th className="text-right px-2 font-medium">Bought</th>
-                    <th className="text-right px-2 font-medium">Won</th>
-                    <th className="text-right px-3 font-medium">PnL $</th>
-                  </tr>
-                </thead>
-                <tbody className="num">
-                  {result.attribution.map((a) => (
-                    <tr key={a.archetype} className="trow">
-                      <td className="px-3 py-1" style={{ fontFamily: "var(--font-sans)" }}>
-                        {a.archetype}
-                      </td>
-                      <td className="text-right px-2 faint">{a.candidates.toLocaleString()}</td>
-                      <td className="text-right px-2 dim">{a.meanScore.toFixed(1)}</td>
-                      <td className="text-right px-2">{a.trades}</td>
-                      <td className="text-right px-2 dim">{a.trades > 0 ? a.wins : "—"}</td>
-                      <td className={`text-right px-3 ${a.pnlUsd >= 0 ? "pos" : "neg"}`}>
-                        {a.trades > 0 ? fmtUsd(a.pnlUsd) : "—"}
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11.5px]">
+                  <thead className="thead">
+                    <tr>
+                      <th className="text-left px-3 py-1.5 font-medium">Archetype</th>
+                      <th className="text-right px-2 font-medium">Offered</th>
+                      <th className="text-right px-2 font-medium">Mean score</th>
+                      <th className="text-right px-2 font-medium">Bought</th>
+                      <th className="text-right px-2 font-medium">Won</th>
+                      <th className="text-right px-3 font-medium">PnL $</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="num">
+                    {result.attribution.map((a) => (
+                      <tr key={a.archetype} className="trow">
+                        <td className="px-3 py-1" style={{ fontFamily: "var(--font-sans)" }}>
+                          {a.archetype}
+                        </td>
+                        <td className="text-right px-2 faint">{a.candidates.toLocaleString()}</td>
+                        <td className="text-right px-2 dim">{a.meanScore.toFixed(1)}</td>
+                        <td className="text-right px-2">{a.trades}</td>
+                        <td className="text-right px-2 dim">{a.trades > 0 ? a.wins : "—"}</td>
+                        <td className={`text-right px-3 ${a.pnlUsd >= 0 ? "pos" : "neg"}`}>
+                          {a.trades > 0 ? fmtUsd(a.pnlUsd) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
@@ -165,34 +167,36 @@ export default function BacktestPage() {
           <div className="panel">
             <div className="panel-title px-3 pt-2.5 pb-1">Trades (last {result.trades.length})</div>
             <div className="max-h-[360px] overflow-y-auto">
-              <table className="w-full text-[11.5px]">
-                <thead className="thead sticky top-0 bg-[var(--panel-solid)]">
-                  <tr>
-                    <th className="text-left px-3 py-1.5 font-medium">Token</th>
-                    <th className="text-right px-2 font-medium">Score</th>
-                    <th className="text-right px-2 font-medium">Entry</th>
-                    <th className="text-right px-2 font-medium">Exit</th>
-                    <th className="text-right px-2 font-medium">Reason</th>
-                    <th className="text-right px-2 font-medium">PnL $</th>
-                    <th className="text-right px-3 font-medium">PnL %</th>
-                  </tr>
-                </thead>
-                <tbody className="num">
-                  {[...result.trades].reverse().map((t, i) => (
-                    <tr key={i} className="trow">
-                      <td className="px-3 py-1">
-                        <Link href={`/token?m=${t.mint}`} className="hover:text-[var(--accent)]" style={{ fontFamily: "var(--font-sans)" }}>{t.symbol}</Link>
-                      </td>
-                      <td className="text-right px-2 dim">{t.signalScore}</td>
-                      <td className="text-right px-2 faint">{new Date(t.entryTs).toLocaleString()}</td>
-                      <td className="text-right px-2 faint">{new Date(t.exitTs).toLocaleString()}</td>
-                      <td className="text-right px-2 dim">{t.exitReason}</td>
-                      <td className={`text-right px-2 ${t.pnlUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(t.pnlUsd)}</td>
-                      <td className={`text-right px-3 ${t.pnlPct >= 0 ? "pos" : "neg"}`}>{fmtPct(t.pnlPct)}</td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11.5px]">
+                  <thead className="thead sticky top-0 bg-[var(--panel-solid)]">
+                    <tr>
+                      <th className="text-left px-3 py-1.5 font-medium">Token</th>
+                      <th className="text-right px-2 font-medium">Score</th>
+                      <th className="text-right px-2 font-medium">Entry</th>
+                      <th className="text-right px-2 font-medium">Exit</th>
+                      <th className="text-right px-2 font-medium">Reason</th>
+                      <th className="text-right px-2 font-medium">PnL $</th>
+                      <th className="text-right px-3 font-medium">PnL %</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="num">
+                    {[...result.trades].reverse().map((t, i) => (
+                      <tr key={i} className="trow">
+                        <td className="px-3 py-1">
+                          <Link href={`/token?m=${t.mint}`} className="hover:text-[var(--accent)]" style={{ fontFamily: "var(--font-sans)" }}>{t.symbol}</Link>
+                        </td>
+                        <td className="text-right px-2 dim">{t.signalScore}</td>
+                        <td className="text-right px-2 faint">{new Date(t.entryTs).toLocaleString()}</td>
+                        <td className="text-right px-2 faint">{new Date(t.exitTs).toLocaleString()}</td>
+                        <td className="text-right px-2 dim">{t.exitReason}</td>
+                        <td className={`text-right px-2 ${t.pnlUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(t.pnlUsd)}</td>
+                        <td className={`text-right px-3 ${t.pnlPct >= 0 ? "pos" : "neg"}`}>{fmtPct(t.pnlPct)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </>

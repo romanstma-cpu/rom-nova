@@ -4,7 +4,7 @@
 
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Status" };
+export const metadata: Metadata = { title: "Status", description: "Every source, socket and store this tab uses, and how live each one is right now." };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return children;

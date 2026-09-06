@@ -710,59 +710,61 @@ function ActivityPanel({ detail }: { detail: LiveTokenDetail }) {
         <span className="panel-title">Activity · buys, sells and who made them</span>
         <span className="num text-[10.5px] faint">{detail.source}</span>
       </div>
-      <table className="w-full text-[11.5px]">
-        <thead className="thead">
-          <tr>
-            <th className="text-left px-3 py-1.5 font-medium">Window</th>
-            <th className="text-right px-2 font-medium">Txns</th>
-            <th className="text-right px-2 font-medium">Buys</th>
-            <th className="text-right px-2 font-medium">Sells</th>
-            <th className="text-right px-2 font-medium">Makers</th>
-            <th className="text-right px-3 font-medium">Buy / sell volume</th>
-          </tr>
-        </thead>
-        <tbody className="num">
-          {shown.map((k) => {
-            const row = w[k]!;
-            const txns =
-              row.buys === undefined && row.sells === undefined
-                ? undefined
-                : (row.buys ?? 0) + (row.sells ?? 0);
-            return (
-              <tr key={k} className="trow">
-                <td className="px-3 py-1 dim">{k}</td>
-                <td className="text-right px-2 dim">
-                  {txns === undefined ? <Dash why="neither side was published" /> : fmtNum(txns)}
-                </td>
-                <td className="text-right px-2 pos">
-                  {row.buys === undefined ? <Dash why="not published" /> : fmtNum(row.buys)}
-                </td>
-                <td className="text-right px-2 neg">
-                  {row.sells === undefined ? <Dash why="not published" /> : fmtNum(row.sells)}
-                </td>
-                <td className="text-right px-2 dim">
-                  {row.traders === undefined ? (
-                    <Dash why={`${detail.source} counts transactions, not distinct wallets, for this window`} />
-                  ) : (
-                    fmtNum(row.traders)
-                  )}
-                </td>
-                <td className="text-right px-3">
-                  {row.buyVolumeUsd === undefined || row.sellVolumeUsd === undefined ? (
-                    <Dash why={`${detail.source} publishes volume for this window but not the buy/sell split`} />
-                  ) : (
-                    <>
-                      <span className="pos">{fmtUsd(row.buyVolumeUsd)}</span>
-                      <span className="faint"> / </span>
-                      <span className="neg">{fmtUsd(row.sellVolumeUsd)}</span>
-                    </>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11.5px]">
+          <thead className="thead">
+            <tr>
+              <th className="text-left px-3 py-1.5 font-medium">Window</th>
+              <th className="text-right px-2 font-medium">Txns</th>
+              <th className="text-right px-2 font-medium">Buys</th>
+              <th className="text-right px-2 font-medium">Sells</th>
+              <th className="text-right px-2 font-medium">Makers</th>
+              <th className="text-right px-3 font-medium">Buy / sell volume</th>
+            </tr>
+          </thead>
+          <tbody className="num">
+            {shown.map((k) => {
+              const row = w[k]!;
+              const txns =
+                row.buys === undefined && row.sells === undefined
+                  ? undefined
+                  : (row.buys ?? 0) + (row.sells ?? 0);
+              return (
+                <tr key={k} className="trow">
+                  <td className="px-3 py-1 dim">{k}</td>
+                  <td className="text-right px-2 dim">
+                    {txns === undefined ? <Dash why="neither side was published" /> : fmtNum(txns)}
+                  </td>
+                  <td className="text-right px-2 pos">
+                    {row.buys === undefined ? <Dash why="not published" /> : fmtNum(row.buys)}
+                  </td>
+                  <td className="text-right px-2 neg">
+                    {row.sells === undefined ? <Dash why="not published" /> : fmtNum(row.sells)}
+                  </td>
+                  <td className="text-right px-2 dim">
+                    {row.traders === undefined ? (
+                      <Dash why={`${detail.source} counts transactions, not distinct wallets, for this window`} />
+                    ) : (
+                      fmtNum(row.traders)
+                    )}
+                  </td>
+                  <td className="text-right px-3">
+                    {row.buyVolumeUsd === undefined || row.sellVolumeUsd === undefined ? (
+                      <Dash why={`${detail.source} publishes volume for this window but not the buy/sell split`} />
+                    ) : (
+                      <>
+                        <span className="pos">{fmtUsd(row.buyVolumeUsd)}</span>
+                        <span className="faint"> / </span>
+                        <span className="neg">{fmtUsd(row.sellVolumeUsd)}</span>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
       <div className="px-3 py-1.5 text-[10.5px] faint leading-snug">
         Counts are transactions, not wallets, except under <b>Makers</b> — which is distinct traders
         where the source counts them and a dash where it does not. Buys plus sells is not a maker
@@ -801,54 +803,56 @@ function ScoreAuditPanel({ detail }: { detail: LiveTokenDetail }) {
         risk factor{audit.unmeasuredRisks === 1 ? "" : "s"} could not be assessed at all. These rows
         sum to {audit.reconciled} against a score of {signal.score}.
       </div>
-      <table className="w-full text-[11.5px]">
-        <thead className="thead">
-          <tr>
-            <th className="text-left px-3 py-1.5 font-medium">Factor</th>
-            <th className="text-right px-2 font-medium">Weight</th>
-            <th className="text-left px-2 font-medium w-[120px]">Reading</th>
-            <th className="text-right px-2 font-medium">Points</th>
-            <th className="text-left px-3 font-medium">What it saw</th>
-          </tr>
-        </thead>
-        <tbody className="num">
-          {audit.rows.map((r) => (
-            <tr key={r.key} className="trow">
-              <td className={`px-3 py-1 ${r.measured ? "" : "faint"}`} style={{ fontFamily: "var(--font-sans)" }}>
-                {r.name}
-                {r.kind === "risk" && <span className="faint text-[9.5px] ml-1.5">penalty</span>}
-              </td>
-              <td className={`text-right px-2 ${r.measured ? "dim" : "faint line-through"}`}>
-                {r.intendedWeight.toFixed(1)}
-              </td>
-              <td className="px-2">
-                {r.measured ? (
-                  // Risk rows store `normalized` as 1 - severity, so a full bar
-                  // means clean. Flipped here so the bar always reads "more is
-                  // worse" in the penalty rows and "more is better" above them
-                  // would be a silent sign flip in the same column.
-                  <Bar value={r.kind === "risk" ? 1 - r.normalized : r.normalized} bad={r.kind === "risk"} />
-                ) : (
-                  <span className="faint text-[10px]">stood down</span>
-                )}
-              </td>
-              {/* A risk row's points can only ever be zero or negative, so a
-                  leading "+" on its zero reads as a bonus. Signed only where a
-                  sign is meaningful. */}
-              <td
-                className={`text-right px-2 ${
-                  !r.measured ? "faint" : r.contribution > 0 ? "pos" : r.contribution < 0 ? "neg" : "dim"
-                }`}
-              >
-                {!r.measured ? "—" : points(r.contribution, r.kind === "risk")}
-              </td>
-              <td className={`px-3 ${r.measured ? "dim" : "faint"}`} style={{ fontFamily: "var(--font-sans)" }}>
-                {r.explanation}
-              </td>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11.5px]">
+          <thead className="thead">
+            <tr>
+              <th className="text-left px-3 py-1.5 font-medium">Factor</th>
+              <th className="text-right px-2 font-medium">Weight</th>
+              <th className="text-left px-2 font-medium w-[120px]">Reading</th>
+              <th className="text-right px-2 font-medium">Points</th>
+              <th className="text-left px-3 font-medium">What it saw</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="num">
+            {audit.rows.map((r) => (
+              <tr key={r.key} className="trow">
+                <td className={`px-3 py-1 ${r.measured ? "" : "faint"}`} style={{ fontFamily: "var(--font-sans)" }}>
+                  {r.name}
+                  {r.kind === "risk" && <span className="faint text-[9.5px] ml-1.5">penalty</span>}
+                </td>
+                <td className={`text-right px-2 ${r.measured ? "dim" : "faint line-through"}`}>
+                  {r.intendedWeight.toFixed(1)}
+                </td>
+                <td className="px-2">
+                  {r.measured ? (
+                    // Risk rows store `normalized` as 1 - severity, so a full bar
+                    // means clean. Flipped here so the bar always reads "more is
+                    // worse" in the penalty rows and "more is better" above them
+                    // would be a silent sign flip in the same column.
+                    <Bar value={r.kind === "risk" ? 1 - r.normalized : r.normalized} bad={r.kind === "risk"} />
+                  ) : (
+                    <span className="faint text-[10px]">stood down</span>
+                  )}
+                </td>
+                {/* A risk row's points can only ever be zero or negative, so a
+                    leading "+" on its zero reads as a bonus. Signed only where a
+                    sign is meaningful. */}
+                <td
+                  className={`text-right px-2 ${
+                    !r.measured ? "faint" : r.contribution > 0 ? "pos" : r.contribution < 0 ? "neg" : "dim"
+                  }`}
+                >
+                  {!r.measured ? "—" : points(r.contribution, r.kind === "risk")}
+                </td>
+                <td className={`px-3 ${r.measured ? "dim" : "faint"}`} style={{ fontFamily: "var(--font-sans)" }}>
+                  {r.explanation}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {/* When a veto is present this is NOT the verdict, and must not be printed
           as one — the header chip says EXTREME RISK and a bold "NO TRADE" here
           would put a second answer to one question on the same screen. The
@@ -911,44 +915,46 @@ function HolderPanel({ detail }: { detail: LiveTokenDetail }) {
         <span className="num">{(h.listedPct * 100).toFixed(1)}%</span> of supply.
       </div>
       <div className="max-h-[420px] overflow-y-auto">
-        <table className="w-full text-[11.5px]">
-          <thead className="thead sticky top-0 bg-[var(--panel-solid)] z-10">
-            <tr>
-              <th className="text-left px-3 py-1.5 font-medium w-8">#</th>
-              <th className="text-left px-2 font-medium">Owner</th>
-              <th className="text-left px-2 font-medium">Label</th>
-              <th className="text-right px-2 font-medium">Share</th>
-              <th className="text-right px-3 font-medium">Cumulative</th>
-            </tr>
-          </thead>
-          <tbody className="num">
-            {h.rows.map((r, i) => {
-              return (
-                <tr key={`${r.rank}-${r.owner}`} className="trow">
-                  <td className="px-3 py-1 faint">{r.rank}</td>
-                  <td className="px-2">
-                    <AddressLinks owner={r.owner} account={r.account} />
-                  </td>
-                  <td className="px-2">
-                    {r.isCreator && <span className="chip chip-neg mr-1">deployer</span>}
-                    {r.insider && <span className="chip chip-warn mr-1">insider</span>}
-                    {r.label ? (
-                      <span className="dim">{r.label}</span>
-                    ) : !r.isCreator && !r.insider ? (
-                      <span className="faint" title={`${h.source} has no name for this account`}>
-                        unlabelled
-                      </span>
-                    ) : null}
-                  </td>
-                  <td className={`text-right px-2 ${r.pct >= 0.1 ? "warn" : "dim"}`}>
-                    {(r.pct * 100).toFixed(2)}%
-                  </td>
-                  <td className="text-right px-3 faint">{(cumulative[i] * 100).toFixed(1)}%</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11.5px]">
+            <thead className="thead sticky top-0 bg-[var(--panel-solid)] z-10">
+              <tr>
+                <th className="text-left px-3 py-1.5 font-medium w-8">#</th>
+                <th className="text-left px-2 font-medium">Owner</th>
+                <th className="text-left px-2 font-medium">Label</th>
+                <th className="text-right px-2 font-medium">Share</th>
+                <th className="text-right px-3 font-medium">Cumulative</th>
+              </tr>
+            </thead>
+            <tbody className="num">
+              {h.rows.map((r, i) => {
+                return (
+                  <tr key={`${r.rank}-${r.owner}`} className="trow">
+                    <td className="px-3 py-1 faint">{r.rank}</td>
+                    <td className="px-2">
+                      <AddressLinks owner={r.owner} account={r.account} />
+                    </td>
+                    <td className="px-2">
+                      {r.isCreator && <span className="chip chip-neg mr-1">deployer</span>}
+                      {r.insider && <span className="chip chip-warn mr-1">insider</span>}
+                      {r.label ? (
+                        <span className="dim">{r.label}</span>
+                      ) : !r.isCreator && !r.insider ? (
+                        <span className="faint" title={`${h.source} has no name for this account`}>
+                          unlabelled
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className={`text-right px-2 ${r.pct >= 0.1 ? "warn" : "dim"}`}>
+                      {(r.pct * 100).toFixed(2)}%
+                    </td>
+                    <td className="text-right px-3 faint">{(cumulative[i] * 100).toFixed(1)}%</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
@@ -992,28 +998,30 @@ function FlowPanelView({ detail }: { detail: LiveTokenDetail }) {
         Every address below is real and checkable.
       </div>
       <div className="max-h-[300px] overflow-y-auto">
-        <table className="w-full text-[11.5px]">
-          <thead className="thead sticky top-0 bg-[var(--panel-solid)] z-10">
-            <tr>
-              <th className="text-left px-3 py-1.5 font-medium">Wallet</th>
-              <th className="text-left px-2 font-medium">Side</th>
-              <th className="text-right px-2 font-medium">Net tokens</th>
-              <th className="text-right px-3 font-medium">Net USD</th>
-            </tr>
-          </thead>
-          <tbody className="num">
-            {f.movers.map((m) => (
-              <tr key={m.owner} className="trow">
-                <td className="px-3 py-1">
-                  <AddressLinks owner={m.owner} />
-                </td>
-                <td className={`px-2 ${m.usd >= 0 ? "pos" : "neg"}`}>{m.usd >= 0 ? "BUY" : "SELL"}</td>
-                <td className="text-right px-2 dim">{fmtNum(Math.abs(m.tokens))}</td>
-                <td className={`text-right px-3 ${m.usd >= 0 ? "pos" : "neg"}`}>{fmtUsd(m.usd)}</td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11.5px]">
+            <thead className="thead sticky top-0 bg-[var(--panel-solid)] z-10">
+              <tr>
+                <th className="text-left px-3 py-1.5 font-medium">Wallet</th>
+                <th className="text-left px-2 font-medium">Side</th>
+                <th className="text-right px-2 font-medium">Net tokens</th>
+                <th className="text-right px-3 font-medium">Net USD</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="num">
+              {f.movers.map((m) => (
+                <tr key={m.owner} className="trow">
+                  <td className="px-3 py-1">
+                    <AddressLinks owner={m.owner} />
+                  </td>
+                  <td className={`px-2 ${m.usd >= 0 ? "pos" : "neg"}`}>{m.usd >= 0 ? "BUY" : "SELL"}</td>
+                  <td className="text-right px-2 dim">{fmtNum(Math.abs(m.tokens))}</td>
+                  <td className={`text-right px-3 ${m.usd >= 0 ? "pos" : "neg"}`}>{fmtUsd(m.usd)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {f.movers.length === 0 && (
           <Empty>Nothing moved more than a dollar in the window that was covered.</Empty>
         )}
@@ -1699,58 +1707,62 @@ function DemoToken({ detail, mint, candles }: { detail: DemoTokenDetail; mint: s
           {/* top traders */}
           <div className="panel">
             <div className="panel-title px-3 pt-2.5 pb-1">Top tracked traders on this token</div>
-            <table className="w-full text-[12px]">
-              <thead className="thead">
-                <tr>
-                  <th className="text-left px-3 py-1.5 font-medium">Wallet</th>
-                  <th className="text-right px-2 font-medium">SM score</th>
-                  <th className="text-right px-2 font-medium">Buys/Sells</th>
-                  <th className="text-right px-2 font-medium">Net realized</th>
-                  <th className="text-right px-2 font-medium">Unrealized</th>
-                  <th className="text-right px-3 font-medium">Holding</th>
-                </tr>
-              </thead>
-              <tbody className="num">
-                {data.topTraders.map((t) => (
-                  <tr key={t.address} className="trow">
-                    <td className="px-3 py-1.5">
-                      <Link href={`/whale?a=${t.address}`} className="hover:text-[var(--accent)]">
-                        {t.entity ?? shortAddr(t.address)}
-                        <span className="faint text-[10px] ml-2">{t.labels.slice(0, 2).join(", ")}</span>
-                      </Link>
-                    </td>
-                    <td className="text-right px-2">{t.smartMoneyScore}</td>
-                    <td className="text-right px-2 dim">{t.buys}/{t.sells}</td>
-                    <td className={`text-right px-2 ${t.netUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(t.netUsd)}</td>
-                    <td className={`text-right px-2 ${t.unrealizedUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(t.unrealizedUsd)}</td>
-                    <td className="text-right px-3">{t.holding ? <span className="pos">yes</span> : <span className="faint">no</span>}</td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12px]">
+                <thead className="thead">
+                  <tr>
+                    <th className="text-left px-3 py-1.5 font-medium">Wallet</th>
+                    <th className="text-right px-2 font-medium">SM score</th>
+                    <th className="text-right px-2 font-medium">Buys/Sells</th>
+                    <th className="text-right px-2 font-medium">Net realized</th>
+                    <th className="text-right px-2 font-medium">Unrealized</th>
+                    <th className="text-right px-3 font-medium">Holding</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="num">
+                  {data.topTraders.map((t) => (
+                    <tr key={t.address} className="trow">
+                      <td className="px-3 py-1.5">
+                        <Link href={`/whale?a=${t.address}`} className="hover:text-[var(--accent)]">
+                          {t.entity ?? shortAddr(t.address)}
+                          <span className="faint text-[10px] ml-2">{t.labels.slice(0, 2).join(", ")}</span>
+                        </Link>
+                      </td>
+                      <td className="text-right px-2">{t.smartMoneyScore}</td>
+                      <td className="text-right px-2 dim">{t.buys}/{t.sells}</td>
+                      <td className={`text-right px-2 ${t.netUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(t.netUsd)}</td>
+                      <td className={`text-right px-2 ${t.unrealizedUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(t.unrealizedUsd)}</td>
+                      <td className="text-right px-3">{t.holding ? <span className="pos">yes</span> : <span className="faint">no</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {/* transactions */}
           <div className="panel">
             <div className="panel-title px-3 pt-2.5 pb-1">Tracked transactions · 72h</div>
             <div className="max-h-[280px] overflow-y-auto">
-              <table className="w-full text-[11.5px]">
-                <tbody className="num">
-                  {data.trades.map((t) => (
-                    <tr key={t.id} className="trow">
-                      <td className="px-3 py-1 faint">{new Date(t.ts).toLocaleTimeString()}</td>
-                      <td className={`px-2 ${t.side === "buy" ? "pos" : "neg"}`}>{t.side.toUpperCase()}</td>
-                      <td className="px-2">{fmtUsd(t.amountUsd)}</td>
-                      <td className="px-2 dim">
-                        <Link href={`/whale?a=${t.wallet}`} className="hover:text-[var(--accent)]">{shortAddr(t.wallet)}</Link>
-                      </td>
-                      <td className="px-2 faint">{t.dex}</td>
-                      <td className="px-2 faint">{t.classification}</td>
-                      <td className="px-2 faint text-right" title={t.signature}>conf {(t.confidence * 100).toFixed(0)}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11.5px]">
+                  <tbody className="num">
+                    {data.trades.map((t) => (
+                      <tr key={t.id} className="trow">
+                        <td className="px-3 py-1 faint">{new Date(t.ts).toLocaleTimeString()}</td>
+                        <td className={`px-2 ${t.side === "buy" ? "pos" : "neg"}`}>{t.side.toUpperCase()}</td>
+                        <td className="px-2">{fmtUsd(t.amountUsd)}</td>
+                        <td className="px-2 dim">
+                          <Link href={`/whale?a=${t.wallet}`} className="hover:text-[var(--accent)]">{shortAddr(t.wallet)}</Link>
+                        </td>
+                        <td className="px-2 faint">{t.dex}</td>
+                        <td className="px-2 faint">{t.classification}</td>
+                        <td className="px-2 faint text-right" title={t.signature}>conf {(t.confidence * 100).toFixed(0)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
               {data.trades.length === 0 && <Empty>No tracked-wallet transactions in the window.</Empty>}
             </div>
           </div>

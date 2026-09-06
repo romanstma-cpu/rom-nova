@@ -4,7 +4,7 @@
 
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Account" };
+export const metadata: Metadata = { title: "Account", description: "Sign in for the hosted Whale Radar, see whether the radar recognises you, and manage your plan and API keys." };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return children;

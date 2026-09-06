@@ -70,36 +70,38 @@ export function RadarRecord() {
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-3">
           <div>
-            <table className="w-full text-[11.5px]">
-              <thead className="thead">
-                <tr>
-                  <th className="text-left px-2 py-1.5 font-medium">Horizon</th>
-                  <th className="text-right px-2 font-medium">Graded</th>
-                  <th className="text-right px-2 font-medium">Median</th>
-                  <th className="text-right px-2 font-medium" title={`net of ${plan.costPct}%`}>
-                    Net
-                  </th>
-                  <th className="text-right px-2 font-medium" title={`share of grades at or above +${Math.round(HIT_RET * 100)}%`}>
-                    Hit
-                  </th>
-                  <th className="text-right px-2 font-medium" title="grades marked to the last price seen because nothing traded at the horizon">
-                    Stale
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="num">
-                {record.horizons.map((h) => (
-                  <tr key={h.horizon} className="trow">
-                    <td className="px-2 py-1.5">{h.label}</td>
-                    <td className="text-right px-2 dim">{h.graded}</td>
-                    <td className={`text-right px-2 ${h.medianGross === null ? "faint" : retCls(h.medianGross)}`}>{h.medianGross === null ? "—" : fmtRet(h.medianGross)}</td>
-                    <td className={`text-right px-2 ${h.medianNet === null ? "faint" : retCls(h.medianNet)}`}>{h.medianNet === null ? "—" : fmtRet(h.medianNet)}</td>
-                    <td className="text-right px-2">{pct(h.hitRate)}</td>
-                    <td className="text-right px-2 faint">{h.stale || "—"}</td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[11.5px]">
+                <thead className="thead">
+                  <tr>
+                    <th className="text-left px-2 py-1.5 font-medium">Horizon</th>
+                    <th className="text-right px-2 font-medium">Graded</th>
+                    <th className="text-right px-2 font-medium">Median</th>
+                    <th className="text-right px-2 font-medium" title={`net of ${plan.costPct}%`}>
+                      Net
+                    </th>
+                    <th className="text-right px-2 font-medium" title={`share of grades at or above +${Math.round(HIT_RET * 100)}%`}>
+                      Hit
+                    </th>
+                    <th className="text-right px-2 font-medium" title="grades marked to the last price seen because nothing traded at the horizon">
+                      Stale
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="num">
+                  {record.horizons.map((h) => (
+                    <tr key={h.horizon} className="trow">
+                      <td className="px-2 py-1.5">{h.label}</td>
+                      <td className="text-right px-2 dim">{h.graded}</td>
+                      <td className={`text-right px-2 ${h.medianGross === null ? "faint" : retCls(h.medianGross)}`}>{h.medianGross === null ? "—" : fmtRet(h.medianGross)}</td>
+                      <td className={`text-right px-2 ${h.medianNet === null ? "faint" : retCls(h.medianNet)}`}>{h.medianNet === null ? "—" : fmtRet(h.medianNet)}</td>
+                      <td className="text-right px-2">{pct(h.hitRate)}</td>
+                      <td className="text-right px-2 faint">{h.stale || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             <div className="num text-[10.5px] dim px-2 pt-2 leading-relaxed">
               Best price inside the hour, median: {record.peakMedian === null ? "—" : fmtRet(record.peakMedian)} — what a
               perfect exit got, which nobody gets. The signal wallet sold on {record.exits.n} of these
@@ -117,46 +119,48 @@ export function RadarRecord() {
             </div>
           </div>
           <div className="flex flex-col gap-3">
-            <table className="w-full text-[11.5px]">
-              <thead className="thead">
-                <tr>
-                  <th className="text-left px-2 py-1.5 font-medium" title={`wallets with at least ${MIN_WALLET_GRADES} graded signals, best five-minute median first`}>
-                    Wallet
-                  </th>
-                  <th className="text-right px-2 font-medium">Signals</th>
-                  <th className="text-right px-2 font-medium">+5m median</th>
-                  <th className="text-right px-2 font-medium">Hit</th>
-                  <th className="text-right px-2 font-medium" title="how long after its signal the wallet usually sells">
-                    Sells after
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="num">
-                {record.byWallet.slice(0, 8).map((w) => (
-                  <tr key={w.wallet} className="trow">
-                    <td className="px-2 py-1.5">
-                      <Link href={`/whale?a=${w.wallet}`} className="link">
-                        {shortAddr(w.wallet)}
-                      </Link>
-                    </td>
-                    <td className="text-right px-2 dim">
-                      {w.signals}
-                      <span className="faint"> ·{w.graded}</span>
-                    </td>
-                    <td className={`text-right px-2 ${w.median5m === null ? "faint" : retCls(w.median5m)}`}>{w.median5m === null ? "—" : fmtRet(w.median5m)}</td>
-                    <td className="text-right px-2">{pct(w.hit5m)}</td>
-                    <td className="text-right px-2 dim">{w.medianExitAfterMs === null ? "—" : fmtHold(w.medianExitAfterMs)}</td>
-                  </tr>
-                ))}
-                {record.byWallet.length === 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-[11.5px]">
+                <thead className="thead">
                   <tr>
-                    <td colSpan={5} className="px-2 py-3 faint text-[11px]">
-                      No wallet has {MIN_WALLET_GRADES} graded signals yet.
-                    </td>
+                    <th className="text-left px-2 py-1.5 font-medium" title={`wallets with at least ${MIN_WALLET_GRADES} graded signals, best five-minute median first`}>
+                      Wallet
+                    </th>
+                    <th className="text-right px-2 font-medium">Signals</th>
+                    <th className="text-right px-2 font-medium">+5m median</th>
+                    <th className="text-right px-2 font-medium">Hit</th>
+                    <th className="text-right px-2 font-medium" title="how long after its signal the wallet usually sells">
+                      Sells after
+                    </th>
                   </tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="num">
+                  {record.byWallet.slice(0, 8).map((w) => (
+                    <tr key={w.wallet} className="trow">
+                      <td className="px-2 py-1.5">
+                        <Link href={`/whale?a=${w.wallet}`} className="link">
+                          {shortAddr(w.wallet)}
+                        </Link>
+                      </td>
+                      <td className="text-right px-2 dim">
+                        {w.signals}
+                        <span className="faint"> ·{w.graded}</span>
+                      </td>
+                      <td className={`text-right px-2 ${w.median5m === null ? "faint" : retCls(w.median5m)}`}>{w.median5m === null ? "—" : fmtRet(w.median5m)}</td>
+                      <td className="text-right px-2">{pct(w.hit5m)}</td>
+                      <td className="text-right px-2 dim">{w.medianExitAfterMs === null ? "—" : fmtHold(w.medianExitAfterMs)}</td>
+                    </tr>
+                  ))}
+                  {record.byWallet.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-2 py-3 faint text-[11px]">
+                        No wallet has {MIN_WALLET_GRADES} graded signals yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
             {record.byDay.length > 1 && (
               <div className="num text-[10.5px] dim px-2 leading-relaxed">
                 By day:{" "}

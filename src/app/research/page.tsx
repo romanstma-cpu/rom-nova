@@ -112,7 +112,7 @@ export default function ResearchPage() {
           </div>
           <div className="flex gap-2 mt-2 flex-wrap">
             {SUGGESTIONS.map((s) => (
-              <button key={s} className="chip cursor-pointer hover:border-[var(--accent)]" onClick={() => ask(s)}>{s}</button>
+              <button key={s} className="chip chip-wrap cursor-pointer hover:border-[var(--accent)]" onClick={() => ask(s)}>{s}</button>
             ))}
           </div>
           <div className="text-[10px] faint mt-2 flex items-center justify-between gap-3 flex-wrap">

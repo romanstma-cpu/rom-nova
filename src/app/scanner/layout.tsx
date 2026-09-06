@@ -4,7 +4,7 @@
 
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Scanner" };
+export const metadata: Metadata = { title: "Scanner", description: "What is moving on Solana right now, ranked by evidence rather than by noise, with a score and its reasons on every row." };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return children;

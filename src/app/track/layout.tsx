@@ -4,7 +4,7 @@
 
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Track Record" };
+export const metadata: Metadata = { title: "Track Record", description: "How past calls held up: the engine's own graded record, built to be able to report no edge." };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return children;

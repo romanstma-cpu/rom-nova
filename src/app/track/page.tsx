@@ -263,76 +263,78 @@ export default function TrackPage() {
                 )}
               </span>
             </div>
-            <table className="w-full text-[12px] min-w-[720px]">
-              <thead className="thead">
-                <tr>
-                  <th className="text-left px-3 py-2 font-medium">Score band</th>
-                  <th className="text-right px-2 font-medium">n</th>
-                  <th className="text-right px-2 font-medium">passes</th>
-                  <th className="text-right px-2 font-medium">mean</th>
-                  <th className="text-right px-2 font-medium">median</th>
-                  <th className="text-right px-2 font-medium">above water</th>
-                  <th className="text-right px-2 font-medium">lift vs baseline</th>
-                  <th className="text-right px-3 font-medium">95% interval on lift</th>
-                </tr>
-              </thead>
-              <tbody className="num">
-                {h.bands.map((b) => {
-                  const separates = b.liftCI !== null && (b.liftCI[0] > 0 || b.liftCI[1] < 0);
-                  return (
-                    <tr key={b.bucket} className="trow">
-                      <td className="px-3 py-[6px]" style={{ fontFamily: "var(--font-sans)" }}>
-                        {b.bucket}
-                      </td>
-                      <td className="text-right px-2 dim">{b.n.toLocaleString()}</td>
-                      <td className="text-right px-2 dim">{b.passes.toLocaleString()}</td>
-                      {b.n === 0 ? (
-                        <>
-                          <td className="text-right px-2 faint" title="nothing scored into this band yet">—</td>
-                          <td className="text-right px-2 faint">—</td>
-                          <td className="text-right px-2 faint">—</td>
-                          <td className="text-right px-2 faint">—</td>
-                          <td className="text-right px-3 faint">—</td>
-                        </>
-                      ) : (
-                        <>
-                          <td className={`text-right px-2 ${b.meanReturnPct >= 0 ? "pos" : "neg"}`}>
-                            {pct(b.meanReturnPct)}
-                          </td>
-                          <td className={`text-right px-2 ${b.medianReturnPct >= 0 ? "pos" : "neg"}`}>
-                            {pct(b.medianReturnPct)}
-                          </td>
-                          <td className="text-right px-2 dim">{(b.hitRate * 100).toFixed(0)}%</td>
-                          <td
-                            className={`text-right px-2 ${separates ? (b.liftPct >= 0 ? "pos" : "neg") : "dim"}`}
-                            title={
-                              separates
-                                ? "This band's interval excludes zero."
-                                : "Not distinguishable from the baseline once passes are resampled."
-                            }
-                          >
-                            {pct(b.liftPct)}
-                            {separates ? " ✳" : ""}
-                          </td>
-                          {/* An interval below the group minimum is not a wide
-                              interval, it is a meaningless one, so it is refused
-                              rather than drawn narrow and wrong. */}
-                          <td className="text-right px-3 dim">
-                            {b.liftCI ? (
-                              `${pct(b.liftCI[0])} … ${pct(b.liftCI[1])}`
-                            ) : (
-                              <span className="faint" title={`needs at least 8 resolved passes in this band`}>
-                                too few passes
-                              </span>
-                            )}
-                          </td>
-                        </>
-                      )}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12px] min-w-[720px]">
+                <thead className="thead">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium">Score band</th>
+                    <th className="text-right px-2 font-medium">n</th>
+                    <th className="text-right px-2 font-medium">passes</th>
+                    <th className="text-right px-2 font-medium">mean</th>
+                    <th className="text-right px-2 font-medium">median</th>
+                    <th className="text-right px-2 font-medium">above water</th>
+                    <th className="text-right px-2 font-medium">lift vs baseline</th>
+                    <th className="text-right px-3 font-medium">95% interval on lift</th>
+                  </tr>
+                </thead>
+                <tbody className="num">
+                  {h.bands.map((b) => {
+                    const separates = b.liftCI !== null && (b.liftCI[0] > 0 || b.liftCI[1] < 0);
+                    return (
+                      <tr key={b.bucket} className="trow">
+                        <td className="px-3 py-[6px]" style={{ fontFamily: "var(--font-sans)" }}>
+                          {b.bucket}
+                        </td>
+                        <td className="text-right px-2 dim">{b.n.toLocaleString()}</td>
+                        <td className="text-right px-2 dim">{b.passes.toLocaleString()}</td>
+                        {b.n === 0 ? (
+                          <>
+                            <td className="text-right px-2 faint" title="nothing scored into this band yet">—</td>
+                            <td className="text-right px-2 faint">—</td>
+                            <td className="text-right px-2 faint">—</td>
+                            <td className="text-right px-2 faint">—</td>
+                            <td className="text-right px-3 faint">—</td>
+                          </>
+                        ) : (
+                          <>
+                            <td className={`text-right px-2 ${b.meanReturnPct >= 0 ? "pos" : "neg"}`}>
+                              {pct(b.meanReturnPct)}
+                            </td>
+                            <td className={`text-right px-2 ${b.medianReturnPct >= 0 ? "pos" : "neg"}`}>
+                              {pct(b.medianReturnPct)}
+                            </td>
+                            <td className="text-right px-2 dim">{(b.hitRate * 100).toFixed(0)}%</td>
+                            <td
+                              className={`text-right px-2 ${separates ? (b.liftPct >= 0 ? "pos" : "neg") : "dim"}`}
+                              title={
+                                separates
+                                  ? "This band's interval excludes zero."
+                                  : "Not distinguishable from the baseline once passes are resampled."
+                              }
+                            >
+                              {pct(b.liftPct)}
+                              {separates ? " ✳" : ""}
+                            </td>
+                            {/* An interval below the group minimum is not a wide
+                                interval, it is a meaningless one, so it is refused
+                                rather than drawn narrow and wrong. */}
+                            <td className="text-right px-3 dim">
+                              {b.liftCI ? (
+                                `${pct(b.liftCI[0])} … ${pct(b.liftCI[1])}`
+                              ) : (
+                                <span className="faint" title={`needs at least 8 resolved passes in this band`}>
+                                  too few passes
+                                </span>
+                              )}
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         ))
       )}

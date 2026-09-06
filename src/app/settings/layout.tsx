@@ -4,7 +4,7 @@
 
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Settings" };
+export const metadata: Metadata = { title: "Settings", description: "Your optional keys, what this browser remembers, where the data comes from, and which build you are running." };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return children;

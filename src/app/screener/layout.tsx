@@ -4,7 +4,7 @@
 
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Screener" };
+export const metadata: Metadata = { title: "Screener", description: "Filter the token universe by score, risk, age and flow, then export what you find." };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return children;

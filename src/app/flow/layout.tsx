@@ -4,7 +4,7 @@
 
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Money Flow" };
+export const metadata: Metadata = { title: "Money Flow", description: "Where the simulated wallets' money went over the last days, drawn as a flow. Simulated, and labelled so." };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return children;

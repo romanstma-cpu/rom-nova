@@ -220,51 +220,53 @@ export default function Dashboard() {
             <span className="panel-title">Momentum Leaders 24h</span>
             <Link href="/tokens" className="link text-[10.5px]">all tokens →</Link>
           </div>
-          <table className="w-full text-[12px]">
-            <thead className="thead">
-              <tr>
-                <th className="text-left px-3 py-1.5 font-medium">Token</th>
-                <th className="text-right px-2 font-medium">Price</th>
-                <th className="text-right px-2 font-medium">24h</th>
-                <th className="text-right px-2 font-medium">Mcap</th>
-                {/* Ten minutes of chain, not six hours — see whaleFlowCell. */}
-                <th
-                  className="text-right px-2 font-medium"
-                  title="Net movement by wallets that moved $20,000+ of this token, over a short chain scan — ten minutes, not six hours."
-                >
-                  Whale flow
-                </th>
-                <th className="text-right px-3 font-medium">Signal</th>
-              </tr>
-            </thead>
-            <tbody className="num">
-              {/* Live rows take ~5s to assemble on a cold load (trending +
-                  rugcheck + chain flow, measured); an empty tbody for that long
-                  reads as broken and lets everything below jump up when rows
-                  land. Shimmer rows hold the space — bars, never numbers. */}
-              {!rowData && <SkeletonRows rows={8} widths={["label", 58, 44, 48, 52, 72]} />}
-              {(rowData?.rows ?? []).slice(0, 8).map((r) => (
-                <tr key={r.mint} className="trow">
-                  <td className="px-3 py-1.5">
-                    <Link href={`/token?m=${r.mint}`} className="flex items-center gap-2 hover:text-[var(--accent)]">
-                      <TokenMark hue={r.hue} symbol={r.symbol} size={18} />
-                      <span className="font-[var(--font-sans)]">{r.symbol}</span>
-                      <span className="faint text-[10px]">{fmtAge(r.ageHours * 3_600_000)}</span>
-                    </Link>
-                  </td>
-                  <td className="text-right px-2">{fmtUsd(r.priceUsd)}</td>
-                  <td className={`text-right px-2 ${r.h24 >= 0 ? "pos" : "neg"}`}>{fmtPct(r.h24)}</td>
-                  <td className="text-right px-2 dim">{fmtUsd(r.marketCapUsd)}</td>
-                  <td className={`text-right px-2 ${whaleFlowCell(r).cls}`} title={whaleFlowCell(r).title}>
-                    {whaleFlowCell(r).text}
-                  </td>
-                  <td className="text-right px-3">
-                    <Score value={r.signalScore} width={44} scored={r.scored !== false} reason={r.unscoredReason} />
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12px]">
+              <thead className="thead">
+                <tr>
+                  <th className="text-left px-3 py-1.5 font-medium">Token</th>
+                  <th className="text-right px-2 font-medium">Price</th>
+                  <th className="text-right px-2 font-medium">24h</th>
+                  <th className="text-right px-2 font-medium">Mcap</th>
+                  {/* Ten minutes of chain, not six hours — see whaleFlowCell. */}
+                  <th
+                    className="text-right px-2 font-medium"
+                    title="Net movement by wallets that moved $20,000+ of this token, over a short chain scan — ten minutes, not six hours."
+                  >
+                    Whale flow
+                  </th>
+                  <th className="text-right px-3 font-medium">Signal</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="num">
+                {/* Live rows take ~5s to assemble on a cold load (trending +
+                    rugcheck + chain flow, measured); an empty tbody for that long
+                    reads as broken and lets everything below jump up when rows
+                    land. Shimmer rows hold the space — bars, never numbers. */}
+                {!rowData && <SkeletonRows rows={8} widths={["label", 58, 44, 48, 52, 72]} />}
+                {(rowData?.rows ?? []).slice(0, 8).map((r) => (
+                  <tr key={r.mint} className="trow">
+                    <td className="px-3 py-1.5">
+                      <Link href={`/token?m=${r.mint}`} className="flex items-center gap-2 hover:text-[var(--accent)]">
+                        <TokenMark hue={r.hue} symbol={r.symbol} size={18} />
+                        <span className="font-[var(--font-sans)]">{r.symbol}</span>
+                        <span className="faint text-[10px]">{fmtAge(r.ageHours * 3_600_000)}</span>
+                      </Link>
+                    </td>
+                    <td className="text-right px-2">{fmtUsd(r.priceUsd)}</td>
+                    <td className={`text-right px-2 ${r.h24 >= 0 ? "pos" : "neg"}`}>{fmtPct(r.h24)}</td>
+                    <td className="text-right px-2 dim">{fmtUsd(r.marketCapUsd)}</td>
+                    <td className={`text-right px-2 ${whaleFlowCell(r).cls}`} title={whaleFlowCell(r).title}>
+                      {whaleFlowCell(r).text}
+                    </td>
+                    <td className="text-right px-3">
+                      <Score value={r.signalScore} width={44} scored={r.scored !== false} reason={r.unscoredReason} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
         <div className="panel">
           <div className="flex items-center justify-between px-3 pt-2.5 pb-1">

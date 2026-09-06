@@ -279,30 +279,32 @@ function DemoWallet({ address, initial }: { address: string; initial: WalletDeta
         {/* open positions */}
         <div className="panel">
           <div className="panel-title px-3 pt-2.5 pb-1">Open positions</div>
-          <table className="w-full text-[12px]">
-            <thead className="thead">
-              <tr>
-                <th className="text-left px-3 py-1.5 font-medium">Token</th>
-                <th className="text-right px-2 font-medium">Value</th>
-                <th className="text-right px-2 font-medium">Cost</th>
-                <th className="text-right px-2 font-medium">PnL</th>
-                <th className="text-right px-3 font-medium">Opened</th>
-              </tr>
-            </thead>
-            <tbody className="num">
-              {detail.positions.sort((a, b) => b.valueUsd - a.valueUsd).map((p) => (
-                <tr key={p.mint} className="trow">
-                  <td className="px-3 py-1.5">
-                    <Link href={`/token?m=${p.mint}`} className="hover:text-[var(--accent)]" style={{ fontFamily: "var(--font-sans)" }}>{p.symbol}</Link>
-                  </td>
-                  <td className="text-right px-2">{fmtUsd(p.valueUsd)}</td>
-                  <td className="text-right px-2 dim">{fmtUsd(p.costBasisUsd)}</td>
-                  <td className={`text-right px-2 ${p.pnlUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(p.pnlUsd)} ({fmtPct(p.pnlPct, 0)})</td>
-                  <td className="text-right px-3 faint">{fmtAgo(p.openedAt)}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12px]">
+              <thead className="thead">
+                <tr>
+                  <th className="text-left px-3 py-1.5 font-medium">Token</th>
+                  <th className="text-right px-2 font-medium">Value</th>
+                  <th className="text-right px-2 font-medium">Cost</th>
+                  <th className="text-right px-2 font-medium">PnL</th>
+                  <th className="text-right px-3 font-medium">Opened</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="num">
+                {detail.positions.sort((a, b) => b.valueUsd - a.valueUsd).map((p) => (
+                  <tr key={p.mint} className="trow">
+                    <td className="px-3 py-1.5">
+                      <Link href={`/token?m=${p.mint}`} className="hover:text-[var(--accent)]" style={{ fontFamily: "var(--font-sans)" }}>{p.symbol}</Link>
+                    </td>
+                    <td className="text-right px-2">{fmtUsd(p.valueUsd)}</td>
+                    <td className="text-right px-2 dim">{fmtUsd(p.costBasisUsd)}</td>
+                    <td className={`text-right px-2 ${p.pnlUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(p.pnlUsd)} ({fmtPct(p.pnlPct, 0)})</td>
+                    <td className="text-right px-3 faint">{fmtAgo(p.openedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {detail.positions.length === 0 && <Empty>Flat — no open positions.</Empty>}
         </div>
 
@@ -310,21 +312,23 @@ function DemoWallet({ address, initial }: { address: string; initial: WalletDeta
         <div className="panel">
           <div className="panel-title px-3 pt-2.5 pb-1">Closed round trips</div>
           <div className="max-h-[300px] overflow-y-auto">
-            <table className="w-full text-[12px]">
-              <tbody className="num">
-                {detail.roundTrips.map((r, i) => (
-                  <tr key={i} className="trow">
-                    <td className="px-3 py-1.5">
-                      <Link href={`/token?m=${r.mint}`} className="hover:text-[var(--accent)]" style={{ fontFamily: "var(--font-sans)" }}>{r.symbol}</Link>
-                    </td>
-                    <td className="text-right px-2 dim">{fmtUsd(r.costUsd)} in</td>
-                    <td className={`text-right px-2 ${r.pnlUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(r.pnlUsd)}</td>
-                    <td className="text-right px-2 dim">{r.holdHours.toFixed(0)}h held</td>
-                    <td className="text-right px-3 faint">{fmtAgo(r.exitTs)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12px]">
+                <tbody className="num">
+                  {detail.roundTrips.map((r, i) => (
+                    <tr key={i} className="trow">
+                      <td className="px-3 py-1.5">
+                        <Link href={`/token?m=${r.mint}`} className="hover:text-[var(--accent)]" style={{ fontFamily: "var(--font-sans)" }}>{r.symbol}</Link>
+                      </td>
+                      <td className="text-right px-2 dim">{fmtUsd(r.costUsd)} in</td>
+                      <td className={`text-right px-2 ${r.pnlUsd >= 0 ? "pos" : "neg"}`}>{fmtUsd(r.pnlUsd)}</td>
+                      <td className="text-right px-2 dim">{r.holdHours.toFixed(0)}h held</td>
+                      <td className="text-right px-3 faint">{fmtAgo(r.exitTs)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             {detail.roundTrips.length === 0 && <Empty>No completed trades yet.</Empty>}
           </div>
         </div>
@@ -356,23 +360,25 @@ function DemoWallet({ address, initial }: { address: string; initial: WalletDeta
         <div className="panel">
           <div className="panel-title px-3 pt-2.5 pb-1">Trade log</div>
           <div className="max-h-[340px] overflow-y-auto">
-            <table className="w-full text-[11.5px]">
-              <tbody className="num">
-                {detail.trades.map((t) => (
-                  <tr key={t.id} className="trow">
-                    <td className="px-3 py-1 faint">{new Date(t.ts).toLocaleString()}</td>
-                    <td className={`px-2 ${t.side === "buy" ? "pos" : "neg"}`}>{t.side.toUpperCase()}</td>
-                    <td className="px-2">
-                      <Link href={`/token?m=${t.mint}`} className="hover:text-[var(--accent)]">{t.symbol}</Link>
-                    </td>
-                    <td className="px-2">{fmtUsd(t.amountUsd)}</td>
-                    <td className="px-2 faint">{t.dex}</td>
-                    <td className="px-2 faint">{t.classification}</td>
-                    <td className="px-2 faint text-right" title={t.signature}>{t.signature.slice(0, 8)}…</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[11.5px]">
+                <tbody className="num">
+                  {detail.trades.map((t) => (
+                    <tr key={t.id} className="trow">
+                      <td className="px-3 py-1 faint">{new Date(t.ts).toLocaleString()}</td>
+                      <td className={`px-2 ${t.side === "buy" ? "pos" : "neg"}`}>{t.side.toUpperCase()}</td>
+                      <td className="px-2">
+                        <Link href={`/token?m=${t.mint}`} className="hover:text-[var(--accent)]">{t.symbol}</Link>
+                      </td>
+                      <td className="px-2">{fmtUsd(t.amountUsd)}</td>
+                      <td className="px-2 faint">{t.dex}</td>
+                      <td className="px-2 faint">{t.classification}</td>
+                      <td className="px-2 faint text-right" title={t.signature}>{t.signature.slice(0, 8)}…</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>

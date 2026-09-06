@@ -4,7 +4,7 @@
 
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Launch Feed" };
+export const metadata: Metadata = { title: "Launch Feed", description: "Every new Solana mint and pool as it lands, triaged in seconds: which checks ran, what they found, and what nobody could know yet." };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return children;

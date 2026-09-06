@@ -144,11 +144,44 @@ function createWindow() {
     else if (action === "zoom-reset") setZoom(0);
   });
 
+  // A renderer that dies — out of memory under the 3D scene, a GPU reset —
+  // used to leave a blank window with nothing to click. Reload it once; a
+  // second death inside a minute is left alone, so a page that crashes on
+  // load cannot loop.
+  let lastCrashAt = 0;
+  win.webContents.on("render-process-gone", (_event, details) => {
+    if (details.reason === "clean-exit" || details.reason === "killed") return;
+    const now = Date.now();
+    if (now - lastCrashAt < 60_000) return;
+    lastCrashAt = now;
+    win.webContents.reload();
+  });
+
   win.loadURL(`app://${ORIGIN_HOST}${BASE}/`);
   return win;
 }
 
+// One instance. A second launch — the shortcut clicked again, a pinned
+// taskbar icon — used to open a second window on the same userData: two
+// Chromiums contending for one profile's storage. The lock hands the
+// second launch to the first, which brings its window forward.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (!win) {
+      createWindow();
+      return;
+    }
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  });
+}
+
 app.whenReady().then(() => {
+  if (!app.hasSingleInstanceLock()) return;
   Menu.setApplicationMenu(null);
 
   protocol.handle("app", (request) => {

@@ -57,9 +57,17 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
+  // Focus goes in on open and BACK OUT on close. The Shell unmounts the
+  // palette, and without the return a reader who opened it from the search
+  // button or with ⌘K landed on <body>, their next Tab restarting at the top.
+  const openerRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const t = setTimeout(() => inputRef.current?.focus(), 30);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      openerRef.current?.focus();
+    };
   }, []);
 
   // Keep the selection on screen. Twelve rows overflow the 46vh list, and an
@@ -135,7 +143,13 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] flex items-start justify-center pt-[12vh]" onClick={onClose}>
-      <div className="panel w-[560px] max-w-[92vw] overflow-hidden fade-up" onClick={(e) => e.stopPropagation()}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Search and commands"
+        className="panel w-[560px] max-w-[92vw] overflow-hidden fade-up"
+        onClick={(e) => e.stopPropagation()}
+      >
         <input
           ref={inputRef}
           value={q}
@@ -162,11 +176,20 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           placeholder="Search tokens and wallets, or jump to a page…"
           className="w-full bg-transparent px-4 py-3 text-[14px] outline-none border-b border-[var(--border)]"
           aria-label="Search and commands"
+          role="combobox"
+          aria-expanded="true"
+          aria-autocomplete="list"
+          aria-controls="palette-list"
+          aria-activedescendant={items[sel] ? `palette-opt-${sel}` : undefined}
         />
-        <div ref={listRef} className="max-h-[46vh] overflow-y-auto py-1">
+        <div ref={listRef} id="palette-list" role="listbox" className="max-h-[46vh] overflow-y-auto py-1">
           {items.map((it, i) => (
             <button
               key={it.key}
+              role="option"
+              id={`palette-opt-${i}`}
+              aria-selected={i === sel}
+              tabIndex={-1}
               data-selected={i === sel || undefined}
               onMouseEnter={() => setSelRaw(i)}
               onClick={() => go(it)}

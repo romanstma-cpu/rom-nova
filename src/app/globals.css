@@ -193,6 +193,10 @@ body::after {
 .chip-danger { border-color: rgba(255, 77, 109, 0.35); color: var(--neg); background: rgba(255, 77, 109, 0.07); }
 .chip-warn { border-color: rgba(255, 180, 84, 0.35); color: var(--warn); background: rgba(255, 180, 84, 0.07); }
 .chip-accent { border-color: rgba(56, 225, 255, 0.35); color: var(--accent); background: rgba(56, 225, 255, 0.07); }
+/* A chip that carries a sentence (the Research desk's example questions): it
+   wraps instead of running off a phone. Unlayered on purpose — .chip's nowrap
+   is unlayered too, and a layered Tailwind utility cannot beat it. */
+.chip-wrap { white-space: normal; text-align: left; height: auto; line-height: 1.35; max-width: 100%; }
 
 .btn {
   display: inline-flex;

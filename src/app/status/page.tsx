@@ -55,68 +55,70 @@ function LiveSockets() {
           while there is an armed rule or an on-curve launch to watch. Nothing connects speculatively.
         </div>
       ) : (
-        <table className="w-full text-[12px]">
-          <thead className="thead">
-            <tr>
-              <th className="text-left px-3 py-1.5 font-medium">Socket</th>
-              <th className="text-left px-2 font-medium">State</th>
-              <th className="text-right px-2 font-medium" title="subscribed / sent-awaiting-ack / unacked (no ack in 10s = NOT subscribed) / registered">
-                Subscriptions
-              </th>
-              <th className="text-right px-2 font-medium">Reconnects</th>
-              <th className="text-right px-2 font-medium" title="application-level pings sent after silence, and how many times silence outlived the timeout">
-                Heartbeat
-              </th>
-              <th className="text-right px-2 font-medium">Frames</th>
-              <th className="text-left px-3 font-medium">Note</th>
-            </tr>
-          </thead>
-          <tbody className="num">
-            {sockets.map((s) => {
-              const d = describeSocket(s, now);
-              return (
-                <tr key={s.name} className="trow">
-                  <td className="px-3 py-2" style={{ fontFamily: "var(--font-sans)" }} title={s.url}>
-                    {s.name}
-                  </td>
-                  <td className={`px-2 ${d.up ? "pos" : s.wanted ? "neg" : "faint"}`} title={s.lastError ? `last error: ${s.lastError}` : undefined}>
-                    {d.up ? "●" : "○"} {d.label}
-                    {!s.wanted && s.state !== "open" ? " · not wanted" : ""}
-                  </td>
-                  <td
-                    className="text-right px-2"
-                    title={s.subscriptions.map((sub) => `${sub.key}: ${sub.state}${sub.messages ? ` · ${sub.messages} frames` : ""}`).join("\n") || "none registered"}
-                  >
-                    <span className="pos">{s.subscribed}</span>
-                    <span className="faint">/</span>
-                    <span className={s.acksPending ? "warn" : "faint"}>{s.acksPending}</span>
-                    <span className="faint">/</span>
-                    <span className={s.unacked ? "neg" : "faint"}>{s.unacked}</span>
-                    <span className="faint">/{s.subscriptions.length}</span>
-                  </td>
-                  <td className="text-right px-2 dim">
-                    {s.reconnects}
-                    {s.attempts > 0 ? <span className="neg"> · {s.attempts} failing</span> : ""}
-                  </td>
-                  <td className="text-right px-2 dim">
-                    {s.heartbeat.pings} pings · {s.heartbeat.timeouts} timeouts
-                  </td>
-                  <td className="text-right px-2 dim">
-                    {s.messages} · {kb(s.bytes)}
-                  </td>
-                  <td className="px-3 text-[11px] dim" style={{ fontFamily: "var(--font-sans)" }}>
-                    {s.name === "pumpportal-ws"
-                      ? "subscribeNewToken only — the trade feeds need an API key. Frames carry no timestamp; pushed rows are stamped with receipt time and dated by a poll."
-                      : `per-account logsSubscribe / accountSubscribe only. Plan: ${plan.wallets.length} wallet${plan.wallets.length === 1 ? "" : "s"}, ${plan.mints.length} mint${plan.mints.length === 1 ? "" : "s"}, ${plan.curves.length} curve${plan.curves.length === 1 ? "" : "s"} of a ${SUBSCRIPTION_CAP}-subscription cap (${CURVE_CAP} curves at most)` +
-                        (plan.droppedWallets + plan.droppedMints + plan.droppedCurves > 0
-                          ? ` — ${plan.droppedWallets + plan.droppedMints} rule account(s) and ${plan.droppedCurves} curve(s) NOT subscribed, over the cap`
-                          : "")}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead className="thead">
+              <tr>
+                <th className="text-left px-3 py-1.5 font-medium">Socket</th>
+                <th className="text-left px-2 font-medium">State</th>
+                <th className="text-right px-2 font-medium" title="subscribed / sent-awaiting-ack / unacked (no ack in 10s = NOT subscribed) / registered">
+                  Subscriptions
+                </th>
+                <th className="text-right px-2 font-medium">Reconnects</th>
+                <th className="text-right px-2 font-medium" title="application-level pings sent after silence, and how many times silence outlived the timeout">
+                  Heartbeat
+                </th>
+                <th className="text-right px-2 font-medium">Frames</th>
+                <th className="text-left px-3 font-medium">Note</th>
+              </tr>
+            </thead>
+            <tbody className="num">
+              {sockets.map((s) => {
+                const d = describeSocket(s, now);
+                return (
+                  <tr key={s.name} className="trow">
+                    <td className="px-3 py-2" style={{ fontFamily: "var(--font-sans)" }} title={s.url}>
+                      {s.name}
+                    </td>
+                    <td className={`px-2 ${d.up ? "pos" : s.wanted ? "neg" : "faint"}`} title={s.lastError ? `last error: ${s.lastError}` : undefined}>
+                      {d.up ? "●" : "○"} {d.label}
+                      {!s.wanted && s.state !== "open" ? " · not wanted" : ""}
+                    </td>
+                    <td
+                      className="text-right px-2"
+                      title={s.subscriptions.map((sub) => `${sub.key}: ${sub.state}${sub.messages ? ` · ${sub.messages} frames` : ""}`).join("\n") || "none registered"}
+                    >
+                      <span className="pos">{s.subscribed}</span>
+                      <span className="faint">/</span>
+                      <span className={s.acksPending ? "warn" : "faint"}>{s.acksPending}</span>
+                      <span className="faint">/</span>
+                      <span className={s.unacked ? "neg" : "faint"}>{s.unacked}</span>
+                      <span className="faint">/{s.subscriptions.length}</span>
+                    </td>
+                    <td className="text-right px-2 dim">
+                      {s.reconnects}
+                      {s.attempts > 0 ? <span className="neg"> · {s.attempts} failing</span> : ""}
+                    </td>
+                    <td className="text-right px-2 dim">
+                      {s.heartbeat.pings} pings · {s.heartbeat.timeouts} timeouts
+                    </td>
+                    <td className="text-right px-2 dim">
+                      {s.messages} · {kb(s.bytes)}
+                    </td>
+                    <td className="px-3 text-[11px] dim" style={{ fontFamily: "var(--font-sans)" }}>
+                      {s.name === "pumpportal-ws"
+                        ? "subscribeNewToken only — the trade feeds need an API key. Frames carry no timestamp; pushed rows are stamped with receipt time and dated by a poll."
+                        : `per-account logsSubscribe / accountSubscribe only. Plan: ${plan.wallets.length} wallet${plan.wallets.length === 1 ? "" : "s"}, ${plan.mints.length} mint${plan.mints.length === 1 ? "" : "s"}, ${plan.curves.length} curve${plan.curves.length === 1 ? "" : "s"} of a ${SUBSCRIPTION_CAP}-subscription cap (${CURVE_CAP} curves at most)` +
+                          (plan.droppedWallets + plan.droppedMints + plan.droppedCurves > 0
+                            ? ` — ${plan.droppedWallets + plan.droppedMints} rule account(s) and ${plan.droppedCurves} curve(s) NOT subscribed, over the cap`
+                            : "")}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
       <div className="px-3 pb-3 pt-2 text-[11px] dim leading-relaxed" style={{ fontFamily: "var(--font-sans)" }}>
         <b>Why nothing here subscribes program-wide.</b> Measured {RATES_MEASURED_ON}:{" "}
@@ -162,45 +164,47 @@ function WalletLedger() {
           carries a measured reputation the token scorer reads as smart money.
         </div>
       ) : (
-        <table className="w-full text-[12px]">
-          <thead className="thead">
-            <tr>
-              <th className="text-left px-3 py-1.5 font-medium">Wallet</th>
-              <th className="text-left px-2 font-medium">State</th>
-              <th className="text-right px-2 font-medium">Fills</th>
-              <th className="text-right px-2 font-medium" title="days actually covered by reads / days from first read to last">Observed / span</th>
-              <th className="text-right px-2 font-medium">Round trips</th>
-              <th className="text-left px-2 font-medium">Verdict</th>
-              <th className="text-right px-3 font-medium">Last read</th>
-            </tr>
-          </thead>
-          <tbody className="num">
-            {snap.wallets.map((w) => (
-              <tr key={w.address} className="trow">
-                <td className="px-3 py-2">
-                  <a href={`/whale?a=${w.address}`} className="link">{w.address.slice(0, 4)}…{w.address.slice(-4)}</a>
-                </td>
-                <td className={`px-2 ${w.recording ? "pos" : "faint"}`}>{w.recording ? "● recording" : "○ paused"}</td>
-                <td className="text-right px-2">{w.fills}</td>
-                <td className="text-right px-2 dim">
-                  {days(w.reputation.observedDays)} / {days(w.reputation.spanDays)}
-                  {w.reputation.gaps.count > 0 && <span className="warn"> · {w.reputation.gaps.count} gap{w.reputation.gaps.count === 1 ? "" : "s"}</span>}
-                </td>
-                <td className="text-right px-2">{w.reputation.roundTrips}</td>
-                <td className="px-2" style={{ fontFamily: "var(--font-sans)" }}>
-                  {w.reputation.verdict === "measured" ? (
-                    <span className={w.reputation.smart ? "pos" : ""}>
-                      grade {w.reputation.grade} · {w.reputation.score}/100{w.reputation.smart ? " · smart money" : ""}
-                    </span>
-                  ) : (
-                    <span className="dim">insufficient — needs {w.reputation.needs.join(", ")}</span>
-                  )}
-                </td>
-                <td className="text-right px-3 dim">{w.lastReadAt ? fmtAgo(w.lastReadAt, now) : "—"}</td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead className="thead">
+              <tr>
+                <th className="text-left px-3 py-1.5 font-medium">Wallet</th>
+                <th className="text-left px-2 font-medium">State</th>
+                <th className="text-right px-2 font-medium">Fills</th>
+                <th className="text-right px-2 font-medium" title="days actually covered by reads / days from first read to last">Observed / span</th>
+                <th className="text-right px-2 font-medium">Round trips</th>
+                <th className="text-left px-2 font-medium">Verdict</th>
+                <th className="text-right px-3 font-medium">Last read</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="num">
+              {snap.wallets.map((w) => (
+                <tr key={w.address} className="trow">
+                  <td className="px-3 py-2">
+                    <a href={`/whale?a=${w.address}`} className="link">{w.address.slice(0, 4)}…{w.address.slice(-4)}</a>
+                  </td>
+                  <td className={`px-2 ${w.recording ? "pos" : "faint"}`}>{w.recording ? "● recording" : "○ paused"}</td>
+                  <td className="text-right px-2">{w.fills}</td>
+                  <td className="text-right px-2 dim">
+                    {days(w.reputation.observedDays)} / {days(w.reputation.spanDays)}
+                    {w.reputation.gaps.count > 0 && <span className="warn"> · {w.reputation.gaps.count} gap{w.reputation.gaps.count === 1 ? "" : "s"}</span>}
+                  </td>
+                  <td className="text-right px-2">{w.reputation.roundTrips}</td>
+                  <td className="px-2" style={{ fontFamily: "var(--font-sans)" }}>
+                    {w.reputation.verdict === "measured" ? (
+                      <span className={w.reputation.smart ? "pos" : ""}>
+                        grade {w.reputation.grade} · {w.reputation.score}/100{w.reputation.smart ? " · smart money" : ""}
+                      </span>
+                    ) : (
+                      <span className="dim">insufficient — needs {w.reputation.needs.join(", ")}</span>
+                    )}
+                  </td>
+                  <td className="text-right px-3 dim">{w.lastReadAt ? fmtAgo(w.lastReadAt, now) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -275,38 +279,40 @@ function HostedRadar() {
           page.
         </div>
       ) : (
-        <table className="w-full text-[12px]">
-          <thead className="thead">
-            <tr>
-              <th className="text-left px-3 py-1.5 font-medium">Worker</th>
-              <th className="text-left px-2 font-medium">State</th>
-              <th className="text-left px-2 font-medium">Gate</th>
-              <th className="text-right px-2 font-medium">Tracked</th>
-              <th className="text-right px-2 font-medium">Signals</th>
-              <th className="text-right px-2 font-medium" title="tabs connected to the worker right now, this one included">
-                Readers
-              </th>
-              <th className="text-left px-3 font-medium">Coverage</th>
-            </tr>
-          </thead>
-          <tbody className="num">
-            <tr className="trow">
-              <td className="px-3 py-2 break-all" style={{ fontFamily: "var(--font-sans)" }}>
-                {url}
-              </td>
-              <td className={`px-2 ${r.phase === "connected" ? "pos" : r.phase === "error" ? "neg" : "faint"}`}>{stateText}</td>
-              <td className={`px-2 ${r.gate ? "warn" : "dim"}`} style={{ fontFamily: "var(--font-sans)" }}>
-                {gateText}
-              </td>
-              <td className="text-right px-2">{n("tracked")}</td>
-              <td className="text-right px-2">{n("signals")}</td>
-              <td className="text-right px-2">{n("clients")}</td>
-              <td className="px-3 dim" style={{ fontFamily: "var(--font-sans)" }}>
-                {r.coverage ?? (r.phase === "off" ? "read while the Whale Radar page is open" : "—")}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead className="thead">
+              <tr>
+                <th className="text-left px-3 py-1.5 font-medium">Worker</th>
+                <th className="text-left px-2 font-medium">State</th>
+                <th className="text-left px-2 font-medium">Gate</th>
+                <th className="text-right px-2 font-medium">Tracked</th>
+                <th className="text-right px-2 font-medium">Signals</th>
+                <th className="text-right px-2 font-medium" title="tabs connected to the worker right now, this one included">
+                  Readers
+                </th>
+                <th className="text-left px-3 font-medium">Coverage</th>
+              </tr>
+            </thead>
+            <tbody className="num">
+              <tr className="trow">
+                <td className="px-3 py-2 break-all" style={{ fontFamily: "var(--font-sans)" }}>
+                  {url}
+                </td>
+                <td className={`px-2 ${r.phase === "connected" ? "pos" : r.phase === "error" ? "neg" : "faint"}`}>{stateText}</td>
+                <td className={`px-2 ${r.gate ? "warn" : "dim"}`} style={{ fontFamily: "var(--font-sans)" }}>
+                  {gateText}
+                </td>
+                <td className="text-right px-2">{n("tracked")}</td>
+                <td className="text-right px-2">{n("signals")}</td>
+                <td className="text-right px-2">{n("clients")}</td>
+                <td className="px-3 dim" style={{ fontFamily: "var(--font-sans)" }}>
+                  {r.coverage ?? (r.phase === "off" ? "read while the Whale Radar page is open" : "—")}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -376,67 +382,69 @@ export default function StatusPage() {
 
       <div className="panel">
         <div className="panel-title px-3 pt-2.5 pb-1">Data providers</div>
-        <table className="w-full text-[12px]">
-          <thead className="thead">
-            <tr>
-              <th className="text-left px-3 py-1.5 font-medium">Provider</th>
-              <th className="text-left px-2 font-medium">Mode</th>
-              <th className="text-left px-2 font-medium">Status</th>
-              <th className="text-right px-2 font-medium">Latency</th>
-              <th className="text-right px-2 font-medium">Error rate</th>
-              <th className="text-right px-2 font-medium">Last data</th>
-              <th className="text-left px-3 font-medium">Note</th>
-            </tr>
-          </thead>
-          <tbody className="num">
-            {data.providers.map((p) => (
-              <tr key={p.name} className="trow">
-                <td className="px-3 py-2" style={{ fontFamily: "var(--font-sans)" }}>{p.name}</td>
-                <td className="px-2">
-                  <span className={`chip ${p.mode === "live" ? "chip-pos" : p.mode === "demo" ? "chip-accent" : ""}`}>{p.mode}</span>
-                </td>
-                {/* "not asked yet" is its own state and reads as such. A
-                    provider that has answered nothing is not healthy, and it is
-                    not offline either — the table used to call it "● ok" with
-                    0ms and 0% errors, which is every enabled provider on a cold
-                    load of this very page. */}
-                <td className="px-2">
-                  <span
-                    className={
-                      p.status === "ok"
-                        ? "pos"
-                        : p.status === "degraded"
-                          ? "warn"
-                          : p.status === "unknown"
-                            ? "dim"
-                            : "faint"
-                    }
-                    title={p.status === "unknown" ? "enabled, but nothing has been requested from it yet this session" : undefined}
-                  >
-                    {p.status === "ok"
-                      ? "● ok"
-                      : p.status === "degraded"
-                        ? "● degraded"
-                        : p.status === "unknown"
-                          ? "◌ not asked yet"
-                          : "○ offline"}
-                  </span>
-                </td>
-                <td className="text-right px-2 dim" title={p.latencyMs === undefined ? "no request has completed" : undefined}>
-                  {p.latencyMs === undefined ? "—" : `${p.latencyMs}ms`}
-                </td>
-                <td
-                  className={`text-right px-2 ${p.errorRatePct !== undefined && p.errorRatePct > 5 ? "neg" : "dim"}`}
-                  title={p.errorRatePct === undefined ? "no requests to compute a rate over" : undefined}
-                >
-                  {p.errorRatePct === undefined ? "—" : `${p.errorRatePct}%`}
-                </td>
-                <td className="text-right px-2 faint">{p.lastDataTs ? fmtAgo(p.lastDataTs) : "—"}</td>
-                <td className="px-3 text-[11px] dim" style={{ fontFamily: "var(--font-sans)" }}>{p.note ?? ""}</td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead className="thead">
+              <tr>
+                <th className="text-left px-3 py-1.5 font-medium">Provider</th>
+                <th className="text-left px-2 font-medium">Mode</th>
+                <th className="text-left px-2 font-medium">Status</th>
+                <th className="text-right px-2 font-medium">Latency</th>
+                <th className="text-right px-2 font-medium">Error rate</th>
+                <th className="text-right px-2 font-medium">Last data</th>
+                <th className="text-left px-3 font-medium">Note</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="num">
+              {data.providers.map((p) => (
+                <tr key={p.name} className="trow">
+                  <td className="px-3 py-2" style={{ fontFamily: "var(--font-sans)" }}>{p.name}</td>
+                  <td className="px-2">
+                    <span className={`chip ${p.mode === "live" ? "chip-pos" : p.mode === "demo" ? "chip-accent" : ""}`}>{p.mode}</span>
+                  </td>
+                  {/* "not asked yet" is its own state and reads as such. A
+                      provider that has answered nothing is not healthy, and it is
+                      not offline either — the table used to call it "● ok" with
+                      0ms and 0% errors, which is every enabled provider on a cold
+                      load of this very page. */}
+                  <td className="px-2">
+                    <span
+                      className={
+                        p.status === "ok"
+                          ? "pos"
+                          : p.status === "degraded"
+                            ? "warn"
+                            : p.status === "unknown"
+                              ? "dim"
+                              : "faint"
+                      }
+                      title={p.status === "unknown" ? "enabled, but nothing has been requested from it yet this session" : undefined}
+                    >
+                      {p.status === "ok"
+                        ? "● ok"
+                        : p.status === "degraded"
+                          ? "● degraded"
+                          : p.status === "unknown"
+                            ? "◌ not asked yet"
+                            : "○ offline"}
+                    </span>
+                  </td>
+                  <td className="text-right px-2 dim" title={p.latencyMs === undefined ? "no request has completed" : undefined}>
+                    {p.latencyMs === undefined ? "—" : `${p.latencyMs}ms`}
+                  </td>
+                  <td
+                    className={`text-right px-2 ${p.errorRatePct !== undefined && p.errorRatePct > 5 ? "neg" : "dim"}`}
+                    title={p.errorRatePct === undefined ? "no requests to compute a rate over" : undefined}
+                  >
+                    {p.errorRatePct === undefined ? "—" : `${p.errorRatePct}%`}
+                  </td>
+                  <td className="text-right px-2 faint">{p.lastDataTs ? fmtAgo(p.lastDataTs) : "—"}</td>
+                  <td className="px-3 text-[11px] dim" style={{ fontFamily: "var(--font-sans)" }}>{p.note ?? ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <LiveSockets />

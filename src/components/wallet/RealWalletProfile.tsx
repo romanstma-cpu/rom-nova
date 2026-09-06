@@ -511,22 +511,24 @@ export function RealWalletProfile({ p }: { p: WalletProfile }) {
             <span className="faint"> — balances read from the chain, cost basis only where the entry was seen</span>
           </div>
           <div className="max-h-[340px] overflow-y-auto">
-            <table className="w-full text-[12px]">
-              <thead className="thead">
-                <tr>
-                  <th className="text-left px-3 py-1.5 font-medium">Token</th>
-                  <th className="text-right px-2 font-medium">Tokens</th>
-                  <th className="text-right px-2 font-medium">Value</th>
-                  <th className="text-right px-2 font-medium">Cost</th>
-                  <th className="text-right px-3 font-medium">Unrealized</th>
-                </tr>
-              </thead>
-              <tbody className="num">
-                {withValue.map((h) => (
-                  <PositionRow key={h.mint} h={h} />
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12px]">
+                <thead className="thead">
+                  <tr>
+                    <th className="text-left px-3 py-1.5 font-medium">Token</th>
+                    <th className="text-right px-2 font-medium">Tokens</th>
+                    <th className="text-right px-2 font-medium">Value</th>
+                    <th className="text-right px-2 font-medium">Cost</th>
+                    <th className="text-right px-3 font-medium">Unrealized</th>
+                  </tr>
+                </thead>
+                <tbody className="num">
+                  {withValue.map((h) => (
+                    <PositionRow key={h.mint} h={h} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
             {withValue.length === 0 && <Empty>No positions with a readable value.</Empty>}
           </div>
         </div>
@@ -548,25 +550,27 @@ export function RealWalletProfile({ p }: { p: WalletProfile }) {
             </div>
           )}
           <div className="max-h-[340px] overflow-y-auto">
-            <table className="w-full text-[12px]">
-              <tbody className="num">
-                {p.roundTrips.map((r, i) => (
-                  <tr key={i} className="trow">
-                    <td className="px-3 py-1.5">
-                      <Link href={`/token?m=${r.mint}`} className="hover:text-[var(--accent)] text-[11.5px]">
-                        {r.symbol ?? shortAddr(r.mint)}
-                      </Link>
-                    </td>
-                    <td className="text-right px-2 dim">{fmtUsd(r.costUsd)} in</td>
-                    <td className={`text-right px-2 ${pnlClass(r.pnlUsd)}`}>{fmtUsd(r.pnlUsd)}</td>
-                    <td className="text-right px-2 dim">
-                      {r.holdHours < 1 ? `${Math.round(r.holdHours * 60)}m` : `${r.holdHours.toFixed(1)}h`} held
-                    </td>
-                    <td className="text-right px-3 faint">{fmtAgo(r.exitTs)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12px]">
+                <tbody className="num">
+                  {p.roundTrips.map((r, i) => (
+                    <tr key={i} className="trow">
+                      <td className="px-3 py-1.5">
+                        <Link href={`/token?m=${r.mint}`} className="hover:text-[var(--accent)] text-[11.5px]">
+                          {r.symbol ?? shortAddr(r.mint)}
+                        </Link>
+                      </td>
+                      <td className="text-right px-2 dim">{fmtUsd(r.costUsd)} in</td>
+                      <td className={`text-right px-2 ${pnlClass(r.pnlUsd)}`}>{fmtUsd(r.pnlUsd)}</td>
+                      <td className="text-right px-2 dim">
+                        {r.holdHours < 1 ? `${Math.round(r.holdHours * 60)}m` : `${r.holdHours.toFixed(1)}h`} held
+                      </td>
+                      <td className="text-right px-3 faint">{fmtAgo(r.exitTs)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             {p.roundTrips.length === 0 && (
               <Empty>
                 Nothing bought AND sold inside this window. Round trips are the only trades whose profit is
@@ -583,24 +587,26 @@ export function RealWalletProfile({ p }: { p: WalletProfile }) {
           <span className="faint"> — every token change this wallet made, priced or not</span>
         </div>
         <div className="max-h-[420px] overflow-y-auto">
-          <table className="w-full text-[11.5px]">
-            <thead className="thead">
-              <tr>
-                <th className="text-left px-3 py-1.5 font-medium">When</th>
-                <th className="text-left px-2 font-medium">Dir</th>
-                <th className="text-left px-2 font-medium">Token</th>
-                <th className="text-left px-2 font-medium">Tokens</th>
-                <th className="text-left px-2 font-medium">Value</th>
-                <th className="text-left px-2 font-medium">Paid / received</th>
-                <th className="text-right px-2 font-medium">Tx</th>
-              </tr>
-            </thead>
-            <tbody className="num">
-              {p.fills.map((f, i) => (
-                <FillRow key={`${f.signature}-${f.mint}-${i}`} f={f} />
-              ))}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11.5px]">
+              <thead className="thead">
+                <tr>
+                  <th className="text-left px-3 py-1.5 font-medium">When</th>
+                  <th className="text-left px-2 font-medium">Dir</th>
+                  <th className="text-left px-2 font-medium">Token</th>
+                  <th className="text-left px-2 font-medium">Tokens</th>
+                  <th className="text-left px-2 font-medium">Value</th>
+                  <th className="text-left px-2 font-medium">Paid / received</th>
+                  <th className="text-right px-2 font-medium">Tx</th>
+                </tr>
+              </thead>
+              <tbody className="num">
+                {p.fills.map((f, i) => (
+                  <FillRow key={`${f.signature}-${f.mint}-${i}`} f={f} />
+                ))}
+              </tbody>
+            </table>
+          </div>
           {p.fills.length === 0 && <Empty>No token movements inside the readable window.</Empty>}
         </div>
       </div>

@@ -524,19 +524,31 @@ export class Db {
     let fills = 0;
     for (const row of walletRows ?? []) {
       const w = newWallet(Date.parse(row.first_seen) || Date.now());
-      // Paged replay, oldest first, capped at 4k fills a wallet — the same
-      // cap the app's ledger holds per wallet.
+      // The NEWEST 4k fills a wallet, replayed oldest-first.
+      //
+      // This asked for `ascending: true` with the same limit, which is the
+      // oldest 4k — so a wallet past the cap was scored on its earliest
+      // history and everything it had done since was invisible. The score
+      // gates signals at 70, and it froze at whatever the wallet was when it
+      // was new: a wallet that has since gone bad keeps its old grade, and
+      // the longer the journal runs the more wallets cross the cap. The
+      // app's ledger has always kept the newest (journal.ts splices from the
+      // front, RADAR_FILL_CAP) — same engine, opposite evidence.
+      //
+      // Fetched newest-first because that is the end the cap must keep, then
+      // reversed, because applyFill() is order-dependent and wants time
+      // moving forwards.
       const { data: tradeRows, error: tErr } = await this.client
         .from("wallet_trades")
         .select("token_address,buy_or_sell,amount_sol,price_at_trade,timestamp")
         .eq("wallet_address", row.wallet_address)
-        .order("timestamp", { ascending: true })
+        .order("timestamp", { ascending: false })
         .limit(4_000);
       if (tErr) {
         this.lastError = `hydrate trades: ${tErr.message}`;
         continue;
       }
-      for (const t of tradeRows ?? []) {
+      for (const t of (tradeRows ?? []).slice().reverse()) {
         const sol = Number(t.amount_sol) || 0;
         const price = Number(t.price_at_trade) || 0;
         applyFill(w, {

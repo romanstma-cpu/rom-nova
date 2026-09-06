@@ -11,6 +11,10 @@ and nothing it displays is investment advice. Every signal answers "why?" with n
 invalidation conditions, and the engine is allowed to answer **NO TRADE**. The full data-honesty statement lives at
 `/legal` in the app.
 
+Running it unattended, or coming back to it after a while? [`HANDOFF.md`](HANDOFF.md)
+is the operations note: what is live, the sixty-second health check, what needs
+a human, and what degrades on its own if nobody is watching.
+
 ---
 
 ## Quick start (zero credentials)

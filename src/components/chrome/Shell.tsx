@@ -69,6 +69,22 @@ export function Shell({ children }: { children: React.ReactNode }) {
   // open (the close button takes it) and back to whatever opened it on
   // close, so a keyboard or screen-reader user is never left on <body>.
   const navOpener = useRef<HTMLElement | null>(null);
+  const navDialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (!navOpen) return;
+    const dialog = navDialog.current;
+    dialog?.showModal();
+    const desktop = window.matchMedia("(min-width: 768px)");
+    const closeOnDesktop = () => {
+      if (desktop.matches) setNavOpen(false);
+    };
+    closeOnDesktop();
+    desktop.addEventListener("change", closeOnDesktop);
+    return () => {
+      desktop.removeEventListener("change", closeOnDesktop);
+      dialog?.close();
+    };
+  }, [navOpen]);
   const openNav = () => {
     navOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setNavOpen(true);
@@ -94,6 +110,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Do not open a second modal behind the native navigation dialog.
+      if (navOpen) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((o) => !o);
@@ -113,7 +131,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [navOpen]);
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
@@ -151,9 +169,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
       {/* mobile drawer */}
       {navOpen && (
-        <div className="fixed inset-0 z-50 md:hidden" onClick={() => setNavOpen(false)}>
+        <dialog ref={navDialog} aria-label="Navigation" className="fixed inset-0 m-0 h-full max-h-none w-full max-w-none border-0 p-0 bg-transparent text-[var(--text)] backdrop:bg-transparent" onCancel={() => setNavOpen(false)} onClick={() => setNavOpen(false)}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
-          <div role="dialog" aria-modal="true" aria-label="Navigation" className="absolute left-0 top-0 bottom-0 fade-up" onClick={(e) => e.stopPropagation()}>
+          <div className="absolute left-0 top-0 bottom-0 fade-up" onClick={(e) => e.stopPropagation()}>
             <div className="h-full flex flex-col bg-[#080b12] border-r border-[var(--border)]">
               <div className="flex items-center justify-between px-4 h-[46px] border-b border-[var(--border)]">
                 <span className="text-[13px] font-semibold tracking-[0.2em]">
@@ -166,7 +184,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               <NavRail onNavigate={() => setNavOpen(false)} />
             </div>
           </div>
-        </div>
+        </dialog>
       )}
 
       {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}

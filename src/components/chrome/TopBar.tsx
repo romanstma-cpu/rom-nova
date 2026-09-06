@@ -1,16 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useApi, fmtUsd, fmtPct } from "@/lib/client";
 import { AlertBadge } from "./AlertBadge";
 import { DataModeChip } from "./DataModeChip";
-
-interface SolReference {
-  priceUsd: number;
-  change24hPct: number | null;
-  sources: { name: string; priceUsd: number }[];
-  maxDeviation: number;
-}
+import type { SolReference } from "@/lib/providers/reference";
 
 // The header carries ONE number: the cross-checked SOL price, marked LIVE.
 // It used to also print the meme index, the smart-money flow and the regime
@@ -28,6 +23,18 @@ interface SolReference {
 export function TopBar({ onOpenPalette, onOpenNav }: { onOpenPalette: () => void; onOpenNav: () => void }) {
   const { data } = useApi<{ reference: SolReference | null }>("/api/market", 8000);
   const ref = data?.reference;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    // Keep aging the last reading even when requests fail or hang.
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const ageSeconds = ref && Number.isFinite(ref.fetchedAt)
+    ? Math.max(0, Math.floor((now - ref.fetchedAt) / 1000))
+    : null;
+  // The provider caches for 60 seconds; allow one refresh and its timeout.
+  const stale = ageSeconds === null || ageSeconds >= 90;
+  const ageLabel = ageSeconds === null ? "age unknown" : `${ageSeconds}s old`;
 
   return (
     <header className="topbar h-[46px] shrink-0 border-b border-[var(--border)] bg-[rgba(6,9,14,0.9)] flex items-center gap-4 px-4">
@@ -44,14 +51,14 @@ export function TopBar({ onOpenPalette, onOpenNav }: { onOpenPalette: () => void
       <div className="hidden md:flex items-center gap-4 num text-[11.5px]">
         {ref ? (
           <span
-            title={`live reference · ${ref.sources.map((s) => `${s.name} $${s.priceUsd.toFixed(2)}`).join(" · ")} · max deviation ${(ref.maxDeviation * 100).toFixed(2)}%`}
+            title={`${stale ? "stale" : "live"} reference · ${ageLabel} · ${ref.sources.map((s) => `${s.name} $${s.priceUsd.toFixed(2)}`).join(" · ")} · max deviation ${(ref.maxDeviation * 100).toFixed(2)}%`}
           >
             <span className="dim">SOL</span> {fmtUsd(ref.priceUsd)}{" "}
             {ref.change24hPct !== null && (
               <span className={ref.change24hPct >= 0 ? "pos" : "neg"}>{fmtPct(ref.change24hPct)}</span>
             )}
-            <span className="text-[8.5px] align-super text-[var(--accent)] ml-0.5" title="real price, cross-checked across public APIs">
-              LIVE
+            <span className={`text-[8.5px] align-super ml-0.5 ${stale ? "warn" : "text-[var(--accent)]"}`} title={`Last successful price reading: ${ageLabel}`}>
+              {stale ? `STALE · ${ageLabel}` : "LIVE"}
             </span>
           </span>
         ) : (

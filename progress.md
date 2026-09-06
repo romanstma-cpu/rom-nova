@@ -1572,6 +1572,75 @@ Authenticode check electron-updater would do needs a signed build, and code
 signing is LO's deferred decision.
 
 
+## Finalising — three worker defects that only show up over time (2026-09-06, night)
+
+LO is moving to a different app and asked for Nova to be left somewhere it can
+survive being unattended. Nothing in the app itself was wrong; all three
+findings were in the worker, and all three were the kind that stay invisible
+while someone is watching and compound while nobody is.
+
+**The neighbour extending DexScreener's ban was us.** `pricelookup.js` has
+always documented the trap — a Render box shares its egress address with
+strangers, DexScreener 429s it the moment a neighbour is busy, and hammering
+through a ban only extends it — so it backs off 30s doubling to five minutes
+and lets Jupiter cover the gap. `worker/src/dexscreener.js` calls the same host
+from the same box and had no brake at all: 3.3 req/s straight through. Live
+`/health` read **114 failures in 171 calls** on the name path while the price
+path sat in a four-minute wait it was partly serving on our behalf. The two now
+share one brake in both directions, a refusal reports its cause instead of
+incrementing a count nobody could explain, and a mint skipped during a ban is
+not cached as null — otherwise one 429 blanked every name for the full TTL.
+Five tests. Deployed and confirmed on the live `/health`.
+
+**Wallets were being scored on their oldest 4,000 fills.** Boot hydration
+rebuilds every reputation the hosted radar gates on, and Render restarts free
+services whenever it likes, so the path runs often. It asked for
+`.order("timestamp", { ascending: true }).limit(4000)` — the *oldest* 4,000 —
+and replayed those. A wallet past the cap was scored on its earliest history
+with everything since invisible, and that score gates signals at 70: a wallet
+that had gone bad kept its old grade forever. 628k trades across 200 tracked
+wallets is roughly 3,100 each and climbing, so wallets are crossing the cap
+now. The app's own ledger had always kept the newest end (`journal.ts` splices
+from the front under `RADAR_FILL_CAP`) — two drivers of one engine reading
+opposite evidence, under a comment claiming they matched. Now fetched
+newest-first and reversed for chronological replay. Hydration had **no test at
+all**, which is how the inversion survived; the two new behavioural ones were
+verified to fail against the old code before being kept.
+
+**Nothing measures or bounds the journal.** The worker has never pruned. It
+wrote 628,502 `wallet_trades` rows in 29 hours — about six a second, half a
+million a day — and nothing in the system reports the database's size or warns
+as it fills. On Supabase's free tier that ends at 500 MB with the database
+read-only, the worker still streaming, and its dropped writes counted in
+`/health` while nothing persists. `007-retention.sql` opens with the query that
+measures it, then a provably lossless cut, an age cut with its cost stated, and
+an optional nightly `pg_cron` schedule. Every statement in it is commented out
+— a decision, not a migration. What makes any of it safe is that `Db.hydrate()`
+is the only reader and can never see more than the newest 4,000 fills of the
+200 most recently active wallets; everything beyond that is history.
+
+Also: `HANDOFF.md` — what is live, the sixty-second health check, the four
+things that need a human, and what rots on its own. And the working tree is
+quiet again: twelve files had shown as modified since before this session with
+an empty `git diff` (stale line-ending stat — renormalising staged nothing,
+which is the proof), and the untracked blind-review reports of 1.7.0 are
+ignored rather than deleted.
+
+**The DNS moved.** Two of the three Resend records are now exactly right —
+SPF on `send` and the DKIM key on `resend._domainkey`. The MX on `send`
+resolves to `inbound-smtp.us-east-1.amazonaws.com`, which Resend's own
+documentation gives as the *receiving* endpoint; the outbound value it asks for
+is `feedback-smtp.us-east-1.amazonses.com`. One field at Porkbun.
+
+| check | result |
+|---|---|
+| gate | typecheck clean, lint clean, **956 tests** (947 → 956) |
+| worker | redeployed twice; hydrated 200 wallets, `db.lastError` null |
+| dexscreener status | new `skipped` / `lastError` / `backoffMs` fields serving live |
+| feed | `latest.yml` 200 at 1.28.0 |
+| app | romapps.xyz/nova 200, dashboard and `/status` verified in-browser, no console errors |
+| tree | clean |
+
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 
 The per-stream passes could not see between pages. The critic could.

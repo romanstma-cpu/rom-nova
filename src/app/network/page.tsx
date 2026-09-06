@@ -81,6 +81,20 @@ export default function NetworkPage() {
         </div>
       )}
 
+      {/* This scene is the demo universe end to end: /api/network reads the
+          simulator's wallets, tokens and edges, and there is no keyless source
+          for a cross-wallet graph. The rail files the page under SIMULATED and
+          the page said nothing. Pinned bottom-left rather than in the HUD —
+          the HUD is behind a button on a phone, and a label you have to open
+          a panel to find is not a label. Lifted clear of the time-machine bar
+          on narrow screens, which is bottom-centre and nearly full width. */}
+      <span
+        className="absolute left-3 bottom-3 max-md:bottom-[4.5rem] z-20 chip"
+        title="Every wallet, token and edge in this scene is the deterministic demo universe. None of these wallets are real people."
+      >
+        SIMULATED
+      </span>
+
       {/* On a phone the three HUD panels stacked to roughly 55% of the screen,
           so the controls hid the thing they control. One button, one sheet,
           closed until asked for. On a desktop there is room and it is always

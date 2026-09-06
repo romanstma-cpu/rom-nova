@@ -384,7 +384,6 @@ export class DemoStore {
       memeMomentumIndex: memeIndex,
       netSmartMoneyFlowUsd: smFlow,
       activeWhales24h: activeWhales.size,
-      slot: 285_000_000 + Math.floor((now - this.universe.genesis) / 400) + (hash32(String(Math.floor(now / 60000))) % 149),
     };
   }
 

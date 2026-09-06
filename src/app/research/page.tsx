@@ -96,7 +96,17 @@ export default function ResearchPage() {
   return (
     <div className="p-3 grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-3">
       <div className="flex flex-col gap-3">
-        <PageTitle title="RESEARCH" lede="Ask the terminal a question and get the evidence behind the answer" />
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <PageTitle title="RESEARCH" lede="Ask the terminal a question and get the evidence behind the answer" />
+          {/* The retrieval layer queries the demo universe and nothing else —
+              answerQuestion() stamps every answer "demo-universe (synthetic)".
+              That line sits UNDER each answer in 10px grey; the rail files the
+              page under SIMULATED; the page itself said nothing before a
+              reader had already read an answer. */}
+          <span className="chip" title="Every answer is queried out of the deterministic demo universe. The sources line under each answer names it.">
+            SIMULATED
+          </span>
+        </div>
         <div className="panel p-3">
           <div className="flex gap-2">
             <input

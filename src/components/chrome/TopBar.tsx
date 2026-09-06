@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useApi, fmtUsd, fmtPct, fmtNum } from "@/lib/client";
+import { useApi, fmtUsd, fmtPct } from "@/lib/client";
 import { AlertBadge } from "./AlertBadge";
 import { DataModeChip } from "./DataModeChip";
-import type { MarketState } from "@/lib/types";
 
 interface SolReference {
   priceUsd: number;
@@ -13,14 +12,21 @@ interface SolReference {
   maxDeviation: number;
 }
 
-// The header carries only what is real on every screen: the slot and the
-// cross-checked SOL price. It used to also print the meme index, the
-// smart-money flow and the regime chip — three simulator numbers, unlabelled,
-// beside a price marked LIVE. The dashboard shows them in a tile that says
-// SIMULATED; a header cannot fit the label, so it does not show the numbers.
+// The header carries ONE number: the cross-checked SOL price, marked LIVE.
+// It used to also print the meme index, the smart-money flow and the regime
+// chip — three simulator numbers, unlabelled, beside a price marked LIVE. The
+// dashboard shows those in a tile that says SIMULATED; a header cannot fit the
+// label, so it does not show the numbers.
+//
+// The slot went the same way and for a worse reason: it was never read off the
+// chain. `market.slot` is arithmetic — 285,000,000 plus elapsed milliseconds
+// over 400 plus a hash of the minute (src/lib/demo/store.ts) — and it sat
+// under a pulsing live dot with the tooltip "latest Solana slot this tab has
+// seen". A number that moves like a measurement, next to one that is one. No
+// keyless source here reports the head slot without a subscription nobody
+// asked for, so the header shows no slot at all rather than a plausible one.
 export function TopBar({ onOpenPalette, onOpenNav }: { onOpenPalette: () => void; onOpenNav: () => void }) {
-  const { data } = useApi<{ market: MarketState; reference: SolReference | null }>("/api/market", 8000);
-  const m = data?.market;
+  const { data } = useApi<{ reference: SolReference | null }>("/api/market", 8000);
   const ref = data?.reference;
 
   return (
@@ -36,10 +42,6 @@ export function TopBar({ onOpenPalette, onOpenNav }: { onOpenPalette: () => void
       </Link>
 
       <div className="hidden md:flex items-center gap-4 num text-[11.5px]">
-        <span className="flex items-center gap-1.5" title="latest Solana slot this tab has seen">
-          <span className="live-dot" />
-          <span className="dim">slot</span> {m ? fmtNum(m.slot) : "—"}
-        </span>
         {ref ? (
           <span
             title={`live reference · ${ref.sources.map((s) => `${s.name} $${s.priceUsd.toFixed(2)}`).join(" · ")} · max deviation ${(ref.maxDeviation * 100).toFixed(2)}%`}

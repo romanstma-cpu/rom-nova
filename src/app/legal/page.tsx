@@ -45,12 +45,20 @@ export default function LegalPage() {
           (CoinGecko and Crypto.com, cross-checked).
         </p>
         <p>
-          <b className="text-[var(--warn)]">Still simulated:</b> wallet activity, wallet PnL, smart-money scoring, the
-          cluster graph, and the backtester — all generated from a{" "}
+          <b className="text-[var(--warn)]">Still simulated:</b> the wallet universe on the simulated desk — its
+          activity, its PnL and the names attached to it — plus smart-money scoring, the cluster graph, and the
+          backtester; all generated from a{" "}
           <b className="text-[var(--warn)]">deterministic synthetic universe</b> with a fixed seed. None of those wallets
           are real people. Names that resemble entities (&ldquo;Meridian Desk&rdquo;, &ldquo;Tidewater Capital&rdquo;) are
           invented. Backtest results and accuracy statistics measure the engine against its own simulation — they
           demonstrate the <i>method</i>, not real-market performance.
+        </p>
+        <p>
+          One line above used to read &ldquo;still simulated: wallet activity, wallet PnL&rdquo;. That stopped being
+          true when the ledger landed: a wallet address you paste is read off the chain — its fills, its holdings and
+          its realized PnL over a coverage window the page states at the top, with anything that was not measured
+          rendered as <b className="text-[var(--text)]">UNMEASURED</b> rather than as a zero. Telling you a real
+          number is fake is the same drift as the opposite one; both teach a reader to stop reading the labels.
         </p>
         <p>
           Where a number was never measured at all, this terminal shows a dash and says why, rather than a zero. A zero

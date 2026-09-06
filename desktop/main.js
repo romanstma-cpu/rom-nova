@@ -35,15 +35,64 @@ protocol.registerSchemesAsPrivileged([
 function resolveStatic(pathname) {
   if (pathname === "/" || pathname === BASE) return path.join(staticRoot, "index.html");
   if (!pathname.startsWith(BASE + "/")) return null;
-  let rel = decodeURIComponent(pathname.slice(BASE.length));
+  // decodeURIComponent throws URIError on a malformed escape — "%zz", or a
+  // lone "%" at the end. A link with a typo, or anything at all typed into
+  // the address bar of a devtools window, reached this line and threw INSIDE
+  // protocol.handle, where the rejection is not a 404 but a failed request
+  // with no page behind it. A path that cannot be decoded names no file, so
+  // it takes the same road as a path that names a missing one.
+  let rel;
+  try {
+    rel = decodeURIComponent(pathname.slice(BASE.length));
+  } catch {
+    return notFoundPage();
+  }
   if (rel.includes("..")) return null;
   let file = path.join(staticRoot, rel);
   if (rel.endsWith("/")) file = path.join(file, "index.html");
   if (fs.existsSync(file) && fs.statSync(file).isFile()) return file;
   if (fs.existsSync(file + ".html")) return file + ".html";
+  return notFoundPage();
+}
+
+/** The exported 404, when the export has one. */
+function notFoundPage() {
   const notFound = path.join(staticRoot, "404.html");
   return fs.existsSync(notFound) ? notFound : null;
 }
+
+/**
+ * The policy every document in this shell is served under.
+ *
+ * Chromium enforces nothing by default on a custom scheme, so until now a
+ * string that escaped React's escaping could have pulled a script off any
+ * host on the internet — and this app renders token names, symbols and
+ * wallet labels that arrive from public APIs, which is precisely the input
+ * an attacker controls. The one thing this cannot do is forbid inline
+ * script: Next's static export inlines its own bootstrap and its flight
+ * payload, and a static export has no server to mint a nonce. Blocking
+ * REMOTE script is still most of the value, and `object-src`, `base-uri`
+ * and `frame-ancestors` cost nothing to close.
+ *
+ * `connect-src` stays wide on purpose: the reader configures their own
+ * providers and their own RPC endpoint, so the set of hosts this app talks
+ * to is not knowable when the policy is written. `https:` and `wss:` at
+ * least keep it off plaintext.
+ */
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data:",
+  "connect-src 'self' https: wss:",
+  "media-src 'none'",
+  "object-src 'none'",
+  "frame-src 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
 
 /**
  * electron-updater, when this is the installed app. The unpackaged shell
@@ -196,7 +245,7 @@ app.whenReady().then(() => {
     if (isBridgeRequest(pathname)) return bridge.handle(request);
     const file = resolveStatic(pathname);
     if (!file) return new Response("not found", { status: 404 });
-    return net.fetch(pathToFileURL(file).toString());
+    return serveFile(file);
   });
 
   createWindow();
@@ -222,3 +271,17 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   app.quit();
 });
+
+/**
+ * A file off disk, with the policy attached to documents.
+ *
+ * Only documents: a CSP header on a .js or .png is ignored by the browser
+ * and would only cost a Response rebuild on every asset the page loads.
+ */
+async function serveFile(file) {
+  const res = await net.fetch(pathToFileURL(file).toString());
+  if (!file.endsWith(".html")) return res;
+  const headers = new Headers(res.headers);
+  headers.set("Content-Security-Policy", CSP);
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}

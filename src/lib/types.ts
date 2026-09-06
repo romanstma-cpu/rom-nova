@@ -1250,7 +1250,6 @@ export interface MarketState {
   memeMomentumIndex: number; // 0..100
   netSmartMoneyFlowUsd: number;
   activeWhales24h: number;
-  slot: number;
 }
 
 // ---------------------------------------------------------------- events

@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "gradient-text",
+        "value": "*",
+        "files": [
+          "src/app/globals.css"
+        ],
+        "createdAt": "2026-09-04T19:26:18.306Z",
+        "reason": "ENI: .wordmark-nova is the NOVA brand wordmark mirroring the romapps.xyz site wordmark, shipped in 1.15.0 and verified in frames; not a heading or metric"
+      }
+    ]
+  }
+}

@@ -48,3 +48,18 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Superseded review reports, left on disk on purpose.
+# Blind-review rounds against 1.7.0 / d2d2572 — twenty-one releases stale, and
+# every finding in them is either fixed or restated in the 1.28.0 audit. Their
+# siblings from the same batch (W1/W2/W3-REPORT.md, W5-BUILD-NOTES.md) were
+# committed at the time and stay tracked; these never were. Ignored rather than
+# deleted so the history is still readable, and so `git status` is quiet for
+# someone returning to this repo cold.
+W*-ROUND*-REPORT.md
+WHOLE-*-REPORT.md
+
+# Impeccable's hook cache is per-machine scratch. config.json is NOT ignored:
+# it carries the reasoned suppression for the NOVA wordmark, which is a
+# decision, not a cache, and re-deciding it every session wastes the argument.
+.impeccable/hook.cache.json

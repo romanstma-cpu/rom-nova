@@ -38,6 +38,30 @@ jobs:
         working-directory: desktop
         run: npm ci
 
+      # electron-builder 26 runs its publishers CONCURRENTLY — one for the
+      # installer, one for its blockmap — and each independently checks for the
+      # release, decides "release doesn't exist", and POSTs to create it. The
+      # log shows the two decisions two milliseconds apart. One wins; the other
+      # gets 422 Validation Failed (already_exists) and fails the whole step —
+      # AFTER the installer has uploaded and BEFORE latest.yml does. The result
+      # is a release that looks complete, an update feed that 404s, and every
+      # installed copy quietly unable to see a new version. That is what
+      # happened to v1.27.1 and v1.28.0.
+      #
+      # Creating the release here first means both publishers find it and only
+      # upload. Idempotent, so re-running a half-finished release works.
+      - name: Ensure the release exists
+        shell: bash
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists"
+          else
+            gh release create "$TAG" --title "${TAG#v}" --generate-notes
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+
       - name: Build + publish installer
         working-directory: desktop
         run: npx electron-builder --win nsis --publish always
@@ -52,3 +76,18 @@ jobs:
           gh release upload "${{ github.ref_name }}" SHA256SUMS.txt --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The updater's entire feed is one file. Without it the installer sitting
+      # on the release is unreachable to every copy already installed — and the
+      # release still looks finished from the outside, which is how two of them
+      # shipped broken before anyone noticed. Asserted, not assumed.
+      - name: Prove the update feed published
+        shell: bash
+        run: |
+          gh release view "$TAG" --json assets -q '.assets[].name' | tee assets.txt
+          grep -qx "latest.yml" assets.txt || { echo "::error::latest.yml missing from $TAG — the auto-updater has no feed"; exit 1; }
+          grep -qx "ROM-Nova-Setup.exe" assets.txt || { echo "::error::installer missing from $TAG"; exit 1; }
+          grep -qx "SHA256SUMS.txt" assets.txt || { echo "::error::SHA256SUMS.txt missing from $TAG"; exit 1; }
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}

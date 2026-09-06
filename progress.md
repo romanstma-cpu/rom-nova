@@ -1494,6 +1494,83 @@ warning. Latest is v7 for each, and setup-node v7 migrated to ESM — a jump
 that cannot be tested without burning a tag, so it is LO's call when to
 take it.
 
+## 1.28.0 — the audit, closed out (2026-09-06, evening)
+
+LO: "GO TO THE AUDIT THAT WAS DONE RECENTLY AND FIX ALL FOUND THINGS."
+Forty-two findings. Six shipped in 1.27.0, one in 1.27.1 (another session's
+release, which also labelled stale SOL prices and made the drawer a native
+`<dialog>`). The rest had empty verdicts — their verifiers died on a usage
+limit, never refuted, just never checked. The fleet died again on the first
+retry; on the third it finished: 68 agents, none failed, three skeptics per
+finding each asked to REFUTE.
+
+**Fourteen survived, four were killed.** Killed and worth not re-filing: the
+bridge test that "asserts the opposite", the desktop store's 200-with-404.html
+case, the hand-typed installer URL, and fmtAgo during AboutPanel's render
+(3-0). Every one of the twelve verdicts that finished before the first limit
+came back real, high confidence, so the rest were read by hand rather than
+assumed.
+
+**Two crashes the audit did not know it had found.** The six-hour update loop
+called `checkForUpdatesAndNotify()` bare with `.catch()` on the result — an
+updater missing that method throws SYNCHRONOUSLY, and a synchronous throw
+never reaches a `.catch()`, so the first tick would have taken the main
+process down. And the crash guard's comment claimed it stopped a crash-loop;
+it bounded the RATE (one reload per 60s) and nothing else, so a page dying
+seventy seconds into every load reloaded forever.
+
+**The sign-in link.** `adoptHashSession` bailed silently when the radar had
+not yet said which Supabase project issued the link — exactly what a cold
+Render worker causes — and the page cleared the fragment whether or not the
+session was adopted. Click the link, land signed out, no message, link spent.
+My own first pass made it worse by moving adoption ahead of /config; the fleet
+caught that.
+
+**The feed that gave up.** socket.io destroys the socket before emitting a
+server-side refusal, so a 503 ended the radar feed for the life of the page
+while /account said "it keeps retrying" and /radar offered STOP RETRYING for a
+loop nobody ran. There is a ladder now — 2s, 5s, 15s, 30s, 60s, 120s.
+
+Also: nine accessibility findings (the launch feed's rows were the only way to
+the triage breakdown and were mouse-only; three delete buttons announced as a
+symbol; neither toast stack announced anything; `aria-pressed` appeared
+nowhere in the codebase; the rail said "black diamond suit, Dashboard" before
+every label); seven copy drifts (Status labelled the simulator's trade counter
+"Live trades"; the fallback-chains paragraph named providers that had not
+served that slot in months, so it is COMPUTED now from the same predicates
+`getProviders()` uses; the privacy section claimed the only requests went to
+"the public price APIs named above" two sentences after describing Supabase
+and Stripe; Settings said Jupiter needs JUPITER_API_KEY when `FLAGS.jupiter()`
+is a flag and nothing else); and useApi returning the previous URL's data
+under a new one.
+
+Tests 919 → 947.
+
+**A release bug this pass caused and then found.** electron-builder 26 runs
+its publishers concurrently and each decides "release doesn't exist" and POSTs
+to create it — two milliseconds apart in the v1.28.0 log. One wins, the other
+422s and fails the step AFTER the installer uploads and BEFORE latest.yml
+does. So v1.27.1 and v1.28.0 both shipped with the installer alone and
+`releases/latest/download/latest.yml` answered 404: every installed copy has
+been unable to see an update since 1.27.1, and nothing said so, because the
+one file nobody checks after a release is the one only other people's machines
+read. Arrived with the builder 25 → 26 upgrade in the Electron 44 pass; 1.27.0
+got away with it. The workflow now creates the release before electron-builder
+runs, and a final step reads the asset list back and fails the build unless
+the installer, latest.yml and SHA256SUMS.txt are all on it.
+
+| check | result |
+|---|---|
+| installer | `b4e9beef…c714` = SHA256SUMS = GitHub digest; latest.yml 1.28.0, 113,348,551 bytes, feed 200 |
+| site | `405caf8`, Pages built, 3 anchors at 1.28.0, test band 947/1,678 |
+| desktop | 1.28.0.0 installed; crash-guard, startPeriodicChecks, CSP and the content-type check in app.asar; window titled "ROM Nova — Solana On-Chain Intelligence"; leveldb LOG 17:21; clean close 4 → 0; window-state.json rewritten 17:22 |
+
+Not fixed, and the only one: finding 10, "updates are auto-downloaded and
+installed on quit with no signature check". The sha512 in latest.yml over TLS
+is a real integrity check, so "verifies nothing" overstates it — but the
+Authenticode check electron-updater would do needs a signed build, and code
+signing is LO's deferred decision.
+
 
 ## 🔴 Whole-build blind review of 1.7.0: FAIL — seven HIGHs in the seams
 

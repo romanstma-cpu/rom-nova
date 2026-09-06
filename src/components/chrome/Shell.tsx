@@ -10,7 +10,14 @@ import { AlertMonitor } from "./AlertMonitor";
 import { RadarArm } from "./RadarArm";
 import { dataMode } from "@/lib/providers/registry";
 import { APP_VERSION, RELEASES_URL } from "@/lib/version";
-import { desktopServerSnapshot, desktopSnapshot, installDesktopUpdate, subscribeDesktop } from "@/lib/desktop";
+import {
+  desktopServerSnapshot,
+  desktopSnapshot,
+  installDesktopUpdate,
+  subscribeDesktop,
+  updateBannerReady,
+  updateBannerVersion,
+} from "@/lib/desktop";
 
 /**
  * What going offline actually stops, computed from the same resolution the
@@ -105,8 +112,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const desk = useSyncExternalStore(subscribeDesktop, desktopSnapshot, desktopServerSnapshot);
   const [updateLaterFor, setUpdateLaterFor] = useState<string | null>(null);
   const [installError, setInstallError] = useState<string | null>(null);
-  const updateVersion = desk.update.version ?? "?";
-  const updateReady = desk.update.state === "ready" && updateLaterFor !== updateVersion;
+  // Both the printed version and the show/hide decision come from
+  // src/lib/desktop, because nothing in this repo renders a component inside a
+  // test: kept here, the version-keyed dismissal would be the one piece of
+  // update logic no assertion touches.
+  const updateVersion = updateBannerVersion(desk.update);
+  const updateReady = updateBannerReady(desk.update, updateLaterFor);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

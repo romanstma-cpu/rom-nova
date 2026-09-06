@@ -631,6 +631,12 @@ export default function RadarPage() {
                         Cancel
                       </button>
                       <span className="faint">prefilled with the last trade the radar saw — type what you actually paid</span>
+                      {/* shareFollow() writes its refusal to community.error,
+                          which until now was rendered in exactly one place:
+                          the wallet-notes panel, on a different screen. A
+                          follow the radar would not count said nothing here
+                          and then surfaced under an unrelated wallet. */}
+                      {community.error && <span className="warn w-full">{community.error}</span>}
                     </form>
                   )}
                 </div>

@@ -96,8 +96,25 @@ const pendingWrites = new Map<string, ReturnType<typeof setTimeout>>();
 
 const hasIdb = (): boolean => typeof indexedDB !== "undefined";
 
+/**
+ * Set the first time a read or a write against the store actually fails.
+ *
+ * The global existing is not the same as the store working: a private window
+ * has `indexedDB` defined and refuses to open it, and a full quota fails at
+ * write time. Every failure below is caught and swallowed - correctly, since
+ * a journal that cannot write must not take the radar down with it - so
+ * without this flag `radarBackendName()` went on reporting "indexeddb" while
+ * nothing survived a reload, which is the whole point of the journal.
+ */
+let idbBroken = false;
+
+/** Called from the catch of every read and write against the store. */
+function idbFailed(): void {
+  idbBroken = true;
+}
+
 export function radarBackendName(): "indexeddb" | "memory" {
-  return hasIdb() ? "indexeddb" : "memory";
+  return hasIdb() && !idbBroken ? "indexeddb" : "memory";
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -139,6 +156,9 @@ async function loadAll(): Promise<void> {
   } catch {
     // A refused IndexedDB (private window, quota) degrades to memory for the
     // session; the hunter still runs, it just starts from zero next time.
+    // radarBackendName() reports "memory" from here on, so /status and /radar
+    // stop claiming the evidence is being kept.
+    idbFailed();
   } finally {
     loaded = true;
   }
@@ -174,7 +194,8 @@ function persistWallet(address: string): void {
           });
           db.close();
         } catch {
-          /* memory holds it; the next fill retries */
+          /* memory holds it; the next fill retries - but the reader is told */
+          idbFailed();
         }
       })();
     }, 400),
@@ -201,7 +222,8 @@ function persistSignals(): void {
           });
           db.close();
         } catch {
-          /* next signal retries */
+          /* next signal retries - but the reader is told */
+          idbFailed();
         }
       })();
     }, 400),

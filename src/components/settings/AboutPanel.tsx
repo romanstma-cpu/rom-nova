@@ -36,7 +36,11 @@ export function AboutPanel() {
   // these agree; a disagreement is worth a chip, not silence.
   const shellVersion = d.version && d.version !== APP_VERSION ? d.version : null;
   const canCheck = d.desktop && d.reachable === true && (update.state === "idle" || update.state === "none" || update.state === "error");
-  const canInstall = d.desktop && update.state === "ready";
+  // Restarting into an update means posting to the same bridge, so this is
+  // gated on the bridge answering exactly as the check button is. The store
+  // already clears the updater's state when a poll fails; this control does
+  // not have to know that to keep from offering an install nobody confirmed.
+  const canInstall = d.desktop && d.reachable === true && update.state === "ready";
 
   const act = async (fn: () => Promise<{ ok: boolean; error: string | null }>) => {
     setBusy(true);
@@ -66,7 +70,7 @@ export function AboutPanel() {
             Installed app{d.platform ? ` on ${platformName(d.platform)}` : ""}
             {d.electron ? ` · Electron ${d.electron}` : ""}. Updates:{" "}
             <span className={update.state === "ready" ? "text-[var(--accent)]" : update.state === "error" ? "warn" : "text-[var(--text)]"}>
-              {describeUpdate(update, d.reachable)}
+              {describeUpdate(update, d.reachable, d.answered)}
             </span>
             {update.checkedAt ? <span className="faint"> · checked {fmtAgo(update.checkedAt)}</span> : null}
           </>

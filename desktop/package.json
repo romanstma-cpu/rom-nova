@@ -30,6 +30,7 @@
       "rpc-proxy.js",
       "bridge.js",
       "window-state.js",
+      "crash-guard.js",
       "icon.ico"
     ],
     "extraResources": [

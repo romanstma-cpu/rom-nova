@@ -25,6 +25,9 @@ const BRIDGE_PATH = "/nova/__desktop";
 const INSTALL_PATH = "/nova/__desktop/install";
 const CHECK_PATH = "/nova/__desktop/check";
 
+/** How often a window left open asks the release feed again. */
+const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
 /** Whether this request is for the shell rather than for a static file. */
 function isBridgeRequest(pathname) {
   return pathname === BRIDGE_PATH || pathname === INSTALL_PATH || pathname === CHECK_PATH;
@@ -106,6 +109,46 @@ function createBridge({ version, platform, arch, versions, updater, now = Date.n
     return Boolean(updater) && (update.state === "idle" || update.state === "none" || update.state === "error");
   }
 
+  /**
+   * The check nobody asked for: the one the shell runs on a timer.
+   *
+   * `checkForUpdatesAndNotify` rather than the POST's `checkForUpdates`,
+   * because no one is looking at the Settings page when this fires and the OS
+   * notification is the only way a reader who leaves the window open ever
+   * hears that a new version finished downloading.
+   *
+   * Wrapped in a resolved promise for a reason the POST's identical wrapper
+   * only half needed: an updater whose API is not the one this was written
+   * against throws SYNCHRONOUSLY on the call, before there is any promise, so
+   * a bare `.catch()` hung off it never runs and the first tick takes the main
+   * process down. This call site lived in main.js, which no test can import,
+   * and the test double did not even model the method it named.
+   *
+   * @returns {boolean} whether the feed was actually asked
+   */
+  function checkPeriodically() {
+    if (!shouldCheck()) return false;
+    Promise.resolve()
+      .then(() => updater.checkForUpdatesAndNotify())
+      .catch(() => {
+        /* reported through the "error" event above */
+      });
+    return true;
+  }
+
+  /**
+   * Asks once now, then every six hours, for a window nobody closes. Returns
+   * the interval handle — null when there is no feed to ask — so the caller,
+   * and the test, can stop it.
+   *
+   * @param {number} [intervalMs]
+   */
+  function startPeriodicChecks(intervalMs = CHECK_INTERVAL_MS) {
+    if (!updater) return null;
+    checkPeriodically();
+    return setInterval(checkPeriodically, intervalMs);
+  }
+
   async function handle(request) {
     const { pathname } = new URL(request.url);
     if (pathname === BRIDGE_PATH) {
@@ -137,7 +180,7 @@ function createBridge({ version, platform, arch, versions, updater, now = Date.n
     return json({ error: "not found" }, 404);
   }
 
-  return { handle, snapshot, shouldCheck, update };
+  return { handle, snapshot, shouldCheck, checkPeriodically, startPeriodicChecks, update };
 }
 
-module.exports = { BRIDGE_PATH, INSTALL_PATH, CHECK_PATH, isBridgeRequest, createBridge };
+module.exports = { BRIDGE_PATH, INSTALL_PATH, CHECK_PATH, CHECK_INTERVAL_MS, isBridgeRequest, createBridge };

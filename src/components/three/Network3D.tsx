@@ -8,6 +8,7 @@ import { useCallback, useState, useSyncExternalStore } from "react";
 import { catchError, type ErrorInfo } from "next/error";
 import { Canvas } from "@react-three/fiber";
 import * as THREE from "three";
+import { isWebGLFailure } from "@/lib/error-report";
 import type { NetworkPayload, SceneMode } from "./graph";
 import { GalaxyScene, type GalaxySettings } from "./galaxy/GalaxyScene";
 
@@ -21,17 +22,29 @@ import { GalaxyScene, type GalaxySettings } from "./galaxy/GalaxyScene";
 // instead of a scene that was never going to appear.
 type GlSupport = "unknown" | "yes" | "no";
 let glCached: GlSupport | null = null;
-function readGlSupport(): GlSupport {
-  if (glCached) return glCached;
+
+/**
+ * One probe of the browser's WebGL support. The canvas arrives as an argument
+ * so the suite can hand this the two answers no real browser gives on demand:
+ * a getContext that returns null, and one that throws — a hardened profile
+ * blocks the call rather than failing it, and an unguarded probe there takes
+ * the page down instead of the scene.
+ */
+export function probeGl(makeCanvas: () => HTMLCanvasElement = () => document.createElement("canvas")): GlSupport {
   try {
-    const probe = document.createElement("canvas");
+    const probe = makeCanvas();
     const ctx = (probe.getContext("webgl2") ?? probe.getContext("webgl")) as WebGLRenderingContext | null;
-    glCached = ctx ? "yes" : "no";
     // Hand the slot back: browsers cap live contexts at around sixteen.
     ctx?.getExtension("WEBGL_lose_context")?.loseContext();
+    return ctx ? "yes" : "no";
   } catch {
-    glCached = "no";
+    return "no";
   }
+}
+
+function readGlSupport(): GlSupport {
+  if (glCached) return glCached;
+  glCached = probeGl();
   return glCached;
 }
 const readGlSupportServer = (): GlSupport => "unknown";
@@ -49,14 +62,32 @@ function NoScene({ detail, onRetry }: { detail: string; onRetry: () => void }) {
   );
 }
 
-const NO_GL_DETAIL =
+// Deliberately not the page boundary's wording. describeError's WebGL advice
+// ends "Every other page works without it", which is a sentence about a page
+// that is broken; this panel covers one scene inside a page whose other panels
+// are still reading, so it says that instead. Only the test the two surfaces
+// apply is shared, never the words.
+export const NO_GL_DETAIL =
   "This browser could not create a WebGL context — common over remote desktop, in virtual machines and in hardened profiles. Everything else on this page works without it.";
+
+/**
+ * What the panel says about a scene that threw. Whether a failure is the
+ * browser refusing 3D has one owner — isWebGLFailure in src/lib/error-report.ts,
+ * which the page boundary already asks and the suite already tests. This file
+ * used to answer it a second time with its own regex over the message alone,
+ * so an error carrying the marker in `name` read as WebGL on the boundary and
+ * as an unexplained crash here. Pure and exported because the node suite
+ * cannot render a boundary to read this string off the panel.
+ */
+export function sceneFailureDetail(error: unknown): string {
+  const like = error instanceof Error ? error : { message: String(error) };
+  return isWebGLFailure(like) ? NO_GL_DETAIL : `The scene failed to build: ${like.message}`;
+}
 
 // The boundary still stands for the synchronous case: a layer throwing over
 // a payload it did not expect takes the scene, not the page.
 function SceneFallback(_props: object, { error, retry }: ErrorInfo) {
-  const message = error instanceof Error ? error.message : String(error);
-  return <NoScene detail={/WebGL/i.test(message) ? NO_GL_DETAIL : `The scene failed to build: ${message}`} onRetry={() => retry()} />;
+  return <NoScene detail={sceneFailureDetail(error)} onRetry={() => retry()} />;
 }
 const SceneBoundary = catchError(SceneFallback);
 

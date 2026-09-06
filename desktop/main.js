@@ -12,14 +12,12 @@ const { pathToFileURL } = require("node:url");
 const { isRpcRequest, handleRpc } = require("./rpc-proxy");
 const { isBridgeRequest, createBridge } = require("./bridge");
 const windowState = require("./window-state");
+const { createCrashGuard } = require("./crash-guard");
 
 // The static export is built with basePath /nova (identical to the deployment
 // at romapps.xyz/nova) — the protocol handler strips the prefix.
 const BASE = "/nova";
 const ORIGIN_HOST = "rom-nova";
-
-/** How often a window left open asks the release feed again. */
-const UPDATE_CHECK_MS = 6 * 60 * 60 * 1000;
 
 const staticRoot = app.isPackaged
   ? path.join(process.resourcesPath, "static")
@@ -194,16 +192,14 @@ function createWindow() {
   });
 
   // A renderer that dies — out of memory under the 3D scene, a GPU reset —
-  // used to leave a blank window with nothing to click. Reload it once; a
-  // second death inside a minute is left alone, so a page that crashes on
-  // load cannot loop.
-  let lastCrashAt = 0;
+  // used to leave a blank window with nothing to click. Whether bringing it
+  // back would help is decided in crash-guard.js, where a test can drive the
+  // decision without an Electron renderer to kill; a load that finishes is
+  // the evidence that guard needs that the page is not dying on the way in.
+  const crashGuard = createCrashGuard();
+  win.webContents.on("did-finish-load", () => crashGuard.loaded());
   win.webContents.on("render-process-gone", (_event, details) => {
-    if (details.reason === "clean-exit" || details.reason === "killed") return;
-    const now = Date.now();
-    if (now - lastCrashAt < 60_000) return;
-    lastCrashAt = now;
-    win.webContents.reload();
+    if (crashGuard.crashed(details) === "reload") win.webContents.reload();
   });
 
   win.loadURL(`app://${ORIGIN_HOST}${BASE}/`);
@@ -252,16 +248,11 @@ app.whenReady().then(() => {
 
   // auto-update against the rom-nova releases: once now, then every six
   // hours for a window left open, since a reader who never quits would
-  // otherwise never learn. Failures stay silent here — an unreachable feed
-  // must never bother the user with a dialog — and are readable on the
-  // Settings page through the bridge.
-  if (updater) {
-    const check = () => {
-      if (bridge.shouldCheck()) updater.checkForUpdatesAndNotify().catch(() => {});
-    };
-    check();
-    setInterval(check, UPDATE_CHECK_MS);
-  }
+  // otherwise never learn. The cadence, the gate and the swallowed failures
+  // live in bridge.js beside the update state they belong to — nothing about
+  // updating is decided in this file, and the test drives all of it with a
+  // fake updater.
+  bridge.startPeriodicChecks();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

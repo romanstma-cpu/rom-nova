@@ -115,7 +115,7 @@ export function normApiKeyRow(raw: unknown): ApiKeyRow | null {
 }
 
 async function keysRequest(url: string, path: string, token: string, init: { method: string; body?: unknown }, fetchImpl: Fetch): Promise<{ status: number; body: unknown }> {
-  const res = await fetchImpl(`${url}${path}`, {
+  const res = await timedFetch(fetchImpl, `${url}${path}`, {
     method: init.method,
     headers: { authorization: `Bearer ${token}`, ...(init.body !== undefined ? { "content-type": "application/json" } : {}) },
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
@@ -182,30 +182,45 @@ type Fetch = typeof fetch;
 /** A free Render worker asleep takes half a minute to wake; the page should say so, not hang. */
 const CONFIG_TIMEOUT_MS = 12_000;
 
-export async function fetchHostedConfig(url: string, fetchImpl: Fetch = fetch, timeoutMs = CONFIG_TIMEOUT_MS): Promise<HostedConfig> {
+const TIMED_OUT = "the radar did not answer in time — a radar that was asleep takes about a minute to wake; try again shortly";
+
+/**
+ * Every hosted call, under the same deadline.
+ *
+ * This deadline used to be on `/config` alone. The rest - /me, the Stripe
+ * session mints, the API-key calls, the community calls - went out with no
+ * signal at all, so a cold worker left whichever button started them sitting
+ * on `busy: true` for as long as the wake took, with nothing on screen saying
+ * why and no way to cancel. A request that cannot finish has to end.
+ */
+async function timedFetch(fetchImpl: Fetch, input: string, init?: RequestInit, timeoutMs = CONFIG_TIMEOUT_MS): Promise<Response> {
   const ctl = typeof AbortController === "function" ? new AbortController() : null;
   const timer = ctl ? setTimeout(() => ctl.abort(), timeoutMs) : null;
   try {
-    const res = await fetchImpl(`${url}/config`, ctl ? { signal: ctl.signal } : undefined);
-    if (!res.ok) throw new HostedError(res.status, `the radar answered ${res.status} to /config`);
-    return normHostedConfig(url, await res.json());
+    return await fetchImpl(input, ctl ? { ...init, signal: ctl.signal } : init);
   } catch (err) {
-    if (ctl?.signal.aborted) throw new HostedError(504, "the radar did not answer in time — a radar that was asleep takes about a minute to wake; try again shortly");
+    if (ctl?.signal.aborted) throw new HostedError(504, TIMED_OUT);
     throw err;
   } finally {
     if (timer) clearTimeout(timer);
   }
 }
 
+export async function fetchHostedConfig(url: string, fetchImpl: Fetch = fetch, timeoutMs = CONFIG_TIMEOUT_MS): Promise<HostedConfig> {
+  const res = await timedFetch(fetchImpl, `${url}/config`, undefined, timeoutMs);
+  if (!res.ok) throw new HostedError(res.status, `the radar answered ${res.status} to /config`);
+  return normHostedConfig(url, await res.json());
+}
+
 export async function fetchMe(url: string, token: string, fetchImpl: Fetch = fetch): Promise<HostedMe> {
-  const res = await fetchImpl(`${url}/me`, { headers: { authorization: `Bearer ${token}` } });
+  const res = await timedFetch(fetchImpl, `${url}/me`, { headers: { authorization: `Bearer ${token}` } });
   const body: unknown = await res.json().catch(() => null);
   if (!res.ok) throw new HostedError(res.status, errorOf(body) ?? `the radar answered ${res.status}`);
   return normHostedMe(body);
 }
 
 async function fetchSessionUrl(url: string, path: string, token: string, fetchImpl: Fetch): Promise<{ status: number; url: string | null; error: string | null }> {
-  const res = await fetchImpl(`${url}${path}`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+  const res = await timedFetch(fetchImpl, `${url}${path}`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
   const body: unknown = await res.json().catch(() => null);
   const o = obj(body);
   return { status: res.status, url: o && typeof o.url === "string" && /^https:\/\//.test(o.url) ? o.url : null, error: errorOf(body) };
@@ -244,7 +259,7 @@ export function normHostedNote(raw: unknown): HostedNote | null {
 }
 
 async function communityRequest(url: string, path: string, token: string, init: { method: string; body?: unknown }, fetchImpl: Fetch): Promise<unknown> {
-  const res = await fetchImpl(`${url}${path}`, {
+  const res = await timedFetch(fetchImpl, `${url}${path}`, {
     method: init.method,
     headers: { authorization: `Bearer ${token}`, ...(init.body !== undefined ? { "content-type": "application/json" } : {}) },
     body: init.body === undefined ? undefined : JSON.stringify(init.body),

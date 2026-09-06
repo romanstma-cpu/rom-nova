@@ -142,11 +142,47 @@ let state: RadarState = SERVER_STATE;
 let socket: Socket | null = null;
 let clock: ReturnType<typeof setInterval> | null = null;
 let holds = 0;
+// How far up the backoff ladder a 503 has walked. socket.io does not retry a
+// server-side refusal at all - it destroys the socket before it emits - so
+// without this the feed ended for the life of the page over an outage
+// measured in seconds, while /account said "it keeps retrying" and /radar
+// offered a STOP RETRYING button for a loop nobody was running.
+let unavailableStep = 0;
+let unavailableTimer: ReturnType<typeof setTimeout> | null = null;
+const UNAVAILABLE_BACKOFF_MS = [2_000, 5_000, 15_000, 30_000, 60_000, 120_000];
 const listeners = new Set<() => void>();
 
 function notify(next: Partial<RadarState>) {
   state = { ...state, ...next, asOf: Date.now() };
   for (const l of listeners) l();
+}
+
+/**
+ * Walk the backoff ladder after the worker answers 503.
+ *
+ * The phase stays "connecting" for the wait, which is already this store's
+ * word for a feed that is down and coming back, so the chips that read it are
+ * right without being touched. When the ladder runs out the phase goes to
+ * "error" and stays there - a worker that has been refusing for four minutes
+ * is not one more request away from working.
+ */
+function scheduleUnavailableRetry(url: string, stillOurs: () => boolean): void {
+  if (unavailableTimer) clearTimeout(unavailableTimer);
+  const wait = UNAVAILABLE_BACKOFF_MS[unavailableStep];
+  if (wait === undefined) {
+    notify({ phase: "error", error: "the radar has been unavailable for several minutes — reconnect when you are ready" });
+    return;
+  }
+  unavailableStep += 1;
+  notify({
+    phase: "connecting",
+    error: `the radar is unavailable — retrying (${unavailableStep} of ${UNAVAILABLE_BACKOFF_MS.length})`,
+  });
+  unavailableTimer = setTimeout(() => {
+    unavailableTimer = null;
+    if (!stillOurs() || !state.enabled || holds === 0) return;
+    openSocket(url);
+  }, wait);
 }
 
 function normWallet(w: unknown): RadarWalletRow {
@@ -285,7 +321,11 @@ function openSocket(url: string) {
   });
   socket = s;
 
-  s.on("connect", () => notify({ phase: "connected", error: null, gate: null }));
+  s.on("connect", () => {
+    // A connection that worked puts the ladder back at the bottom.
+    unavailableStep = 0;
+    notify({ phase: "connected", error: null, gate: null });
+  });
   s.on("connect_error", (err) => {
     const status = (err as { data?: { status?: unknown } }).data?.status;
     const gate: RadarGate = status === 401 ? "signin" : status === 402 ? "subscribe" : status === 503 ? "unavailable" : null;
@@ -293,6 +333,10 @@ function openSocket(url: string) {
     // A refusal the next retry cannot change. Stop; the account page
     // reconnects after a sign-in or a purchase.
     if (gate === "signin" || gate === "subscribe") s.disconnect();
+    // 503 is the other kind: the worker could not reach Supabase to check
+    // anyone's access. socket.io destroys the socket before emitting this, so
+    // nothing retries it unless we do. Same ladder as the mid-stream gate.
+    if (gate === "unavailable") scheduleUnavailableRetry(url, () => socket === s);
   });
   // The worker closing a connection on purpose: a session that expired or
   // a subscription that lapsed. It says why first, then disconnects, and
@@ -311,13 +355,23 @@ function openSocket(url: string) {
         });
       }, 1_500);
     }
+    // "unavailable" is the worker saying it cannot serve right now: a restart,
+    // a deploy, a cold start that timed out. Worth waiting out, not worth
+    // giving up on.
+    if (gate === "unavailable") scheduleUnavailableRetry(url, () => socket === s);
   });
   s.on("disconnect", (reason) => {
     if (reason === "io server disconnect") {
       if (state.phase !== "error") notify({ phase: "error", error: "the radar closed the connection" });
       return;
     }
-    if (state.enabled) notify({ phase: "connecting", error: String(reason) });
+    // socket.io's own words for a dropped frame - "transport close", "ping
+    // timeout", "transport error" - were painted as a red error line under a
+    // chip that already said CONNECTING. A reconnect the client handles by
+    // itself is not a failure the reader has to read about, and those strings
+    // describe nothing they can act on. The phase carries the news; the error
+    // line is cleared for the one that matters.
+    if (state.enabled) notify({ phase: "connecting", error: null });
   });
 
   s.on("snapshot", (snap: unknown) => {

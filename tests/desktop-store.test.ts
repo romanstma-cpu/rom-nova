@@ -1,5 +1,6 @@
 // The page's view of the desktop shell: nothing fetched in a browser, the
-// bridge read under app://, and the words for each update state.
+// bridge read under app://, the words for each update state, and the gate
+// that decides whether the shell's update banner is on screen.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
@@ -13,6 +14,8 @@ import {
   refreshDesktop,
   resetDesktopStore,
   subscribeDesktop,
+  updateBannerReady,
+  updateBannerVersion,
   type DesktopUpdate,
 } from "../src/lib/desktop";
 
@@ -78,6 +81,7 @@ describe("under app://", () => {
     expect(desktopSnapshot()).toMatchObject({
       desktop: true,
       reachable: true,
+      answered: true,
       version: "1.26.0",
       platform: "win32",
       electron: "33.4.11",
@@ -91,8 +95,8 @@ describe("under app://", () => {
     desktopSeams.fetch = fakeFetch(() => ({ status: 404, body: "not found" }));
     const unsub = subscribeDesktop(() => {});
     await flush();
-    expect(desktopSnapshot()).toMatchObject({ desktop: true, reachable: false, version: null });
-    expect(describeUpdate(desktopSnapshot().update, false)).toMatch(/predates the update bridge/);
+    expect(desktopSnapshot()).toMatchObject({ desktop: true, reachable: false, answered: false, version: null });
+    expect(describeUpdate(desktopSnapshot().update, false, false)).toMatch(/predates the update bridge/);
     unsub();
   });
 
@@ -133,7 +137,37 @@ describe("under app://", () => {
     }) as unknown as typeof fetch;
     expect(await installDesktopUpdate()).toEqual({ ok: false, error: "net down" });
     await refreshDesktop();
-    expect(desktopSnapshot()).toMatchObject({ desktop: true, reachable: false });
+    expect(desktopSnapshot()).toMatchObject({ desktop: true, reachable: false, answered: false });
+  });
+
+  it("a poll that fails stops speaking for the updater it could not read", async () => {
+    // The regression this pins: the failure branch spread the last good
+    // answer forward, so a bridge that stopped answering shipped
+    // `reachable: false` next to a live "ready" state, its percent and its
+    // checkedAt — Settings kept the "Restart to install" button and printed
+    // how long ago it had "checked". Both older failure tests poll from a
+    // reset store, so neither ever drove success -> failure.
+    desktopSeams.fetch = fakeFetch(() => ({
+      status: 200,
+      body: shellJson({ state: "ready", version: "1.28.0", percent: 100, checkedAt: 12_345 }),
+    }));
+    await refreshDesktop();
+    expect(desktopSnapshot()).toMatchObject({
+      reachable: true,
+      answered: true,
+      update: { state: "ready", version: "1.28.0", percent: 100, checkedAt: 12_345 },
+    });
+
+    desktopSeams.fetch = vi.fn(async () => {
+      throw new Error("net down");
+    }) as unknown as typeof fetch;
+    await refreshDesktop();
+    const after = desktopSnapshot();
+    // The running process's own identity survives — the page is still in it.
+    expect(after).toMatchObject({ desktop: true, reachable: false, answered: true, version: "1.26.0", platform: "win32", electron: "33.4.11" });
+    // Everything the failed poll did not read does not.
+    expect(after.update).toEqual({ state: "unavailable", version: null, percent: null, error: null, checkedAt: null });
+    expect(describeUpdate(after.update, after.reachable, after.answered)).toMatch(/stopped answering the update bridge/);
   });
 
   it("polls only while something is subscribed", async () => {
@@ -170,5 +204,47 @@ describe("describeUpdate", () => {
       "could not reach the release feed — net::ERR_INTERNET_DISCONNECTED",
     );
     expect(describeUpdate(u({ state: "error" }), true)).toBe("could not reach the release feed");
+  });
+
+  it("tells a shell that never had the bridge apart from one that stopped answering", () => {
+    expect(describeUpdate(u({ state: "ready", version: "1.28.0" }), false)).toMatch(/predates the update bridge/);
+    expect(describeUpdate(u({ state: "ready", version: "1.28.0" }), false, true)).toBe(
+      "the shell stopped answering the update bridge — the updater's state is unmeasured until it answers again",
+    );
+  });
+});
+
+describe("the update banner's gate", () => {
+  const update = (p: Partial<DesktopUpdate>): DesktopUpdate => ({ state: "idle", version: null, percent: null, error: null, checkedAt: null, ...p });
+  const QUIET_STATES: DesktopUpdate["state"][] = ["unavailable", "idle", "checking", "available", "downloading", "none", "error"];
+
+  it("only a downloaded update interrupts the reader", () => {
+    expect(updateBannerReady(update({ state: "ready", version: "1.28.0" }), null)).toBe(true);
+    // Everything before "ready" belongs in Settings → About, not across the
+    // top of whatever page the reader is on.
+    for (const state of QUIET_STATES) {
+      expect(updateBannerReady(update({ state, version: "1.28.0" }), null)).toBe(false);
+    }
+  });
+
+  it("Later hides that download and no other", () => {
+    expect(updateBannerReady(update({ state: "ready", version: "1.28.0" }), "1.28.0")).toBe(false);
+    // The whole reason the dismissal stores a version instead of a boolean:
+    // a second download announces itself rather than inheriting the first
+    // "Later" for the life of the window.
+    expect(updateBannerReady(update({ state: "ready", version: "1.29.0" }), "1.28.0")).toBe(true);
+  });
+
+  it("a shell that reports ready without a version is still dismissable", () => {
+    const nameless = update({ state: "ready" });
+    expect(updateBannerVersion(nameless)).toBe("?");
+    expect(updateBannerReady(nameless, null)).toBe(true);
+    expect(updateBannerReady(nameless, "?")).toBe(false);
+    // And dismissing the nameless one does not silence a named one.
+    expect(updateBannerReady(update({ state: "ready", version: "1.28.0" }), "?")).toBe(true);
+  });
+
+  it("names the version the banner prints", () => {
+    expect(updateBannerVersion(update({ state: "ready", version: "1.28.0" }))).toBe("1.28.0");
   });
 });

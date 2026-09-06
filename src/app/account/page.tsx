@@ -99,14 +99,31 @@ export default function AccountPage() {
     const release = holdRadar();
     const url = radarSnapshot().url || HOSTED_RADAR_URL;
     const hash = window.location.hash;
-    void loadHosted(url).then(async () => {
+    // The session in the URL is adopted FIRST, and unconditionally. This used
+    // to hang off loadHosted(...).then, so a radar that did not answer - a
+    // cold worker, a 503, no network - meant a reader who clicked the sign-in
+    // link in their email landed on a signed-out page with the token already
+    // spent out of the address bar. Reading /config is not a precondition for
+    // having signed in.
+    void (async () => {
+      // /config first, because it is the only place the Supabase project the
+      // link belongs to comes from — but its failure no longer takes the rest
+      // of the mount with it. This was one `.then` chain, so a cold worker
+      // meant the emailed session was never adopted at all.
+      await loadHosted(url).catch(() => {});
       if (hash.includes("access_token=")) {
-        await adoptHashSession(hash);
-        window.history.replaceState(null, "", window.location.pathname + window.location.search);
+        // Spend the fragment only when the session in it was actually taken.
+        // Clearing it regardless threw an emailed sign-in away with nothing
+        // left to reload; kept, a reload once the radar is awake finishes the
+        // job. A fragment never leaves the browser, so keeping it exposes
+        // nothing the link navigation had not already put in history.
+        if (await adoptHashSession(hash)) {
+          window.history.replaceState(null, "", window.location.pathname + window.location.search);
+        }
       }
-      await refreshMe(url);
-      if (accountSnapshot().me?.user && accountSnapshot().hosted?.api.keys) await loadApiKeys(url);
-    });
+      await refreshMe(url).catch(() => {});
+      if (accountSnapshot().me?.user && accountSnapshot().hosted?.api.keys) await loadApiKeys(url).catch(() => {});
+    })();
     return release;
   }, []);
 
@@ -398,7 +415,16 @@ export default function AccountPage() {
         <div className="panel p-3.5 flex flex-col gap-2">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="panel-title">API access</span>
-            <span className="chip text-[9.5px]">{acct.apiKeys ? `${acct.apiKeys.length} key${acct.apiKeys.length === 1 ? "" : "s"}` : "reading…"}</span>
+            {/* "reading..." is only true while something is being read. The
+                keys load is gated behind /me, so when /me failed this chip sat
+                on "reading..." for as long as the page stayed open. */}
+            <span className="chip text-[9.5px]">
+              {acct.apiKeys
+                ? `${acct.apiKeys.length} key${acct.apiKeys.length === 1 ? "" : "s"}`
+                : acct.meError
+                  ? "not read — the radar did not answer"
+                  : "reading…"}
+            </span>
             {hosted.api.ratePerMin !== null && <span className="chip text-[9.5px] num">{hosted.api.ratePerMin} requests / min</span>}
           </div>
           <div className="text-[11.5px] dim leading-relaxed">

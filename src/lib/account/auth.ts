@@ -116,10 +116,23 @@ function notify(next: Partial<AccountState>): void {
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
+/**
+ * The session this tab holds, whether or not the disk would take it.
+ *
+ * writeSession's catch has always said a private window or a full quota means
+ * "signed in for this page load only" - and it was not true, because
+ * readSession read localStorage and nothing else. The write failed, the read
+ * that followed found nothing, and the app sat showing a signed-in account
+ * whose accessToken() answered null to everything: the radar never connected,
+ * /me never loaded, and no error was ever raised. This is what makes the
+ * promise in that catch true.
+ */
+let memorySession: AccountSession | null = null;
+
 function readSession(): AccountSession | null {
   try {
     const raw = typeof localStorage === "undefined" ? null : localStorage.getItem(SESSION_KEY);
-    if (!raw) return null;
+    if (!raw) return memorySession;
     const o = JSON.parse(raw) as Record<string, unknown>;
     const u = (o.user ?? {}) as Record<string, unknown>;
     const a = (o.auth ?? {}) as Record<string, unknown>;
@@ -132,16 +145,18 @@ function readSession(): AccountSession | null {
       auth: { url: str(a.url), anonKey: str(a.anonKey) },
     };
   } catch {
-    return null;
+    return memorySession;
   }
 }
 
 function writeSession(s: AccountSession | null): void {
+  memorySession = s;
   try {
     if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
     else localStorage.removeItem(SESSION_KEY);
   } catch {
-    /* private window or quota: signed in for this page load only */
+    /* private window or quota: signed in for this page load only, and
+       memorySession above is what makes that sentence true */
   }
 }
 
@@ -375,7 +390,21 @@ export async function accessToken(fetchImpl: Fetch = fetch): Promise<string | nu
 }
 
 async function refreshSession(s: AccountSession, fetchImpl: Fetch): Promise<string | null> {
-  const stillLive = () => (s.expiresAt > Date.now() ? s.accessToken : null);
+  // The old token while it lasts, and an explanation once it does not. The
+  // silent half was the bug: a token past its expiry that could not be
+  // refreshed returned null to the radar and to every account button, with
+  // the rail still showing a signed-in dot and nothing saying why the page
+  // had stopped working. The session is NOT cleared - the refresh token may
+  // be perfectly good and the network merely absent - so this says "could not
+  // reach", not "signed out".
+  const stillLive = () => {
+    if (s.expiresAt > Date.now()) return s.accessToken;
+    notify({
+      error:
+        "your session needs refreshing and the sign-in service could not be reached — check your connection and try again",
+    });
+    return null;
+  };
   let r: GoTrueReply;
   try {
     r = await gotrue(s.auth, "/token?grant_type=refresh_token", { body: { refresh_token: s.refreshToken } }, fetchImpl);
@@ -404,8 +433,6 @@ async function refreshSession(s: AccountSession, fetchImpl: Fetch): Promise<stri
  */
 export async function adoptHashSession(hash: string, fetchImpl: Fetch = fetch): Promise<boolean> {
   ensureRestored();
-  const p = state.provider;
-  if (!p) return false;
   const q = new URLSearchParams(hash.replace(/^#/, ""));
   const desc = q.get("error_description");
   if (desc) {
@@ -415,6 +442,22 @@ export async function adoptHashSession(hash: string, fetchImpl: Fetch = fetch): 
   const access = q.get("access_token");
   const refresh = q.get("refresh_token");
   if (!access || !refresh) return false;
+  // Which Supabase project issued this link is known only from the radar's
+  // /config, and /config can miss its deadline while a free Render worker
+  // wakes — twelve seconds against a wake of about a minute. So an emailed
+  // link can land before there is anything to check it against. This was the
+  // one exit in this function that told the reader nothing, and the page wiped
+  // the fragment regardless: the link was spent, the URL was clean, and the
+  // reader was still signed out with no idea why. Say it, and ask Supabase
+  // nothing — the session in the fragment is unspent and a reload will use it.
+  const p = state.provider;
+  if (!p) {
+    notify({
+      error:
+        "the radar has not said where sign-in goes yet, so this link could not be checked — its session is still in this page's address; give the radar a moment and reload",
+    });
+    return false;
+  }
   const expiresAtS = Number(q.get("expires_at"));
   const expiresIn = Number(q.get("expires_in")) || 3600;
   notify({ busy: true, error: null });

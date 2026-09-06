@@ -5,9 +5,19 @@ import path from "node:path";
 // The version the app shows is the desktop package's — the one number the
 // release drill bumps — stamped into both builds here so the web build and
 // the installer made from the same export agree. "dev" only if unreadable.
-function desktopVersion(): string {
+//
+// The root stays process.cwd() because neither __dirname nor import.meta.url
+// survives both ways Next loads this file: it is either transpiled to
+// CommonJS by SWC or imported through Node's native TS loader, and each of
+// those kills one of them. That makes the read silently cwd-dependent, so it
+// is a parameter — tests/version-stamp.test.ts drives both branches from a
+// directory it controls and checks the stamp below against the package read
+// from the test file's own location. Next takes only the default export
+// (interopDefault in server/config.js), so the named export changes nothing
+// about the config it loads.
+export function desktopVersion(root: string = process.cwd()): string {
   try {
-    const pkg = JSON.parse(readFileSync(path.join(process.cwd(), "desktop", "package.json"), "utf8")) as { version?: string };
+    const pkg = JSON.parse(readFileSync(path.join(root, "desktop", "package.json"), "utf8")) as { version?: string };
     return pkg.version || "dev";
   } catch {
     return "dev";

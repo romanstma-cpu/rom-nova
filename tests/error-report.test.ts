@@ -1,7 +1,7 @@
 // The words a broken page uses, and the block a reader copies to report it.
 
 import { describe, it, expect } from "vitest";
-import { describeError, errorReport } from "../src/lib/error-report";
+import { describeError, errorReport, isWebGLFailure } from "../src/lib/error-report";
 
 const AT = new Date("2026-09-05T15:04:05.000Z");
 
@@ -67,6 +67,17 @@ describe("describeError", () => {
     const d = describeError({ message: "Error creating WebGL context." });
     expect(d.reload).toBe(false);
     expect(d.title).toMatch(/3D graphics/);
+    // The marker does not always ride in the message. This is the case the
+    // scene's own private copy of the test used to miss, because it read the
+    // message alone and this reads the name too.
+    expect(describeError({ name: "WebGLContextEvent", message: "context creation failed" }).title).toMatch(/3D graphics/);
+  });
+
+  it("owns the WebGL test the scene's fallback panel shares", () => {
+    expect(isWebGLFailure({ message: "THREE.WebGLRenderer: Error creating WebGL context." })).toBe(true);
+    expect(isWebGLFailure({ name: "WebGLContextEvent", message: "context creation failed" })).toBe(true);
+    expect(isWebGLFailure({ name: "TypeError", message: "Cannot read properties of undefined" })).toBe(false);
+    expect(isWebGLFailure(null)).toBe(false);
   });
 
   it("everything else is a broken page with the rest of the app intact", () => {

@@ -62,6 +62,20 @@ export interface ErrorDescription {
 }
 
 /**
+ * Whether a thrown thing is the browser refusing 3D rather than the app
+ * breaking. Exported because the scene draws its own panel in place for this
+ * case (Network3D's sceneFailureDetail) and used to carry a second copy of the
+ * test. The copies had already drifted: this one reads the name as well as the
+ * message, that one read the message alone, so an error naming itself WebGL
+ * was a graphics failure on the page boundary and an unexplained crash inside
+ * the scene. The alternatives after the first are the messages three.js and
+ * the fibre actually throw, kept as a record of what this catches.
+ */
+export function isWebGLFailure(error: ErrorLike | null | undefined): boolean {
+  return /WebGL|Error creating WebGL context|THREE\.WebGLRenderer/i.test(`${error?.name ?? ""} ${error?.message ?? ""}`);
+}
+
+/**
  * A plain-words reading of the error, for the boundary's first two lines.
  *
  * The one case worth telling apart is a chunk that failed to load: after a
@@ -80,7 +94,7 @@ export function describeError(error: ErrorLike | null | undefined): ErrorDescrip
       reload: true,
     };
   }
-  if (/WebGL|Error creating WebGL context|THREE\.WebGLRenderer/i.test(msg)) {
+  if (isWebGLFailure(error)) {
     return {
       title: "This page needs 3D graphics the browser could not provide",
       advice:

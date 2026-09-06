@@ -6,12 +6,17 @@ import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { createBridge, isBridgeRequest, BRIDGE_PATH, INSTALL_PATH, CHECK_PATH } = require("../desktop/bridge.js");
+const { createBridge, isBridgeRequest, BRIDGE_PATH, INSTALL_PATH, CHECK_PATH, CHECK_INTERVAL_MS } = require("../desktop/bridge.js");
 
 type Bridge = ReturnType<typeof createBridge>;
 
 class FakeUpdater extends EventEmitter {
   checkForUpdates = vi.fn(() => Promise.resolve());
+  // The periodic check calls this one, not checkForUpdates. The fake modelled
+  // only the two methods the request handlers touched, so the six-hour loop —
+  // which named a third — could have called anything at all, including a
+  // method electron-updater does not have, and every test here still passed.
+  checkForUpdatesAndNotify = vi.fn(() => Promise.resolve());
   quitAndInstall = vi.fn();
 }
 
@@ -167,5 +172,67 @@ describe("the packaged shell", () => {
       vi.advanceTimersByTime(100);
       expect(updater.quitAndInstall).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+// This loop ran inline in main.js — `if (bridge.shouldCheck())
+// updater.checkForUpdatesAndNotify().catch(...)` on a six-hour setInterval —
+// where no test could reach it: main.js destructures Electron at the top level
+// and registers a privileged scheme on import, so vitest cannot load the file
+// at all. It now lives beside the update state it reads.
+describe("the six-hour check on a window left open", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  // Each tick hands the call to a microtask on purpose: an updater with no
+  // checkForUpdatesAndNotify throws SYNCHRONOUSLY, and a bare .catch() on a
+  // synchronous throw never runs — that first tick would have taken the main
+  // process down. So every assertion here has to let the queue drain first.
+  const flush = () => vi.advanceTimersByTimeAsync(0);
+
+  it("asks once on start, then again on every interval", async () => {
+    const { bridge, updater } = packaged();
+    const timer = bridge.startPeriodicChecks();
+    await flush();
+    expect(updater.checkForUpdatesAndNotify).toHaveBeenCalledTimes(1);
+    // The notifying variant, not the one the Settings page's POST uses.
+    expect(updater.checkForUpdates).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS - 1);
+    expect(updater.checkForUpdatesAndNotify).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(updater.checkForUpdatesAndNotify).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS * 3);
+    expect(updater.checkForUpdatesAndNotify).toHaveBeenCalledTimes(5);
+    clearInterval(timer);
+  });
+
+  it("goes quiet once an update is downloaded and waiting", async () => {
+    const { bridge, updater } = packaged();
+    const timer = bridge.startPeriodicChecks();
+    await flush();
+    updater.emit("update-downloaded", { version: "1.28.0" });
+    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS * 4);
+    // Re-checking a finished download makes electron-updater announce it
+    // again: one OS notification per tick for an update already waiting.
+    expect(updater.checkForUpdatesAndNotify).toHaveBeenCalledTimes(1);
+    clearInterval(timer);
+  });
+
+  it("starts no timer for the unpackaged shell, which has no feed to ask", () => {
+    const bridge: Bridge = createBridge({ version: () => "0.0.0-dev", platform: "win32", arch: "x64" });
+    expect(bridge.startPeriodicChecks()).toBeNull();
+    expect(bridge.checkPeriodically()).toBe(false);
+  });
+
+  it("survives an updater whose API is not the one it was written against", async () => {
+    // The call is wrapped in a resolved promise for exactly this: a missing
+    // method throws synchronously, where a `.catch()` on the call itself never
+    // runs — so this test fails by killing the main process, not by asserting.
+    const { bridge, updater } = packaged();
+    delete (updater as Partial<FakeUpdater>).checkForUpdatesAndNotify;
+    const timer = bridge.startPeriodicChecks();
+    await Promise.resolve();
+    expect(bridge.update.state).toBe("idle");
+    clearInterval(timer);
   });
 });

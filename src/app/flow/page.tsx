@@ -31,7 +31,7 @@ export default function FlowPage() {
             it was the one flow surface that never said so (H5). */}
         <span className="chip">SIMULATED</span>
         {WINDOWS.map((w) => (
-          <button key={w.hours} onClick={() => setHours(w.hours)} className={`chip cursor-pointer ${hours === w.hours ? "chip-accent" : ""}`}>
+          <button key={w.hours} type="button" aria-pressed={hours === w.hours} onClick={() => setHours(w.hours)} className={`chip cursor-pointer ${hours === w.hours ? "chip-accent" : ""}`}>
             {w.label}
           </button>
         ))}

@@ -11,6 +11,7 @@ import { ledgerSnapshot, ledgerSnapshotServer, subscribeLedger, FILL_CAP, WALLET
 import { MIN_OBSERVED_DAYS, MIN_ROUND_TRIPS } from "@/lib/ledger/reputation";
 import type { ProviderHealth } from "@/lib/types";
 import Link from "next/link";
+import { fallbackChains } from "@/lib/providers/registry";
 import { radarConfiguredUrl, radarServerSnapshot, radarSnapshot, subscribeRadar } from "@/lib/radar/client";
 import { HOSTED_RADAR_URL } from "@/lib/account/hosted";
 
@@ -375,8 +376,8 @@ export default function StatusPage() {
         <Stat label="Universe seed">{data.engine.seed}</Stat>
         <Stat label="Tokens">{data.engine.tokens}</Stat>
         <Stat label="Wallets">{data.engine.wallets}</Stat>
-        <Stat label="Historical trades">{fmtNum(data.engine.historicalTrades)}</Stat>
-        <Stat label="Live trades">{fmtNum(data.engine.liveTrades)}</Stat>
+        <Stat label="Sim trades, seeded">{fmtNum(data.engine.historicalTrades)}</Stat>
+        <Stat label="Sim trades, since load" sub="SIMULATED">{fmtNum(data.engine.liveTrades)}</Stat>
         <Stat label="Sim heartbeat">{fmtAgo(data.engine.simulatedUntil)}</Stat>
       </div>
 
@@ -451,11 +452,41 @@ export default function StatusPage() {
       <HostedRadar />
       <WalletLedger />
 
+      {/* Computed, not written. The paragraph that used to sit here named
+          birdeye in the token chain long after jupiter took that slot, and
+          described a labels chain that nothing resolves - two inches under a
+          table generated from the real resolution. */}
       <div className="panel p-3.5 text-[11.5px] dim leading-relaxed">
         <span className="panel-title block mb-1.5">Fallback chains</span>
-        Token data: jupiter → birdeye → dexscreener → cached · Market data: birdeye → dexscreener → demo · Wallet activity:
-        helius → demo · Labels: nansen → birdeye → demo · SOL reference price: coingecko ∥ cryptocom ∥ infstones (median,
-        cross-checked) · Unconfigured providers fall back to the deterministic demo universe — never silently, always labeled.
+        <div className="flex flex-col gap-1">
+          {fallbackChains().map((c) => (
+            <div key={c.capability} className="flex flex-wrap items-baseline gap-x-1.5">
+              <span className="text-[var(--text)]">{c.capability}:</span>
+              {c.steps.map((s, i) => (
+                <span key={s.name} className="flex items-baseline gap-1.5">
+                  {i > 0 && <span className="faint">&rarr;</span>}
+                  <span
+                    className={s.active ? "num text-[var(--accent)]" : s.configured ? "num" : "num faint line-through"}
+                    title={s.active ? "serving this capability now" : s.configured ? "configured, next in line" : "not configured"}
+                  >
+                    {s.name}
+                  </span>
+                </span>
+              ))}
+              <span className="faint">&rarr;</span>
+              <span className={c.steps.some((s) => s.active) ? "faint" : "text-[var(--warn)]"}>{c.fallback}</span>
+            </div>
+          ))}
+          <div className="flex flex-wrap items-baseline gap-x-1.5">
+            <span className="text-[var(--text)]">SOL reference price:</span>
+            <span className="num">coingecko &#8741; cryptocom &#8741; infstones</span>
+            <span className="faint">(median of whichever answer, cross-checked)</span>
+          </div>
+        </div>
+        <div className="faint mt-1.5">
+          Highlighted is the one serving now; struck through is not configured. A capability that reaches its last
+          column falls back &mdash; never silently, always labelled on the page that shows it.
+        </div>
       </div>
     </div>
   );

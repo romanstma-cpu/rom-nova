@@ -221,7 +221,7 @@ export default function WhalesPage() {
       <div className="flex items-center gap-2 flex-wrap">
         <PageTitle title="WALLETS" lede="Who is moving size right now, and the real record of any wallet you paste" />
         {filters.map((f) => (
-          <button key={f.id} onClick={() => setFilter(f.id)} className={`chip cursor-pointer ${filter === f.id ? "chip-accent" : ""}`}>
+          <button key={f.id} type="button" aria-pressed={filter === f.id} onClick={() => setFilter(f.id)} className={`chip cursor-pointer ${filter === f.id ? "chip-accent" : ""}`}>
             {f.label}
           </button>
         ))}

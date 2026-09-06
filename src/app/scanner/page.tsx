@@ -233,10 +233,10 @@ export default function ScannerPage() {
             min liq $
             <input value={minLiq} onChange={(e) => setMinLiq(e.target.value)} className="input w-[90px]" />
           </label>
-          <button className={`btn text-[11px] ${frozen ? "btn-primary" : ""}`} onClick={() => setFrozen((x) => !x)}>
+          <button type="button" aria-pressed={frozen} className={`btn text-[11px] ${frozen ? "btn-primary" : ""}`} onClick={() => setFrozen((x) => !x)}>
             {frozen ? "ranking frozen" : "freeze ranking"}
           </button>
-          <button className={`btn text-[11px] ${paused ? "btn-danger" : ""}`} onClick={() => setPaused((x) => !x)}>
+          <button type="button" aria-pressed={paused} className={`btn text-[11px] ${paused ? "btn-danger" : ""}`} onClick={() => setPaused((x) => !x)}>
             {paused ? "▶ resume" : "⏸ pause"}
           </button>
         </div>

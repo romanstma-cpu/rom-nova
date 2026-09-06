@@ -51,11 +51,22 @@ export function useApi<T>(url: string | null, refreshMs?: number): {
   loading: boolean;
   reload: () => void;
 } {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // The URL a value BELONGS TO is stored with it, and the hook reports
+  // nothing once the caller has moved on. Without this the token page showed
+  // the previous mint's price, liquidity and holder split under the new
+  // mint's symbol for the length of a request, and a failed load left the old
+  // mint's error sitting under the new one's heading.
+  const [state, setState] = useState<{ url: string | null; data: T | null; error: string | null }>({
+    url: null,
+    data: null,
+    error: null,
+  });
   const [loading, setLoading] = useState(true);
   const [nonce, setNonce] = useState(0);
   const reload = useCallback(() => setNonce((n) => n + 1), []);
+  const fresh = state.url === url;
+  const data = fresh ? state.data : null;
+  const error = fresh ? state.error : null;
 
   useEffect(() => {
     if (!url) return;
@@ -64,13 +75,14 @@ export function useApi<T>(url: string | null, refreshMs?: number): {
       try {
         const json = (await getJson(url)) as T;
         if (!dead) {
-          setData(json);
-          setError(null);
+          setState({ url, data: json, error: null });
           setLoading(false);
         }
       } catch (err) {
         if (!dead) {
-          setError(err instanceof Error ? err.message : String(err));
+          // The failed URL's own error, keeping whatever data that same URL
+          // had already served - a poll that fails does not blank the page.
+          setState((s) => ({ url, data: s.url === url ? s.data : null, error: err instanceof Error ? err.message : String(err) }));
           setLoading(false);
         }
       }

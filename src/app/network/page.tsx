@@ -151,7 +151,17 @@ export default function NetworkPage() {
           ))}
           <div className="flex items-center gap-2 pt-1">
             <span className="faint text-[10px] w-10">speed</span>
-            <input type="range" min={0} max={3} step={0.5} value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="flex-1 accent-[#38e1ff]" />
+            <input
+              type="range"
+              min={0}
+              max={3}
+              step={0.5}
+              value={speed}
+              onChange={(e) => setSpeed(Number(e.target.value))}
+              className="flex-1 accent-[#38e1ff]"
+              aria-label="Scene speed"
+              aria-valuetext={speed === 0 ? "paused" : `${speed} times`}
+            />
             <span className="num text-[10px] w-6">{speed === 0 ? "⏸" : `${speed}x`}</span>
           </div>
           <button

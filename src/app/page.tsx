@@ -191,9 +191,17 @@ export default function Dashboard() {
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center faint text-[11px] tracking-[0.25em]">
-              SCANNING SOLANA…
+              BUILDING THE SIMULATED GRAPH…
             </div>
           )}
+          {/* /network carries this chip; the same scene embedded here did not,
+              and a galaxy of wallets on the dashboard reads as the chain. */}
+          <span
+            className="absolute bottom-2.5 left-2.5 chip text-[9.5px] z-10"
+            title="Every wallet, token and edge in this scene is the deterministic demo universe. None of these wallets are real people."
+          >
+            SIMULATED
+          </span>
           <Link href="/network" className="absolute top-2.5 right-2.5 btn text-[10.5px]">
             full 3D network ⤢
           </Link>

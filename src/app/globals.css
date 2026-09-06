@@ -261,6 +261,15 @@ body::after {
   background: linear-gradient(90deg, rgba(56, 225, 255, 0.07), rgba(40, 55, 85, 0.16) 22%, rgba(40, 55, 85, 0.1));
   box-shadow: inset 2px 0 0 0 var(--accent);
 }
+/* A focused row has to look focused. The launch feed's rows are real tab stops
+   - they open the triage breakdown - and an outline on a <tr> renders
+   inconsistently across engines, so the focused row borrows the hover
+   treatment and brightens the rail. */
+.trow:focus-visible {
+  outline: none;
+  background: linear-gradient(90deg, rgba(56, 225, 255, 0.12), rgba(40, 55, 85, 0.2) 22%, rgba(40, 55, 85, 0.12));
+  box-shadow: inset 3px 0 0 0 var(--accent);
+}
 
 .link { color: var(--accent); }
 .link:hover { text-decoration: underline; }

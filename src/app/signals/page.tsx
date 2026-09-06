@@ -88,14 +88,14 @@ export default function SignalTerminal() {
     <div className="p-3 flex flex-col gap-3">
       <div className="flex items-center gap-2 flex-wrap">
         <PageTitle title="SIGNALS" lede="Ranked setups, with the case for and against each" />
-        <select value={profile} onChange={(e) => setProfile(e.target.value as StrategyProfileId)} className="input">
+        <select value={profile} onChange={(e) => setProfile(e.target.value as StrategyProfileId)} className="input" aria-label="Strategy profile">
           {PROFILES.map((p) => (
             <option key={p.id} value={p.id}>{p.label}</option>
           ))}
         </select>
         <div className="flex gap-1.5 ml-2 flex-wrap">
           {boards.map((b) => (
-            <button key={b.id} onClick={() => setBoard(b.id)} className={`chip cursor-pointer ${board === b.id ? "chip-accent" : ""}`}>
+            <button key={b.id} type="button" aria-pressed={board === b.id} onClick={() => setBoard(b.id)} className={`chip cursor-pointer ${board === b.id ? "chip-accent" : ""}`}>
               {b.label}
             </button>
           ))}

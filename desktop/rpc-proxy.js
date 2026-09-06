@@ -59,6 +59,18 @@ function isRpcRequest(pathname) {
  * shape would make every refusal look like a dead endpoint.
  */
 async function handleRpc(request) {
+  // Promised by the SECURITY note above and, until now, not delivered. A
+  // simple request - the kind a form can send with no preflight - cannot
+  // carry application/json, so requiring it keeps this path reachable only by
+  // code that meant to call it. The app:// scheme already refuses remote
+  // origins; this is the second lock on the same door.
+  const contentType = (request.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+  if (request.method === "POST" && contentType !== "application/json") {
+    return new Response(JSON.stringify({ error: "content-type must be application/json" }), {
+      status: 415,
+      headers: { "content-type": "application/json" },
+    });
+  }
   if (request.method !== "POST") {
     return new Response(JSON.stringify({ error: "POST only" }), {
       status: 405,

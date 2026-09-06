@@ -89,7 +89,15 @@ export default function WatchlistsPage() {
                   )}
                 </Link>
                 <span className="chip">{it.kind}</span>
-                <button className="faint hover:text-[var(--neg)]" onClick={() => post({ op: "remove", id: wl.id, ref: it.ref })}>✕</button>
+                <button
+                  type="button"
+                  className="faint hover:text-[var(--neg)]"
+                  onClick={() => post({ op: "remove", id: wl.id, ref: it.ref })}
+                  aria-label={`Remove ${it.ref} from ${wl.name}`}
+                  title="Remove from this watchlist"
+                >
+                  <span aria-hidden="true">✕</span>
+                </button>
               </div>
             ))}
             <div className="px-3 py-2 flex gap-2">

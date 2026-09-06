@@ -666,8 +666,14 @@ export default function AlertsPage() {
                 <button className={`chip cursor-pointer ${r.enabled ? "chip-pos" : ""}`} onClick={() => patchRule(r.id, { enabled: !r.enabled })}>
                   {r.enabled ? "on" : "off"}
                 </button>
-                <button className="chip chip-neg cursor-pointer" onClick={() => deleteRule(r.id)}>
-                  ✕
+                <button
+                  type="button"
+                  className="chip chip-neg cursor-pointer"
+                  onClick={() => deleteRule(r.id)}
+                  aria-label="Delete this live rule"
+                  title="Delete this rule"
+                >
+                  <span aria-hidden="true">✕</span>
                 </button>
               </div>
             );
@@ -837,8 +843,14 @@ function SimAlerts({ nowMs }: { nowMs: number }) {
               <button className={`chip cursor-pointer ${r.enabled ? "chip-pos" : ""}`} onClick={() => post({ op: "toggle", id: r.id })}>
                 {r.enabled ? "on" : "off"}
               </button>
-              <button className="chip chip-neg cursor-pointer" onClick={() => post({ op: "delete", id: r.id })}>
-                ✕
+              <button
+                type="button"
+                className="chip chip-neg cursor-pointer"
+                onClick={() => post({ op: "delete", id: r.id })}
+                aria-label="Delete this simulated rule"
+                title="Delete this rule"
+              >
+                <span aria-hidden="true">✕</span>
               </button>
             </div>
           ))}

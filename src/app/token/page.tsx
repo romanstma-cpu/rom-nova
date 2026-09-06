@@ -281,6 +281,8 @@ function ChartPanel({
               <button
                 key={iv}
                 className={`btn text-[10px] px-1.5 py-0.5 ${interval === iv ? "btn-primary" : ""}`}
+                type="button"
+                aria-pressed={interval === iv}
                 onClick={() => onInterval(iv)}
                 title={`${iv} bars`}
               >
@@ -294,6 +296,8 @@ function ChartPanel({
               <button
                 key={w.label}
                 className={`btn text-[10px] px-1.5 py-0.5 ${spanMs === w.spanMs ? "btn-primary" : ""}`}
+                type="button"
+                aria-pressed={spanMs === w.spanMs}
                 onClick={() => setSpanMs(w.spanMs)}
               >
                 {w.label}
@@ -302,6 +306,8 @@ function ChartPanel({
           </span>
           <button
             className={`btn text-[10px] px-1.5 py-0.5 ${logScale ? "btn-primary" : ""}`}
+            type="button"
+            aria-pressed={logScale}
             onClick={() => setLogScale((x) => !x)}
             title="logarithmic price axis"
           >
@@ -1774,7 +1780,15 @@ function DemoToken({ detail, mint, candles }: { detail: DemoTokenDetail; mint: s
           <div className="panel p-3 flex flex-col gap-2">
             <div className="panel-title">Desk actions · paper only</div>
             <div className="flex gap-2">
-              <input value={tradeUsd} onChange={(e) => setTradeUsd(e.target.value)} className="input w-[90px]" />
+              <input
+                value={tradeUsd}
+                onChange={(e) => setTradeUsd(e.target.value)}
+                className="input w-[90px]"
+                inputMode="decimal"
+                placeholder="USD"
+                aria-label="Paper trade size in US dollars"
+                title="Size of the paper trade, in US dollars. No real funds exist anywhere in this app."
+              />
               <button className="btn btn-primary flex-1 justify-center" onClick={() => doPaperTrade("buy")}>Paper buy</button>
               <button className="btn btn-danger flex-1 justify-center" onClick={() => doPaperTrade("sell")}>Paper sell</button>
             </div>

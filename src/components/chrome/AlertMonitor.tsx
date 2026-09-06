@@ -612,7 +612,12 @@ export function AlertMonitor() {
   // Bottom-LEFT so the simulator's toasts (bottom-right, labeled SIMULATED)
   // and these can never be visually conflated.
   return (
-    <div className="fixed bottom-4 left-4 z-40 flex flex-col gap-2 w-[340px] pointer-events-none">
+    <div
+      className="fixed bottom-4 left-4 z-40 flex flex-col gap-2 w-[340px] pointer-events-none"
+      role="alert"
+      aria-live="assertive"
+      aria-label="Fired alerts"
+    >
       {toasts.map((t) => (
         <Link
           key={t.id}

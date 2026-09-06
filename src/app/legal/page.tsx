@@ -104,9 +104,17 @@ export default function LegalPage() {
           (Supabase Auth) and, if you subscribe, a Stripe customer id; card details go to Stripe&apos;s own page and never
           touch this app. The entire engine runs inside your browser. Your
           watchlists, alerts, paper portfolio, and research notes are stored only in your browser&apos;s local storage on
-          your device — they are never uploaded, and clearing your browser data removes them completely. The only network
-          requests this app makes are to the public price APIs named above; those requests carry no personal data or
-          identifiers beyond what any HTTP request includes.
+          your device — they are never uploaded, and clearing your browser data removes them completely.
+        </p>
+        <p>
+          Where your browser sends requests, in full: the data vendors named in the section above (Jupiter,
+          GeckoTerminal, DEX Screener, RugCheck, SQD, CoinGecko, Crypto.com and Solana&apos;s public JSON-RPC, plus the
+          PumpPortal socket); the hosted Whale Radar and the sign-in provider, but only once you open the Account page
+          or arm the hosted radar; Stripe, only if you start a subscription; OpenRouter, only if you paste your own key
+          on the Research desk; and, in the installed Windows app, GitHub&apos;s release feed to check for updates. None
+          of those requests carries an identifier this app invented — there is none to carry. This paragraph used to
+          say the only requests were to &ldquo;the public price APIs named above&rdquo;, which left out every one of the
+          vendors this terminal actually reads.
         </p>
         <p>
           There is no wallet connection, no private-key or seed-phrase handling of any kind, and no way to move real funds

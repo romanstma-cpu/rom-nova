@@ -127,8 +127,9 @@ export default function ResearchPage() {
           </div>
           <div className="text-[10px] faint mt-2 flex items-center justify-between gap-3 flex-wrap">
             <span>
-              Answers are built from structured queries against the app database — every claim carries its
-              evidence and source timestamp.{" "}
+              Answers are built from structured queries against the{" "}
+              <span className="text-[var(--warn)]">deterministic demo universe</span> — not the live token list — and
+              every claim carries its evidence and the source timestamp.{" "}
               {ai.enabled ? "A model rewords them; it never supplies a number." : "No generative model is involved."}
             </span>
             {/* Was 10px grey at the tail of this line — present in the DOM and

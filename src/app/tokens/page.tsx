@@ -65,7 +65,7 @@ export default function TokenRadar() {
       <div className="flex items-center gap-2 flex-wrap">
         <PageTitle title="TOKENS" lede="The trending list with scores, risk and whale flow" />
         {QUICKS.map((f) => (
-          <button key={f.id} onClick={() => setQuick(f.id)} className={`chip cursor-pointer ${quick === f.id ? "chip-accent" : ""}`}>
+          <button key={f.id} type="button" aria-pressed={quick === f.id} onClick={() => setQuick(f.id)} className={`chip cursor-pointer ${quick === f.id ? "chip-accent" : ""}`}>
             {f.label}
           </button>
         ))}

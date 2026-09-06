@@ -291,6 +291,67 @@ export interface DataMode {
   bounded: string[];
 }
 
+/** One candidate in a capability's fallback chain. */
+export interface ChainStep {
+  name: string;
+  /** Whether this candidate's flag and key requirements are satisfied. */
+  configured: boolean;
+  /** Whether it is the one actually serving: the first configured one. */
+  active: boolean;
+}
+
+export interface CapabilityChain {
+  capability: string;
+  steps: ChainStep[];
+  /** What happens when nothing in the chain is configured. */
+  fallback: string;
+}
+
+/**
+ * The fallback chains, computed from the same predicates `getProviders()`
+ * resolves with.
+ *
+ * This exists because the Status page used to STATE these chains in a
+ * paragraph, and a paragraph cannot be kept true. It named birdeye in the
+ * token chain long after jupiter took that slot, invented a "labels" chain
+ * that nothing resolves, and left out flow and risk entirely - two inches
+ * under a table generated from the real thing. The rule this codebase already
+ * applies to the data-mode chip applies here too: if the reader is being told
+ * how the app resolves, the telling has to come from the resolution.
+ */
+export function fallbackChains(): CapabilityChain[] {
+  const chain = (capability: string, candidates: [string, boolean][], fallback: string): CapabilityChain => {
+    let taken = false;
+    const steps = candidates.map(([name, configured]) => {
+      const active = configured && !taken;
+      if (active) taken = true;
+      return { name, configured, active };
+    });
+    return { capability, steps, fallback };
+  };
+  return [
+    chain(
+      "Token data",
+      [["jupiter", FLAGS.jupiter()], ["geckoterminal", FLAGS.coingecko()], ["dexscreener", FLAGS.dexscreener()]],
+      "the deterministic demo universe",
+    ),
+    chain(
+      "Market data & candles",
+      [["birdeye", FLAGS.birdeye()], ["geckoterminal", FLAGS.coingecko()], ["dexscreener", FLAGS.dexscreener()]],
+      "the deterministic demo universe",
+    ),
+    chain(
+      "Token security",
+      [["birdeye", FLAGS.birdeye()], ["solana-rpc", FLAGS.solanaRpc()]],
+      "the deterministic demo universe",
+    ),
+    chain("Wallet activity", [["helius", FLAGS.helius()]], "the deterministic demo universe"),
+    chain("Wallet flow", [["sqd", FLAGS.sqd()]], "nothing - the flow is reported UNMEASURED, never as zero"),
+    chain("Rug risk", [["rugcheck", FLAGS.rugcheck()]], "nothing - no grade is shown at all"),
+    chain("Wallet holdings", [["jupiter-holdings", FLAGS.walletHoldings()]], "nothing - cost basis is reported unknown"),
+  ];
+}
+
 export function dataMode(): DataMode {
   const p = getProviders();
   const live: string[] = [];

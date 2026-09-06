@@ -76,7 +76,10 @@ export function AboutPanel() {
             <a className="link" href={INSTALLER_URL}>
               ROM-Nova-Setup.exe
             </a>{" "}
-            updates itself, remembers its window, and reaches the full Solana archive the web build cannot. Your browser
+            updates itself, remembers its window, and reaches Solana&apos;s public RPC directly, which a browser
+            cannot — that endpoint refuses requests carrying a web origin. It is a deeper wallet history than this tab
+            can read, not an archive: the public nodes prune, and every page says how far back it actually saw. Your
+            browser
             may also offer to install this site as an app; that keeps everything in this browser&apos;s storage.
           </>
         )}

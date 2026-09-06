@@ -133,10 +133,24 @@ export function NavRail({ onNavigate }: { onNavigate?: () => void }) {
         title={it.sim ? `${it.hint} — SIMULATED, and labelled so on the page` : it.hint}
         aria-current={active ? "page" : undefined}
       >
-        <span className="w-4 text-center text-[13px] opacity-80">{it.glyph}</span>
+        {/* Decoration. Without aria-hidden every rail link was announced by
+            its Unicode symbol NAME first - "black diamond suit, Dashboard" -
+            which is the first thing a screen-reader user hears on every page. */}
+        <span className="w-4 text-center text-[13px] opacity-80" aria-hidden="true">{it.glyph}</span>
         {it.label}
         {it.href === "/account" && signedIn && (
-          <span className="ml-auto w-1.5 h-1.5 rounded-full bg-[var(--pos)] shadow-[0_0_6px_var(--pos)]" title="signed in" aria-label="signed in" />
+          /* A green dot is not a state anyone can hear, and an aria-label on a
+             bare <span> with no role is ignored by assistive tech entirely. So
+             the dot is decoration and the word beside it is the state - out of
+             sight, and not out of earshot. */
+          <>
+            <span
+              className="ml-auto w-1.5 h-1.5 rounded-full bg-[var(--pos)] shadow-[0_0_6px_var(--pos)]"
+              title="signed in"
+              aria-hidden="true"
+            />
+            <span className="sr-only">signed in</span>
+          </>
         )}
       </Link>
     );

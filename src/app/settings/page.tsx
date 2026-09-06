@@ -27,12 +27,17 @@ import { AboutPanel } from "@/components/settings/AboutPanel";
 const PROVIDERS: { name: string; healthKey: string; env: string[]; role: string; keyless?: boolean }[] = [
   { name: "CoinGecko", healthKey: "coingecko", env: ["keyless (COINGECKO_API_KEY optional)"], role: "live SOL reference price + global market context — active by default", keyless: true },
   { name: "Crypto.com Exchange", healthKey: "cryptocom", env: ["keyless"], role: "live SOL_USD ticker from the public exchange API — cross-checks CoinGecko", keyless: true },
-  { name: "Jupiter Tokens V2 + Swap V2", healthKey: "jupiter", env: ["JUPITER_API_KEY"], role: "token info, verification, organic score, swap routing (Ultra is superseded — not used)" },
+  { name: "Jupiter Tokens V2", healthKey: "jupiter", env: ["keyless (ENABLE_JUPITER, on by default)"], role: "the primary token source: holders, top-holder share, dev balance, organic score, launchpad and creator mint history. No key — and the reason the token list costs one request instead of twenty-five", keyless: true },
   { name: "Birdeye", healthKey: "birdeye", env: ["BIRDEYE_API_KEY"], role: "OHLCV market data, token security, holder positions & labels (smart_trader / insider / dev / sniper / bundler)" },
   { name: "Helius", healthKey: "helius", env: ["HELIUS_API_KEY"], role: "enhanced wallet transactions, webhooks, Solana RPC/WebSocket — the browser-side key above covers the Whale Radar without server mode" },
   { name: "Nansen", healthKey: "nansen", env: ["NANSEN_API_KEY"], role: "optional premium wallet labels and smart-money datasets" },
   { name: "InfStones", healthKey: "infstones", env: ["INFSTONES_API_KEY"], role: "blockchain intelligence: third-opinion price cross-check" },
   { name: "DEX Screener", healthKey: "dexscreener", env: ["ENABLE_DEXSCREENER=true"], role: "keyless fallback for pairs, liquidity and price", keyless: true },
+  { name: "GeckoTerminal", healthKey: "geckoterminal", env: ["keyless (ENABLE_COINGECKO)"], role: "hourly OHLCV history — the only keyless source with candles, serialised behind a 2.1s gap because it rate-limits", keyless: true },
+  { name: "RugCheck", healthKey: "rugcheck", env: ["keyless (ENABLE_RUGCHECK)"], role: "liquidity-pool lock state, named risks and a third-party grade — shown beside the score, never folded into it", keyless: true },
+  { name: "SQD", healthKey: "sqd", env: ["keyless (ENABLE_SQD)"], role: "wallet-level flow: who bought and sold a mint. Absent means the flow reads UNMEASURED, never zero", keyless: true },
+  { name: "Solana JSON-RPC", healthKey: "solana-rpc", env: ["keyless (ENABLE_SOLANA_RPC)"], role: "mint and freeze authority read off the chain, and the per-account WebSocket. The installed app reaches it through the shell, which a browser cannot", keyless: true },
+  { name: "PumpPortal", healthKey: "pumpportal", env: ["keyless"], role: "token creations pushed over a socket — the launch feed's live half", keyless: true },
 ];
 
 /** One row of "this browser remembers X" with its one action. */

@@ -709,7 +709,7 @@ export default function LaunchesPage() {
             min liq $
             <input value={minLiq} onChange={(e) => setMinLiq(e.target.value)} className="input w-[80px]" />
           </label>
-          <select value={venue} onChange={(e) => setVenue(e.target.value)} className="input text-[11px]">
+          <select value={venue} onChange={(e) => setVenue(e.target.value)} className="input text-[11px]" aria-label="Filter by launch venue">
             <option value="all">all venues</option>
             {venues.map((v) => (
               <option key={v} value={v}>
@@ -719,6 +719,8 @@ export default function LaunchesPage() {
           </select>
           <button
             className={`btn text-[11px] ${hideSerial ? "btn-primary" : ""}`}
+            type="button"
+            aria-pressed={hideSerial}
             onClick={() => setHideSerial((x) => !x)}
             title="Hide launches whose deployer has issued 50 or more mints. Sampled pages carry creators at 3,911 and 5,623 mints."
           >
@@ -726,6 +728,8 @@ export default function LaunchesPage() {
           </button>
           <button
             className={`btn text-[11px] ${hideAvoid ? "btn-primary" : ""}`}
+            type="button"
+            aria-pressed={hideAvoid}
             onClick={() => setHideAvoid((x) => !x)}
             title="Hide rows where at least one triage check failed."
           >
@@ -733,6 +737,8 @@ export default function LaunchesPage() {
           </button>
           <button
             className={`btn text-[11px] ${cleanOnly ? "btn-primary" : ""}`}
+            type="button"
+            aria-pressed={cleanOnly}
             onClick={() => setCleanOnly((x) => !x)}
             title={
               "Show only rows where NO check failed and none warned — the best this page will ever say about a " +
@@ -745,6 +751,8 @@ export default function LaunchesPage() {
           </button>
           <button
             className={`btn text-[11px] ${nearGrad ? "btn-primary" : ""}`}
+            type="button"
+            aria-pressed={nearGrad}
             onClick={() => setNearGrad((x) => !x)}
             title={
               `Show only mints at or past ${NEAR_GRADUATION * 100}% of their bonding curve — the ones closest to ` +
@@ -854,9 +862,24 @@ export default function LaunchesPage() {
               const expanded = open === l.mint;
               return (
                 <Fragment key={l.mint}>
+                  {/* The row IS the disclosure control - the per-check
+                      evidence under it exists nowhere else in the app - so it
+                      has to be one to the keyboard too. tabIndex puts it in the
+                      tab order, role says what it is, aria-expanded says which
+                      way it will go. Enter and Space both fire, and Space's
+                      default page-scroll is suppressed the way a real button
+                      suppresses it. */}
                   <tr
                     className="trow cursor-pointer"
+                    tabIndex={0}
+                    role="button"
+                    aria-expanded={expanded}
                     onClick={() => setOpen(expanded ? null : l.mint)}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" && e.key !== " ") return;
+                      e.preventDefault();
+                      setOpen(expanded ? null : l.mint);
+                    }}
                     style={isNew ? { background: "rgba(56,225,255,0.10)" } : undefined}
                   >
                     {/* Two different ages, never one column pretending to be

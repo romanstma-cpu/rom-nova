@@ -123,7 +123,10 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     const ws: Item[] = live.wallets.map((w) => ({
       key: w.address,
       title: w.entity ?? shortAddr(w.address),
-      sub: `${w.labels.join(", ")} · SM ${w.smartMoneyScore}`,
+      // The wallet half of search is the demo universe, and SM is its own
+      // score for its own invented wallets. Unlabelled, beside real token
+      // results, it read as a directory of real traders.
+      sub: `SIMULATED · ${w.labels.join(", ")} · SM ${w.smartMoneyScore}`,
       href: `/whale?a=${w.address}`,
       kind: "wallet",
     }));

@@ -165,6 +165,28 @@ ten an hour). `schema.sql` (or `migrations/006-community.sql`) adds the
 `follows` and `notes` tables; `/health` → `db.community` says when.
 Hide a note by setting `hidden = true` on its row in Supabase.
 
+## Storage, and the one thing that stops this if nobody is watching
+
+The worker has no retention. It has written every fill it has ever seen and
+will keep doing so: `/health` → `db.written.trades` was 628,502 rows in
+29 hours the day this was written, about six a second, roughly half a million
+rows a day that never leave. `wallet_trades` is the expensive one — an
+88-character signature and two 44-character addresses per row, under four
+indexes, one of them a unique index whose key is bigger than some rows.
+
+Nothing in the system reports the database's size or warns as it fills, so
+this is the failure that arrives silently. On Supabase's free tier the limit
+is 500 MB and the database goes read-only there; the worker keeps streaming
+and counts dropped writes in `/health` while nothing persists.
+
+Measure before deciding anything — the query is STEP 0 of
+[`supabase/migrations/007-retention.sql`](supabase/migrations/007-retention.sql),
+which also carries two prunes and an optional nightly `pg_cron` schedule.
+Every statement in that file is commented out; it is a decision to make, not a
+migration to run. The argument for why pruning is safe at all is in its
+header: `Db.hydrate()` is the only reader, and it can never see more than the
+newest 4,000 fills of the 200 most recently active wallets.
+
 ## What triggers a deploy
 
 The Blueprint's `buildFilter` deploys on changes under `worker/`, under

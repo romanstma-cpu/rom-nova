@@ -1,0 +1,112 @@
+-- ROM Nova Radar — retention. OPTIONAL, AND IT REMOVES ROWS.
+--
+-- Nothing runs this for you. The worker never prunes: it has written every
+-- fill it has ever seen since the day it started, with no retention anywhere
+-- in the codebase. At the rate /health reported when this file was written —
+-- 628,502 wallet_trades rows in 29 hours, about six a second — the journal
+-- grows by roughly half a million rows a day and does not stop.
+--
+-- wallet_trades is the expensive table by a wide margin. Each row carries an
+-- 88-character transaction signature and two 44-character addresses under FOUR
+-- indexes, one of them a unique index on
+-- (signature, wallet_address, token_address, buy_or_sell) whose key is larger
+-- than some rows. Call it a few hundred bytes of heap plus roughly as much
+-- again in indexes.
+--
+--
+-- STEP 0 — MEASURE FIRST. Decide nothing before you know the number.
+-- Supabase Dashboard -> SQL -> New query -> paste -> Run.
+--
+--   select pg_size_pretty(pg_database_size(current_database())) as database,
+--          pg_size_pretty(pg_total_relation_size('wallet_trades')) as wallet_trades,
+--          pg_size_pretty(pg_total_relation_size('tracked_wallets')) as wallets,
+--          pg_size_pretty(pg_total_relation_size('token_launches')) as launches,
+--          (select count(*) from wallet_trades) as fills;
+--
+-- The free tier is 500 MB and goes read-only at the limit; when that happens
+-- the worker keeps streaming and counts its dropped writes in /health while
+-- nothing persists. If the database is comfortable, close this file — an
+-- unpruned journal is strictly better evidence than a pruned one.
+--
+--
+-- WHAT THE RUNNING SYSTEM CAN ACTUALLY READ
+--
+-- Db.hydrate() is the only reader. It takes the top MAX_TRACKED wallets
+-- (200 by default) ordered by last_active, and for each one the newest 4,000
+-- fills. That is the ceiling: at most 800,000 rows are readable at boot no
+-- matter how many are stored. Scores are rebuilt from those replayed fills —
+-- the score column on tracked_wallets is written out, never read back in — so
+-- a fill this query cannot reach contributes nothing to any score, any signal,
+-- or any gate. It is history, and only history.
+--
+--
+-- STEP 1 — THE LOSSLESS CUT. Rows beyond the newest 4,000 of any wallet.
+--
+-- Hydration caps at 4,000 per wallet, so these rows cannot change a score
+-- today or after any future restart. This is the one prune with no behavioural
+-- cost at all. On a journal whose wallets mostly hold a handful of fills each
+-- it may free very little; run STEP 0 again afterwards and see.
+--
+--   with ranked as (
+--     select id, row_number() over (
+--       partition by wallet_address order by timestamp desc
+--     ) as rn
+--     from wallet_trades
+--   )
+--   delete from wallet_trades t
+--   using ranked r
+--   where t.id = r.id and r.rn > 4000;
+--
+--
+-- STEP 2 — THE AGE CUT. Old fills belonging to wallets nothing tracks.
+--
+-- This one HAS a cost, so read it before running it. It keeps every fill of
+-- the 200 wallets hydration actually replays and drops fills older than thirty
+-- days from all the others — tens of thousands of wallets the radar observed
+-- once and never proved. If such a wallet later becomes active again it
+-- re-enters the tracked set with a shorter history than it would have had, and
+-- its reputation rebuilds from what is left. That is the trade: months of disk
+-- against the deep past of wallets that never earned a signal.
+--
+-- Widen the interval to be gentler. Run STEP 1 first; it is free.
+--
+--   delete from wallet_trades t
+--   where t.timestamp < now() - interval '30 days'
+--     and not exists (
+--       select 1 from (
+--         select wallet_address from tracked_wallets order by last_active desc limit 200
+--       ) keep
+--       where keep.wallet_address = t.wallet_address
+--     );
+--
+-- Postgres does not hand space back to the filesystem on a delete. After a
+-- large prune:
+--
+--   vacuum full wallet_trades;   -- takes an exclusive lock; the worker will
+--                                -- log write failures for its duration and
+--                                -- retry from its queue, which is what that
+--                                -- queue is for.
+--
+--
+-- STEP 3 — MAKE IT UNATTENDED (optional, needs pg_cron).
+--
+-- If you are leaving this running and not watching it, a schedule is worth
+-- more than a one-off. Supabase ships pg_cron; enable it under
+-- Database -> Extensions. Nightly at 03:12 UTC, the lossless cut only:
+--
+--   create extension if not exists pg_cron;
+--   select cron.schedule('nova-trim-fills', '12 3 * * *', $$
+--     with ranked as (
+--       select id, row_number() over (
+--         partition by wallet_address order by timestamp desc
+--       ) as rn
+--       from wallet_trades
+--     )
+--     delete from wallet_trades t using ranked r where t.id = r.id and r.rn > 4000;
+--   $$);
+--
+-- To stop it:  select cron.unschedule('nova-trim-fills');
+--
+--
+-- Every statement here is commented out on purpose. Uncomment the one you have
+-- decided to run, run it alone, and measure again afterwards.

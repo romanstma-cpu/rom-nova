@@ -88,32 +88,29 @@ export function FirstRun() {
     {
       href: "/launches",
       title: "Watch launches land",
-      body: "Every new mint and pool on Solana, triaged in seconds: which checks ran, what they found, and what nobody could know yet.",
+      body: "New pools, early activity, and the checks behind each launch.",
     },
     {
       href: "/radar",
       title: "Arm the whale radar",
-      body: "It hunts on its own: wallets that enter launches big get tracked and scored on real round trips, and a proven one buying again is the signal.",
+      body: "Discover active wallets and inspect their measured track records.",
     },
     {
       href: "/track",
       title: "Check whether it was right",
-      body: "Past calls are graded against what actually happened next. The engine keeps its own marks and shows you them.",
+      body: "See how past signals held up against what happened next.",
     },
   ];
 
   return (
-    <section className="panel p-4 border border-[var(--accent)]/30" aria-labelledby="firstrun-h">
+    <section className="getting-started" aria-labelledby="firstrun-h">
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <h2 id="firstrun-h" className="text-[13px] font-semibold tracking-wide">
-            New here? Three places to start.
+            Your first session
           </h2>
           <p className="text-[12px] dim mt-1 max-w-[68ch]">
-            Most of this terminal is live Solana, read keylessly in your own browser; the rest is a labelled
-            simulation, and the data chip in the header says which is which on every screen. Nothing here is a
-            recommendation. What the app offers is the reasoning — how each call is built, what it refuses to score,
-            and how often it turns out right.
+            Start with a launch, a wallet, or the record. Live and simulated data are labelled throughout.
           </p>
         </div>
         <button
@@ -132,7 +129,7 @@ export function FirstRun() {
             <Link
               href={s.href}
               onClick={dismiss}
-              className="block h-full rounded-md border border-[var(--border)] p-3 hover:border-[var(--accent)] transition-colors"
+              className="intro-step block h-full transition-colors"
             >
               <span className="text-[10px] faint">{String(i + 1).padStart(2, "0")}</span>
               <span className="block text-[12.5px] font-semibold mt-0.5">{s.title}</span>
@@ -141,9 +138,6 @@ export function FirstRun() {
           </li>
         ))}
       </ol>
-      <p className="text-[10.5px] faint mt-3">
-        You can bring this back any time from Settings.
-      </p>
     </section>
   );
 }

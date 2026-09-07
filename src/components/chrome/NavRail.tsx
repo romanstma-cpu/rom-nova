@@ -125,7 +125,7 @@ export function NavRail({ onNavigate }: { onNavigate?: () => void }) {
         key={it.href}
         href={it.href}
         onClick={onNavigate}
-        className={`flex items-center gap-2.5 rounded-md px-2 py-[5px] text-[12.5px] transition-[color,background-color,box-shadow,transform] duration-150 ${
+        className={`nav-item flex items-center gap-2.5 rounded-md px-2 py-[5px] text-[12.5px] transition-[color,background-color,box-shadow,transform] duration-150 ${
           active
             ? "bg-[rgba(56,225,255,0.09)] text-[var(--accent)] border border-[rgba(56,225,255,0.25)] shadow-[inset_2px_0_0_0_var(--accent),0_0_18px_-8px_rgba(56,225,255,0.55)]"
             : "text-[var(--text-dim)] hover:text-[var(--text)] hover:bg-[rgba(40,55,85,0.25)] hover:translate-x-[1px] border border-transparent"
@@ -157,7 +157,9 @@ export function NavRail({ onNavigate }: { onNavigate?: () => void }) {
   };
 
   return (
-    <nav className="w-[172px] shrink-0 h-full border-r border-[var(--border)] bg-[rgba(6,9,14,0.85)] flex flex-col gap-1 py-3 overflow-y-auto md:border-r">
+    <nav aria-label="Main navigation" className="nova-nav shrink-0 h-full border-r border-[var(--border)] flex flex-col gap-1 py-3 overflow-y-auto">
+      <div className="nav-workspace"><span className="workspace-emblem" aria-hidden="true">N</span><div><strong>Nova Terminal</strong><span>Solana workspace</span></div></div>
+      <p className="nav-section-label">WORKSPACE</p>
       <div className="px-3 pb-2">{NAV_PRIMARY.map(link)}</div>
       <div className="px-3 pb-2">
         <button

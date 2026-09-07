@@ -18,8 +18,8 @@
 // template — the title is in the static HTML itself.
 export function PageTitle({ title, lede, className = "" }: { title: string; lede?: string; className?: string }) {
   return (
-    <span className={`flex items-baseline gap-2.5 min-w-0 mr-1 ${className}`}>
-      <h1 className="text-[15px] font-semibold tracking-wide shrink-0" title={lede}>
+    <span className={`page-heading flex items-baseline gap-2.5 min-w-0 mr-1 ${className}`}>
+      <h1 className="font-semibold shrink-0" title={lede}>
         {title}
       </h1>
       {lede && <span className="page-lede hidden lg:inline truncate">{lede}</span>}

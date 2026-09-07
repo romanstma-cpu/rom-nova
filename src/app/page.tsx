@@ -67,14 +67,25 @@ export default function Dashboard() {
   const highConviction = (sigData?.signals ?? []).filter((s) => s.score >= 64 && s.label !== "NO TRADE").length;
 
   return (
-    <div className="p-3 flex flex-col gap-3 min-h-full">
+    <div className="dashboard flex flex-col min-h-full">
+      <div className="dashboard-heading">
+        <div>
+          <p className="eyebrow">SOLANA / INTELLIGENCE</p>
+          <h1>Market overview<span className="heading-dot">.</span></h1>
+          <p className="dashboard-lede">Follow the momentum. Read the evidence.</p>
+        </div>
+        <div className="dashboard-actions">
+          <Link href="/radar" className="btn">Whale radar <span aria-hidden="true">↗</span></Link>
+          <Link href="/scanner" className="btn btn-primary">Open scanner <span aria-hidden="true">→</span></Link>
+        </div>
+      </div>
       {/* Shown once, above everything, then never again. A visitor arriving
           from the site's hero has clicked "Launch it live" and landed on a
           wall of numbers with no idea what any of it is for. */}
       <FirstRun />
 
       {/* KPI strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <div className="dashboard-metrics grid grid-cols-2 lg:grid-cols-4 gap-3">
         {ref ? (
           <Stat label="SOL · live ref" sub={ref.change24hPct !== null ? fmtPct(ref.change24hPct) + " 24h" : "cross-checked"}>
             <span className="text-[var(--accent)]">{fmtUsd(ref.priceUsd)}</span>
@@ -123,17 +134,17 @@ export default function Dashboard() {
       </div>
 
       {/* main tri-panel */}
-      <div className="grid grid-cols-1 xl:grid-cols-[300px_1fr_290px] gap-3 min-h-[460px]">
+      <div className="dashboard-main">
         {/* conviction cards */}
-        <div className="panel flex flex-col min-h-0">
-          <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
+        <div className="panel conviction-panel flex flex-col min-h-0">
+          <div className="dashboard-panel-heading">
             <span className="panel-title">Highest Conviction</span>
             {sigData && <span className="chip text-[9.5px]">{sigData.demo === false ? "LIVE" : "SIMULATED"}</span>}
             <Link href="/signals" className="link text-[10.5px]">all signals →</Link>
           </div>
           <div className="overflow-y-auto min-h-0 max-h-[560px]">
             {conviction.map((s, i) => (
-              <Link key={s.id} href={`/signal?id=${s.id}`} className="block px-3 py-2.5 border-b border-[rgba(27,35,51,0.5)] hover:bg-[rgba(40,55,85,0.15)]">
+              <Link key={s.id} href={`/signal?id=${s.id}`} className="conviction-row block border-b border-[rgba(27,35,51,0.5)] hover:bg-[rgba(40,55,85,0.15)]">
                 <div className="flex items-center gap-2">
                   <span className="faint num text-[10px] w-3">{i + 1}</span>
                   <TokenMark hue={s.hue} symbol={s.symbol} size={20} />
@@ -178,7 +189,11 @@ export default function Dashboard() {
         </div>
 
         {/* 3D center */}
-        <div className="panel relative overflow-hidden min-h-[460px]">
+        <div className="panel network-preview relative overflow-hidden min-h-[460px]">
+          <div className="network-caption pointer-events-none absolute left-4 top-4 z-10">
+            <p className="eyebrow">THE OBSERVATORY</p>
+            <h2>Follow the connections</h2>
+          </div>
           {net ? (
             <Network3D
               payload={net}

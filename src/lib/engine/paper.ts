@@ -53,7 +53,12 @@ export function placeOrder(store: DemoStore, req: OrderRequest): { order: PaperO
   const snap = store.snapshot(req.mint);
   const price = store.lastPrice(req.mint);
   if (!snap || !price) return { order: mk("rejected", "no market data"), error: "no market data" };
-  if (req.usd <= 0) return { order: mk("rejected", "amount must be positive"), error: "amount must be positive" };
+  if (!Number.isFinite(req.usd) || req.usd <= 0) return { order: mk("rejected", "amount must be finite and positive"), error: "amount must be finite and positive" };
+  if (req.side !== "buy" && req.side !== "sell") return { order: mk("rejected", "invalid side"), error: "invalid side" };
+  if ((req.stopLossPct !== undefined && (!Number.isFinite(req.stopLossPct) || req.stopLossPct <= 0 || req.stopLossPct >= 100)) ||
+      (req.takeProfitPct !== undefined && (!Number.isFinite(req.takeProfitPct) || req.takeProfitPct <= 0))) {
+    return { order: mk("rejected", "invalid stop or target"), error: "stop must be between 0 and 100%; target must be positive" };
+  }
 
   // price impact from pool depth; refuse orders that would eat the pool
   const depth = Math.max(snap.liquidityUsd * 0.5, 1);

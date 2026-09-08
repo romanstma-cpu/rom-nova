@@ -43,6 +43,20 @@ function storeWithHeavyPosition() {
 }
 
 describe("paper stops on an illiquid position", () => {
+  it.each([NaN, Infinity, -Infinity, 0, -10])("rejects invalid amounts without corrupting cash or positions: %s", usd => {
+    const { store, mint } = storeWithHeavyPosition();
+    const before = JSON.stringify(store.portfolios);
+    const result = placeOrder(store, { portfolioId: "pf1", mint, side: "buy", usd });
+    expect(result.error).toBeTruthy();
+    expect(JSON.stringify(store.portfolios)).toBe(before);
+  });
+
+  it.each([NaN, Infinity, -1, 0, 100])("rejects invalid stops: %s", stopLossPct => {
+    const { store, mint } = storeWithHeavyPosition();
+    const before = JSON.stringify(store.portfolios);
+    expect(placeOrder(store, { portfolioId: "pf1", mint, side: "buy", usd: 10, stopLossPct }).error).toBeTruthy();
+    expect(JSON.stringify(store.portfolios)).toBe(before);
+  });
   it("refuses a single order larger than the pool can absorb", () => {
     const { store, mint, cap } = storeWithHeavyPosition();
     const res = placeOrder(store, { portfolioId: "pf1", mint, side: "sell", usd: cap * 6 });

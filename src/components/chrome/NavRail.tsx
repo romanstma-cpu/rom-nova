@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSyncExternalStore } from "react";
 import { DataModeChip } from "./DataModeChip";
+import { NavIcon } from "@/components/ui/NavIcon";
 import { accountServerSnapshot, accountSnapshot, subscribeAccount } from "@/lib/account/auth";
 
 export type NavItem = { href: string; label: string; glyph: string; hint: string; sim?: boolean };
@@ -136,7 +137,7 @@ export function NavRail({ onNavigate }: { onNavigate?: () => void }) {
         {/* Decoration. Without aria-hidden every rail link was announced by
             its Unicode symbol NAME first - "black diamond suit, Dashboard" -
             which is the first thing a screen-reader user hears on every page. */}
-        <span className="w-4 text-center text-[13px] opacity-80" aria-hidden="true">{it.glyph}</span>
+        <NavIcon href={it.href} />
         {it.label}
         {it.href === "/account" && signedIn && (
           /* A green dot is not a state anyone can hear, and an aria-label on a
@@ -158,7 +159,7 @@ export function NavRail({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <nav aria-label="Main navigation" className="nova-nav shrink-0 h-full border-r border-[var(--border)] flex flex-col gap-1 py-3 overflow-y-auto">
-      <div className="nav-workspace"><span className="workspace-emblem" aria-hidden="true">N</span><div><strong>Nova Terminal</strong><span>Solana workspace</span></div></div>
+      <div className="nav-workspace"><span className="workspace-emblem" aria-hidden="true">✦</span><div><strong>Nova Terminal</strong><span>Solana workspace</span></div></div>
       <p className="nav-section-label">WORKSPACE</p>
       <div className="px-3 pb-2">{NAV_PRIMARY.map(link)}</div>
       <div className="px-3 pb-2">

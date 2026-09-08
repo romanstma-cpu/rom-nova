@@ -21,6 +21,7 @@ import {
   subscribeLedger,
 } from "@/lib/track-store";
 import { Empty } from "@/components/ui/bits";
+import { CostReview } from "@/components/ui/CostReview";
 import { RadarRecord } from "@/components/radar/RadarRecord";
 import { RadarModel } from "@/components/radar/RadarModel";
 import { clearLaunchRecord, launchSnapshot, launchSnapshotServer, subscribeLaunchRecord } from "@/lib/launch-record/store";
@@ -178,7 +179,7 @@ export default function TrackPage() {
   );
 
   return (
-    <div className="p-3 flex flex-col gap-3 h-full min-h-0 overflow-auto">
+    <div className="evidence-page flex flex-col gap-5 min-h-full">
       <div className="flex items-center gap-2 flex-wrap">
         <PageTitle title="TRACK RECORD" lede="How past calls held up, graded against what happened next" />
         <span className="text-[10.5px] dim num ml-2">
@@ -191,6 +192,8 @@ export default function TrackPage() {
           </button>
         </div>
       </div>
+
+      <CostReview ledger={ledger} tick={tick} />
 
       {/* The radar grades its own signals; that record comes first because it
           is the one a copier acts on. */}

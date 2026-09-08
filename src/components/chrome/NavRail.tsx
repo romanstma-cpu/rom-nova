@@ -35,6 +35,7 @@ export const NAV_PRIMARY: NavItem[] = [
   // page here that acts instead of ranking.
   { href: "/radar", label: "Whale Radar", glyph: "◎", hint: "finds and scores whale wallets on its own" },
   { href: "/alerts", label: "Alerts", glyph: "◬", hint: "rules this browser evaluates while open" },
+  { href: "/track", label: "Track Record", glyph: "⌗", hint: "forward results, evidence and cost sensitivity" },
 ];
 
 export const NAV_MORE: { title: string; items: NavItem[] }[] = [
@@ -47,7 +48,6 @@ export const NAV_MORE: { title: string; items: NavItem[] }[] = [
       { href: "/watchlists", label: "Watchlists", glyph: "☆", hint: "your lists, kept in this browser" },
       // The page that grades the rest. "Is the score any good" is an
       // intelligence question, not a diagnostic one.
-      { href: "/track", label: "Track Record", glyph: "⌗", hint: "how past calls held up" },
     ],
   },
   {

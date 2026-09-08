@@ -70,9 +70,9 @@ export default function Dashboard() {
     <div className="dashboard flex flex-col min-h-full">
       <div className="dashboard-heading">
         <div>
-          <p className="eyebrow">SOLANA / INTELLIGENCE</p>
+          <p className="eyebrow dashboard-eyebrow"><span aria-hidden="true" /> YOUR EDGE STARTS WITH EVIDENCE</p>
           <h1>Market overview<span className="heading-dot">.</span></h1>
-          <p className="dashboard-lede">Follow the momentum. Read the evidence.</p>
+          <p className="dashboard-lede">A wider view of Solana. From the first movement to the bigger picture.</p>
         </div>
         <div className="dashboard-actions">
           <Link href="/radar" className="btn">Whale radar <span aria-hidden="true">↗</span></Link>
@@ -192,7 +192,8 @@ export default function Dashboard() {
         <div className="panel network-preview relative overflow-hidden min-h-[460px]">
           <div className="network-caption pointer-events-none absolute left-4 top-4 z-10">
             <p className="eyebrow">THE OBSERVATORY</p>
-            <h2>Follow the connections</h2>
+            <h2>Every move.<br />A new connection.</h2>
+            <p className="network-description">Explore the wallets, tokens, and flows<br />inside the simulated universe.</p>
           </div>
           {net ? (
             <Network3D
@@ -218,7 +219,7 @@ export default function Dashboard() {
             SIMULATED
           </span>
           <Link href="/network" className="absolute top-2.5 right-2.5 btn text-[10.5px]">
-            full 3D network ⤢
+            Explore the network ↗
           </Link>
           {selected && (
             <Link
@@ -237,7 +238,7 @@ export default function Dashboard() {
       </div>
 
       {/* bottom row: movers + net whale flow */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+      <div className="dashboard-bottom grid grid-cols-1 xl:grid-cols-2 gap-3">
         <div className="panel">
           <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
             <span className="panel-title">Momentum Leaders 24h</span>

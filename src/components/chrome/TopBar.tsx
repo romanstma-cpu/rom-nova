@@ -38,14 +38,14 @@ export function TopBar({ onOpenPalette, onOpenNav }: { onOpenPalette: () => void
 
   return (
     <header className="topbar h-[46px] shrink-0 border-b border-[var(--border)] bg-[rgba(6,9,14,0.9)] flex items-center gap-4 px-4">
-      <button className="md:hidden btn px-2 text-[14px]" onClick={onOpenNav} aria-label="Open navigation">
+      <button className="nav-toggle md:hidden btn px-2 text-[14px]" onClick={onOpenNav} aria-label="Open navigation">
         ☰
       </button>
       <Link href="/" className="flex items-baseline gap-2 mr-2 select-none">
         <span className="text-[15px] font-semibold tracking-[0.22em] text-[var(--text)]">
           ROM<span className="wordmark-nova">NOVA</span>
         </span>
-        <span className="hidden lg:inline text-[9px] tracking-[0.28em] faint">SOLANA ON-CHAIN INTELLIGENCE</span>
+        <span className="brand-descriptor hidden xl:inline text-[9px] tracking-[0.2em] faint">ON-CHAIN INTELLIGENCE</span>
       </Link>
 
       <div className="hidden md:flex items-center gap-4 num text-[11.5px]">
@@ -77,13 +77,13 @@ export function TopBar({ onOpenPalette, onOpenNav }: { onOpenPalette: () => void
             glyph alone; the accessible name stays either way. */}
         <button
           onClick={onOpenPalette}
-          className="btn text-[11px]"
+          className="command-trigger btn text-[11px]"
           title="Search and commands — press / or ⌘K anywhere"
           aria-label="Search and commands"
         >
           <span aria-hidden="true" className="sm:hidden">⌕</span>
-          <span className="dim hidden sm:inline">search / go to</span>
-          <kbd className="hidden sm:inline-block text-[10px] border border-[var(--border-hi)] rounded px-1 py-px bg-[rgba(20,28,44,0.8)]">⌘K</kbd>
+          <span className="dim hidden sm:inline">Search the terminal</span>
+          <kbd className="hidden sm:inline-block text-[10px] border border-[var(--border-hi)] rounded px-1 py-px bg-[rgba(20,28,44,0.8)]">/</kbd>
         </button>
       </div>
     </header>

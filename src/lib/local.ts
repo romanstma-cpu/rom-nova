@@ -46,7 +46,7 @@ import { getSolReference } from "./providers/reference";
 import { asChartInterval } from "./providers/jupiter-chart";
 import type { StrategyProfileId } from "./types";
 
-export const IS_STATIC = process.env.NEXT_PUBLIC_STATIC === "1";
+export { IS_STATIC } from "./static-mode";
 
 function localStore(): DemoStore {
   return ensureSimulator();

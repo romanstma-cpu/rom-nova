@@ -8,7 +8,6 @@ import { CommandPalette } from "./CommandPalette";
 import { EventToasts } from "./EventToasts";
 import { AlertMonitor } from "./AlertMonitor";
 import { RadarArm } from "./RadarArm";
-import { dataMode } from "@/lib/providers/registry";
 import { APP_VERSION, RELEASES_URL } from "@/lib/version";
 import {
   desktopServerSnapshot,
@@ -54,20 +53,32 @@ const readOffline = () => !navigator.onLine;
 const readOfflineServer = () => false;
 
 // The provider set is configuration and does not change for the life of the
-// tab, so the sentence is computed once and never re-subscribed.
+// tab, so the sentence is computed once. Computing it means building the whole
+// provider registry, which used to put every provider into every page's first
+// load for a banner most visitors never see. The registry now loads after the
+// page renders — in the same chunk the in-browser engine fetches anyway — and
+// not later: waiting until the browser is actually offline would mean fetching
+// a chunk with no network. Until it arrives the banner uses the short sentence.
 let offlineTextCached: string | null = null;
-function readOfflineText(): string {
-  if (offlineTextCached === null) {
-    try {
+let offlineTextLoad: Promise<void> | null = null;
+function subscribeOfflineText(onChange: () => void): () => void {
+  let live = true;
+  offlineTextLoad ??= import("@/lib/providers/registry")
+    .then(({ dataMode }) => {
       offlineTextCached = offlineMessage(dataMode());
-    } catch {
+    })
+    .catch(() => {
       offlineTextCached = DEFAULT_OFFLINE_TEXT;
-    }
-  }
-  return offlineTextCached;
+    });
+  void offlineTextLoad.then(() => {
+    if (live) onChange();
+  });
+  return () => {
+    live = false;
+  };
 }
+const readOfflineText = () => offlineTextCached ?? DEFAULT_OFFLINE_TEXT;
 const readOfflineTextServer = () => DEFAULT_OFFLINE_TEXT;
-const subscribeNever = () => () => {};
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -105,7 +116,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   // shell says "online" with the default sentence, and the first client
   // paint reads the real answer without a setState-in-effect round trip.
   const offline = useSyncExternalStore(subscribeOnline, readOffline, readOfflineServer);
-  const offlineText = useSyncExternalStore(subscribeNever, readOfflineText, readOfflineTextServer);
+  const offlineText = useSyncExternalStore(subscribeOfflineText, readOfflineText, readOfflineTextServer);
   // The desktop shell's update state, for the one banner worth interrupting
   // with: a downloaded update, which installs on the next start whether or
   // not the reader restarts now. In a browser this snapshot never changes.

@@ -3,8 +3,8 @@
 **Solana on-chain intelligence.** Track sophisticated wallets, detect emerging momentum, understand the risk, and rank
 opportunities by measurable evidence — with a 3D network view of the money actually moving.
 
-**Live:** https://romapps.xyz/nova/ — the entire terminal runs in your browser; nothing to install, no account,
-and your workspace never leaves your device.
+**Live:** https://romapps.xyz/nova/ — the entire terminal runs in your browser; nothing to install, no account
+needed (an optional one is only for the hosted Whale Radar), and your workspace never leaves your device.
 
 ROM Nova is an analytics and decision-support product. It does not predict the future, it does not guarantee outcomes,
 and nothing it displays is investment advice. Every signal answers "why?" with numbers, carries a bear case and
@@ -52,7 +52,7 @@ npm run build         # server-mode production build
 npm run start         # serve the server-mode build
 npm run build:static  # browser-only export → ./out (the public artifact)
 node scripts/serve-static.mjs   # serve ./out at localhost:8788/nova/
-npm run test          # vitest — 192 engine/provider/universe tests
+npm run test          # vitest — engine, provider, radar, desktop and worker tests
 npm run typecheck     # tsc --noEmit
 npm run lint          # eslint (React compiler rules)
 npm run calibrate     # prints score distributions + wallet cohort separation
@@ -93,10 +93,11 @@ src/lib/types.ts           domain model — every layer speaks these shapes
 src/lib/demo/              deterministic universe generator, store, live simulator
 src/lib/engine/            features → signals → risk / similarity / backtest / paper / perf / research
 src/lib/providers/         vendor adapters behind interfaces + health + fallback registry
-src/app/api/*              21 route handlers (zod-validated where they mutate)
+src/app/api/*              route handlers (zod-validated where they mutate)
 src/components/three/      R3F scene: layout math (pure), nodes, particle field, camera rig, FPS governor
 db/schema.sql              the durable Postgres schema live mode persists into
-tests/                     34 vitest tests (engine invariants + universe determinism)
+tests/                     vitest suite (engine invariants, universe determinism, providers, radar, worker)
+docs/history/              the build log (progress.md) and the review rounds, kept for the record
 ```
 
 **The one rule that holds everything together:** every read that feeds the signal engine takes an `asOf` timestamp and

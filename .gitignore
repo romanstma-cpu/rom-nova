@@ -53,7 +53,7 @@ next-env.d.ts
 # Blind-review rounds against 1.7.0 / d2d2572 — twenty-one releases stale, and
 # every finding in them is either fixed or restated in the 1.28.0 audit. Their
 # siblings from the same batch (W1/W2/W3-REPORT.md, W5-BUILD-NOTES.md) were
-# committed at the time and stay tracked; these never were. Ignored rather than
+# committed at the time and stay tracked, now in docs/history/; these never were. Ignored rather than
 # deleted so the history is still readable, and so `git status` is quiet for
 # someone returning to this repo cold.
 W*-ROUND*-REPORT.md

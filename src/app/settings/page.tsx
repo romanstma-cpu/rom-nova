@@ -13,7 +13,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useApi } from "@/lib/client";
-import { IS_STATIC } from "@/lib/local";
+import { IS_STATIC } from "@/lib/static-mode";
 import type { ProviderHealth } from "@/lib/types";
 import { AiKeyCard } from "@/components/ui/AiKeyCard";
 import { HeliusKeyCard } from "@/components/radar/HeliusKeyCard";

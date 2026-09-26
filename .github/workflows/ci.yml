@@ -1,0 +1,47 @@
+name: ci
+
+# The same gates the release runs, on every pull request and every push to
+# main, so a problem is caught when it is made rather than when a tag is cut.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # scripts/build-static.mjs renames src/middleware.ts aside while it
+      # exports. A commit made inside that window drops rate limiting and the
+      # security headers from every server build of that commit — 1.1.1 was
+      # entirely a fix for it, and 1.5.0 nearly shipped it again.
+      - name: Middleware is in place
+        run: |
+          test -f src/middleware.ts || { echo "::error::src/middleware.ts is missing. Was it committed while build:static had it renamed?"; exit 1; }
+          test ! -e src/middleware.server-only || { echo "::error::src/middleware.server-only is committed. Rename it back to src/middleware.ts."; exit 1; }
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests
+        run: npm test
+
+      - name: Static build
+        run: npm run build:static

@@ -109,6 +109,7 @@ export function AiKeyCard() {
           value={ai.model}
           onChange={(e) => saveAi({ ...ai, model: e.target.value })}
           className="input flex-1 min-w-0"
+          aria-label="AI model"
         >
           {FREE_MODELS.map((m) => (
             <option key={m.id} value={m.id}>

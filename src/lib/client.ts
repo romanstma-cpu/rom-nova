@@ -6,8 +6,16 @@
 // handlers, zero server.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { IS_STATIC, localGet, localPost, localSubscribe } from "./local";
+import { IS_STATIC } from "./static-mode";
 import { WHALE_TRADE_USD } from "./engine/thresholds";
+
+// The in-browser engine (handlers, simulator, every provider) is loaded on
+// first use rather than with the page. Imported statically it rode in a chunk
+// every route parsed before rendering, the Legal page included; now the page
+// renders first and the engine arrives with its first request. Server mode
+// never requests it.
+let localModule: Promise<typeof import("./local")> | null = null;
+const loadLocal = () => (localModule ??= import("./local"));
 
 export async function apiGet<T = unknown>(url: string): Promise<T> {
   return (await getJson(url)) as T;
@@ -15,7 +23,7 @@ export async function apiGet<T = unknown>(url: string): Promise<T> {
 
 async function getJson(url: string): Promise<unknown> {
   if (IS_STATIC) {
-    const res = await localGet(url);
+    const res = await (await loadLocal()).localGet(url);
     if (res.status >= 400) throw new Error((res.body as { error?: string })?.error ?? `error ${res.status}`);
     return res.body;
   }
@@ -33,7 +41,7 @@ export async function apiPost<T = Record<string, unknown>>(
   body: unknown,
 ): Promise<{ ok: boolean; status: number; body: T }> {
   if (IS_STATIC) {
-    const res = await localPost(url, body);
+    const res = await (await loadLocal()).localPost(url, body);
     return { ok: res.status < 400, status: res.status, body: res.body as T };
   }
   const res = await fetch(url, {
@@ -164,9 +172,18 @@ export function useEventStream(onEvent: (e: StreamEvent) => void, enabled = true
   useEffect(() => {
     if (!enabled) return;
     if (IS_STATIC) {
-      // in-browser bus: connection is a given, no state churn needed
-      const unsub = localSubscribe((e) => cb.current(e as StreamEvent));
-      return () => unsub();
+      // in-browser bus: connection is a given, no state churn needed. The
+      // engine loads asynchronously, so an unmount can land before the
+      // subscription exists — `dead` stops it from being made at all.
+      let unsub: (() => void) | null = null;
+      let dead = false;
+      void loadLocal().then(({ localSubscribe }) => {
+        if (!dead) unsub = localSubscribe((e) => cb.current(e as StreamEvent));
+      });
+      return () => {
+        dead = true;
+        unsub?.();
+      };
     }
     let es: EventSource | null = null;
     let retry: ReturnType<typeof setTimeout> | null = null;

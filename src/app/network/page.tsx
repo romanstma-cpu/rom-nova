@@ -225,6 +225,8 @@ export default function NetworkPage() {
             setAsOf(v === 0 ? null : Date.now() + v);
           }}
           className="flex-1 accent-[#38e1ff]"
+          aria-label="Time machine: how far back to rewind the network"
+          aria-valuetext={asOf ? `${fmtAgo(asOf)}, historical` : "now, live"}
         />
         <span className="num text-[11px] dim w-[130px] text-right">
           {asOf ? `${fmtAgo(asOf)} (historical)` : "now"}

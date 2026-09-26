@@ -3,21 +3,32 @@ name: release
 # Tag vX.Y.Z → run the gates, build the static app, wrap it in the desktop
 # shell, and publish ROM-Nova-Setup.exe (+ latest.yml for the auto-updater
 # and SHA256SUMS.txt for humans) to this repo's releases.
+#
+# A pull request that touches this file or the desktop shell runs the same
+# build as a dry run: everything up to and including the installer, nothing
+# published. Changes to the release pipeline used to be untestable without
+# burning a tag; now they are tested on the pull request that makes them.
 
 on:
   push:
     tags: ["v*"]
+  pull_request:
+    paths: [".github/workflows/release.yml", "desktop/**"]
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+env:
+  PUBLISH: ${{ startsWith(github.ref, 'refs/tags/v') }}
 
 jobs:
   release:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -51,6 +62,7 @@ jobs:
       # Creating the release here first means both publishers find it and only
       # upload. Idempotent, so re-running a half-finished release works.
       - name: Ensure the release exists
+        if: env.PUBLISH == 'true'
         shell: bash
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -63,17 +75,28 @@ jobs:
           TAG: ${{ github.ref_name }}
 
       - name: Build + publish installer
+        if: env.PUBLISH == 'true'
         working-directory: desktop
         run: npx electron-builder --win nsis --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish checksums
+      - name: Build installer (dry run, nothing published)
+        if: env.PUBLISH != 'true'
+        working-directory: desktop
+        run: npx electron-builder --win nsis --publish never
+
+      - name: Checksum
         shell: pwsh
         run: |
           $hash = (Get-FileHash "desktop/dist/ROM-Nova-Setup.exe" -Algorithm SHA256).Hash.ToLower()
           "$hash  ROM-Nova-Setup.exe" | Out-File -Encoding ascii SHA256SUMS.txt
-          gh release upload "${{ github.ref_name }}" SHA256SUMS.txt --clobber
+          Get-Content SHA256SUMS.txt
+
+      - name: Publish checksums
+        if: env.PUBLISH == 'true'
+        shell: bash
+        run: gh release upload "${{ github.ref_name }}" SHA256SUMS.txt --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -82,6 +105,7 @@ jobs:
       # release still looks finished from the outside, which is how two of them
       # shipped broken before anyone noticed. Asserted, not assumed.
       - name: Prove the update feed published
+        if: env.PUBLISH == 'true'
         shell: bash
         run: |
           gh release view "$TAG" --json assets -q '.assets[].name' | tee assets.txt
@@ -91,3 +115,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
+
+      # A dry run proves the pipeline, not a release; the installer is kept
+      # for a week so it can be installed and inspected.
+      - name: Keep the dry-run installer
+        if: env.PUBLISH != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ROM-Nova-Setup-dry-run
+          path: |
+            desktop/dist/ROM-Nova-Setup.exe
+            SHA256SUMS.txt
+          retention-days: 7

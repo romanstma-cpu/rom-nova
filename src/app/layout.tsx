@@ -28,14 +28,16 @@ export const metadata: Metadata = {
     type: "website",
     siteName: "ROM Nova",
     // The card a shared link unfurls into — Discord, X, iMessage, Slack —
-    // rendered from the app's own palette and icon (public/og.png).
-    images: [{ url: "/nova/og.png", width: 1200, height: 630, alt: "ROM Nova — Solana on-chain intelligence" }],
+    // rendered from the app's own palette and icon (public/og.png). The path
+    // is relative to metadataBase: Next joins its /nova path onto this, so
+    // "/nova/og.png" here published https://romapps.xyz/nova/nova/og.png.
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: "ROM Nova — Solana on-chain intelligence" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "ROM Nova — Solana On-Chain Intelligence",
     description: "A whale radar that finds and grades wallets by itself, launches triaged in seconds, and a copy desk that never holds a key.",
-    images: ["/nova/og.png"],
+    images: ["/og.png"],
   },
   robots: { index: true, follow: true },
   // Installable from the browser: the manifest names the app, its icons and

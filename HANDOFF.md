@@ -1,7 +1,8 @@
 # Leaving ROM Nova alone
 
 Written 2026-09-06, at 1.28.0. Everything below was measured that day, not
-remembered. `progress.md` is the build log; this is the operations note.
+remembered. `docs/history/progress.md` is the build log; this is the operations
+note. The app has moved on since (1.29.0 is live); the operations below still hold.
 
 ## What is running
 

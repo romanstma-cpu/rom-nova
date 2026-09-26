@@ -115,10 +115,13 @@ burning a tag, so it was left alone deliberately.
 
 Feature commit → bump `desktop/package.json` → `npm run build:static` (after
 the bump, not before) → bump commit → `git tag vX.Y.Z` → push → watch the run
-→ verify sha256 against `SHA256SUMS.txt` and GitHub's digest → mirror `out/`
-into `rom-site/nova` → edit the four version anchors in `rom-site/index.html`
-with an editor, never PowerShell → push → wait for Pages → install and prove
-the desktop app writes to `C:\Users\W\AppData\Roaming\ROM Nova`.
+→ verify sha256 against `SHA256SUMS.txt` and GitHub's digest → in the
+`rom-apps` repository, **replace** `nova/` with `out/` (delete the folder
+first; copying over it left three old builds and 3.5 MB of unreachable files
+behind) → run `python3 scripts/site.py build <new dir>` there, which fails on
+any broken link → push → wait for Pages → install and prove the desktop app
+writes to `C:\Users\W\AppData\Roaming\ROM Nova`. The homepage no longer shows
+Nova's version number, so there are no version anchors to edit.
 
 The workflow now creates the GitHub release *before* electron-builder runs and
 asserts all three assets exist afterwards. Both exist because 1.27.1 and

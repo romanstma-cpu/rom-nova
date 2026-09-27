@@ -1,12 +1,14 @@
 name: Radar uptime
 
-# Checks the radar worker's public /health every 30 minutes. A failed run
-# means the worker did not answer, or answered without ok: true; GitHub emails
-# the person who last changed this schedule. Database trouble (a paused or
-# full Supabase project) shows as a warning on the run with the worker's own
-# last database error. Render's free plan sleeps an idle service, so the check
-# allows a cold start before it gives up. Scheduled workflows are paused by
-# GitHub after 60 days with no repository activity; re-enable it under Actions.
+# Checks the radar worker's public /health every 30 minutes. When it stops
+# answering (or answers without ok: true) this opens one issue titled
+# "Radar is down", which GitHub emails to the repository owner, and comments
+# on it and closes it once the worker is healthy again, so an outage costs two
+# emails rather than one every half hour. A database error the worker reports
+# (a paused or full Supabase project) is shown as a warning on the run.
+# Render's free plan sleeps an idle service, so the check allows a cold start
+# before it decides the worker is down. GitHub pauses scheduled workflows after
+# 60 days with no repository activity; re-enable this one under Actions.
 on:
   schedule:
     - cron: '17,47 * * * *'
@@ -14,6 +16,11 @@ on:
 
 permissions:
   contents: read
+  issues: write
+
+concurrency:
+  group: radar-uptime
+  cancel-in-progress: false
 
 jobs:
   health:
@@ -21,23 +28,26 @@ jobs:
     timeout-minutes: 10
     env:
       URL: https://rom-nova-radar.onrender.com/health
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      TITLE: Radar is down
     steps:
       - name: Check /health
+        id: health
         shell: bash
         run: |
           set -uo pipefail
-          body=""
+          healthy=false
+          detail=""
           for attempt in 1 2 3 4; do
             code=$(curl -sS -m 90 -o health.json -w '%{http_code}' "$URL") || code=000
-            if [ "$code" = 200 ]; then body=$(cat health.json); break; fi
+            if [ "$code" = 200 ]; then break; fi
+            detail="HTTP $code on 4 attempts over about 2 minutes"
             echo "attempt $attempt: HTTP $code"
             sleep 30
           done
-          if [ -z "$body" ]; then
-            echo "::error::The radar worker did not answer $URL with HTTP 200"
-            exit 1
-          fi
-          python3 - <<'EOF'
+          if [ "$code" = 200 ]; then
+            if python3 - <<'EOF'
           import json, os
           d = json.load(open("health.json"))
           db = d.get("db") or {}
@@ -51,7 +61,34 @@ jobs:
           print("\n".join(lines))
           if db.get("lastError"):
               print(f"::warning::Database error reported by the worker: {db['lastError']}")
-          if d.get("ok") is not True:
-              print("::error::/health answered without ok: true")
-              raise SystemExit(1)
+          raise SystemExit(0 if d.get("ok") is True else 1)
           EOF
+            then healthy=true; else detail="/health answered without ok: true"; fi
+          fi
+          echo "healthy=$healthy" >> "$GITHUB_OUTPUT"
+          echo "detail=$detail" >> "$GITHUB_OUTPUT"
+          if [ "$healthy" = true ]; then echo "healthy"; else echo "::warning::Radar is down: $detail"; fi
+
+      - name: Open or close the "Radar is down" issue
+        shell: bash
+        env:
+          HEALTHY: ${{ steps.health.outputs.healthy }}
+          DETAIL: ${{ steps.health.outputs.detail }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          open=$(gh issue list --repo "$REPO" --state open --search "\"$TITLE\" in:title" \
+                   --json number,title --jq "map(select(.title == \"$TITLE\")) | .[0].number // empty")
+          if [ "$HEALTHY" = true ]; then
+            if [ -n "$open" ]; then
+              gh issue close "$open" --repo "$REPO" --comment "The worker answered /health with ok: true again ($RUN_URL)."
+              echo "closed #$open"
+            fi
+          elif [ -z "$open" ]; then
+            gh issue create --repo "$REPO" --title "$TITLE" --body "$(printf '%s\n' \
+              "The radar worker at $URL is not healthy: $DETAIL." "" \
+              "First seen by $RUN_URL. This issue closes itself when /health answers with ok: true again." "" \
+              "Where to look: the Render dashboard for rom-nova-radar (suspended, failed deploy, or out of free hours) and the Supabase project rom-nova-radar (paused or read-only).")"
+          else
+            echo "still down; #$open is already open"
+          fi

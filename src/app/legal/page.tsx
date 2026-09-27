@@ -1,14 +1,14 @@
 import Link from "next/link";
 
 export const metadata = {
-  title: "Disclaimer & Privacy",
-  description: "What ROM Nova is, which parts are live and which are simulated, and what it stores in your browser. Not investment advice.",
+  title: "Terms, Disclaimer & Privacy",
+  description: "What ROM Nova is, which parts are live and which are simulated, the hosted radar subscription's terms and refunds, and what it stores in your browser. Not investment advice.",
 };
 
 export default function LegalPage() {
   return (
     <div className="p-4 max-w-[760px] flex flex-col gap-4">
-      <h1 className="text-[16px] font-semibold tracking-wide">DISCLAIMER &amp; PRIVACY</h1>
+      <h1 className="text-[16px] font-semibold tracking-wide">TERMS, DISCLAIMER &amp; PRIVACY</h1>
 
       <section className="panel p-4 text-[12.5px] leading-relaxed dim flex flex-col gap-2">
         <h2 className="panel-title">What this is</h2>
@@ -93,6 +93,47 @@ export default function LegalPage() {
           conditions — and the engine frequently concludes <b className="text-[var(--text)]">NO TRADE</b>. Memecoin markets
           in the real world carry extreme risk, including total loss. If you trade, that decision and its consequences are
           entirely yours; do your own research and consider consulting a licensed professional.
+        </p>
+      </section>
+
+      {/* Written to match what the code does: Stripe Checkout for one recurring
+          price, cancellation from Stripe's Customer Portal with access to the end
+          of the paid period (cancel_at_period_end), and no uptime guarantee from
+          a single hosted worker. Change the words here if that behaviour changes. */}
+      <section className="panel p-4 text-[12.5px] leading-relaxed dim flex flex-col gap-2" id="subscription">
+        <h2 className="panel-title">Hosted Whale Radar subscription</h2>
+        <p>
+          Everything in this terminal is free except the hosted Whale Radar, a server run by ROM Apps that watches the
+          chain around the clock. Access to it is a subscription, sold through the{" "}
+          <Link href="/account" className="link">Account</Link> page.
+        </p>
+        <p>
+          <b className="text-[var(--text)]">Price and billing.</b> The price and billing period are shown on the Account
+          page and on Stripe&apos;s checkout page before you pay, including any tax. The subscription renews
+          automatically at the end of each period and is charged by Stripe to the card you gave it. If the price changes,
+          the new price applies from your next renewal after you have been told about it, and you can cancel before then.
+        </p>
+        <p>
+          <b className="text-[var(--text)]">Cancelling.</b> Cancel any time from the billing portal on the Account page.
+          Cancelling stops the next renewal; the radar stays open to you until the end of the period you already paid for.
+        </p>
+        <p>
+          <b className="text-[var(--text)]">Refunds.</b> Payments are not refunded for the part of a period left after
+          you cancel. You will be refunded in full if you were charged in error or charged twice, or if the hosted radar
+          was unavailable for most of a period you paid for. To ask, write through the contact points below with the
+          email you signed in with, within 30 days of the charge. Nothing here limits a right to a refund or to cancel
+          that the law where you live gives you.
+        </p>
+        <p>
+          <b className="text-[var(--text)]">What you are paying for.</b> Access to the radar&apos;s feed while the
+          subscription is active. It is a research tool run on a best-effort basis: it can be slow, incomplete or
+          unavailable, the data it relays comes from third parties, and it is not investment advice (see above). ROM Apps
+          may end the service; if it does, the subscription is cancelled and the unused part of the current period is
+          refunded.
+        </p>
+        <p>
+          <b className="text-[var(--text)]">Fair use.</b> One subscription is for one person. Reselling or
+          redistributing the feed, or trying to reach it without a subscription, can end access without a refund.
         </p>
       </section>
 

@@ -337,7 +337,8 @@ export default function AccountPage() {
           <div className="text-[11.5px] dim leading-relaxed">
             The hosted radar hunts around the clock; the subscription keeps that server up. {price ? `${price}, ` : "The price is shown at checkout, "}
             cancel any time from the billing portal, and the feed stays open to the end of the paid period. Payment is on
-            Stripe&apos;s own page; neither this app nor the radar sees a card.
+            Stripe&apos;s own page; neither this app nor the radar sees a card.{" "}
+            <Link href="/legal#subscription" className="link">Subscription terms and refunds</Link>.
           </div>
           {!signedIn ? (
             <div className="text-[11px] warn">Sign in above first.</div>

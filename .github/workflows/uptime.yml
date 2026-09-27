@@ -1,0 +1,57 @@
+name: Radar uptime
+
+# Checks the radar worker's public /health every 30 minutes. A failed run
+# means the worker did not answer, or answered without ok: true; GitHub emails
+# the person who last changed this schedule. Database trouble (a paused or
+# full Supabase project) shows as a warning on the run with the worker's own
+# last database error. Render's free plan sleeps an idle service, so the check
+# allows a cold start before it gives up. Scheduled workflows are paused by
+# GitHub after 60 days with no repository activity; re-enable it under Actions.
+on:
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      URL: https://rom-nova-radar.onrender.com/health
+    steps:
+      - name: Check /health
+        shell: bash
+        run: |
+          set -uo pipefail
+          body=""
+          for attempt in 1 2 3 4; do
+            code=$(curl -sS -m 90 -o health.json -w '%{http_code}' "$URL") || code=000
+            if [ "$code" = 200 ]; then body=$(cat health.json); break; fi
+            echo "attempt $attempt: HTTP $code"
+            sleep 30
+          done
+          if [ -z "$body" ]; then
+            echo "::error::The radar worker did not answer $URL with HTTP 200"
+            exit 1
+          fi
+          python3 - <<'EOF'
+          import json, os
+          d = json.load(open("health.json"))
+          db = d.get("db") or {}
+          lines = [
+              f"uptime: {d.get('uptime_s')} s",
+              f"db written: {db.get('written')}, dropped: {db.get('dropped')}, queued: {db.get('queued')}",
+              f"db last error: {db.get('lastError')}",
+          ]
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write("### Radar health\n\n" + "\n".join(f"- {l}" for l in lines) + "\n")
+          print("\n".join(lines))
+          if db.get("lastError"):
+              print(f"::warning::Database error reported by the worker: {db['lastError']}")
+          if d.get("ok") is not True:
+              print("::error::/health answered without ok: true")
+              raise SystemExit(1)
+          EOF
